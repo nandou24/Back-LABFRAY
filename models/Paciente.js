@@ -16,6 +16,10 @@ const telefonoSchema = new mongoose.Schema({
 
 const PacienteSchema = Schema({
   
+    hc: {
+        type: String,
+        required: true
+    },
     tipoDoc: {
         type: String,
         required: true
@@ -26,14 +30,17 @@ const PacienteSchema = Schema({
     },
     nombreCliente: {
         type: String,
-        required: true
+        required: true,
+        set: (value) => value.toUpperCase()
     },
     apePatCliente: {
         type: String,
-        required: true
+        required: true,
+        set: (value) => value.toUpperCase()
     },
     apeMatCliente: {
-        type: String
+        type: String,
+        set: (value) => value.toUpperCase()
     },
     fechaNacimiento: {
         type: Date,
@@ -62,6 +69,9 @@ const PacienteSchema = Schema({
         type: String
     },
     phones: [telefonoSchema]
+}, 
+{ 
+    timestamps: true 
 })
 
 //aquí se define o elige la colección/tabla en la que queremos que se guarde

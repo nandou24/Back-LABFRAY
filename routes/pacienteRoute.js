@@ -1,6 +1,6 @@
 const { Router } = require('express');
 const { check } = require('express-validator');
-const { crearPaciente} = require('../controllers/pacienteController');
+const { crearPaciente, mostrarUltimos30Pacientes, encontrarTermino, actualizarPaciente } = require('../controllers/pacienteController');
 const { validarCampos } = require('../middlewares/validar-campo');
 const { validarJWT } = require('../middlewares/validar-token');
 
@@ -50,5 +50,25 @@ router.post('/newPaciente', [
 
 ], crearPaciente);
 
+//POST
+//! Listar últimos 30 pacientes
+router.get('/last30', [
+    //check('token')
+    //.notEmpty().withMessage('Es token es obligatorio'),
+], mostrarUltimos30Pacientes);
+
+//POST
+//! Buscar paciente
+router.get('/findTerm', [
+    //check('token')
+    //.notEmpty().withMessage('Es token es obligatorio'),
+], encontrarTermino);
+
+//POST
+//! Actualizar Paciente
+router.put('/:nroHC/updatePatient', [
+    //check('token')
+    //.notEmpty().withMessage('Es token es obligatorio'),
+], actualizarPaciente);
 //para exportar rutas
 module.exports = router;
