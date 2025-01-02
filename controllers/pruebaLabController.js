@@ -1,97 +1,98 @@
 const { response } = require("express");
-const Paciente = require("../models/Paciente");
+const PruebaLab = require("../models/PruebaLab");
 const bcrypt = require('bcryptjs');
 const { generarJWT } = require('../helpers/jwt');
 const jwt = require("jsonwebtoken");
 
-const crearPaciente = async (req, res = response) => {
+const crearPruebaLab = async (req, res = response) => {
 
     //debemos generar un número de historia clínica año-mes-correlativo-inicial de ape pater - inicial ape mat
     const { 
-        tipoDoc, 
-        nroDoc, 
-        nombreCliente, 
-        apePatCliente,
-        apeMatCliente,
-        fechaNacimiento,
-        sexoCliente,
-        departamentoCliente,
-        provinciaCliente,
-        distritoCliente,
-        direcCliente,
-        mailCliente,
-        phones
+        areaLab, 
+        nombrePruebaLab, 
+        condPreAnalitPaciente, 
+        condPreAnalitRefer,
+        metodoPruebaLab,
+        tipoMuestra,
+        tipoTuboEnvase,
+        tiempoEntrega,
+        precioPrueba,
+        observPruebas,
+        estadoPrueba,
+        compuestaPrueba,
+        tipoResultado,
+        valorRefCuali,
+        valorRefCuantiLimInf,
+        valorRefCuantiLimSup,
+        unidadesRef,
+        otrosValoresRef
+
         } = req.body;
     
-    //Para crear HC    
-    const fecha = new Date();
-    const anio = fecha.getFullYear();
-    const mes = (fecha.getMonth() + 1).toString().padStart(2, '0');
   
     try {
       //   console.log(name, email, password, rol, "holaaa");
   
-      // verificar el email si es que existe
-      const paciente = await Paciente.findOne({ tipoDoc, nroDoc });
+      // verificar si el nombre existe
+      const pruebaLab = await PruebaLab.findOne({ nombrePruebaLab });
   
-      if (paciente) {
+      if (pruebaLab) {
         return res.status(400).json({
           ok: false,
-          msg: "Ya existe un usuario con ese documento de identidad",
+          msg: "Ya existe una prueba con ese nombre",
         });
       }
       
       console.log('Datos recibidos:', req.body);
-
-      //Hashear la contraseña mediante un hash
-      //const numAletorio = bcrypt.genSaltSync();
-      //dbPaciente.password = bcrypt.hashSync(password, numAletorio);
-  
+ 
       //Generar el JWT
       //const token = await generarJWT(dbPaciente.id, dbPaciente.name, dbPaciente.rol);
       //Crear usuario de base de datos
 
-      //creando codigo HC
-      // Buscar el último paciente creado en el año actual
-      const ultimoPaciente = await Paciente.findOne({ hc: new RegExp(`^${anio}${mes}`) }).sort({ hc: -1 });
-      console.log(ultimoPaciente + 'aquíi')
+      //creando codigo prueba
+      
+      // Buscar el última prueba creada en el área
+      const ultimoPrueba = await PruebaLab.findOne({
+         where: { areaLab },
+         order: [['codPruebaLab', 'DESC']],
+        });
+      console.log(ultimoPrueba + 'aquíi')
       
       // Obtener el correlativo
       let correlativo = 1;
-      if (ultimoPaciente) {
-        const ultimoCorrelativo = parseInt(ultimoPaciente.hc.slice(7, 13));
+      if (ultimoPrueba) {
+        const ultimoCorrelativo = parseInt(ultimoPrueba.codPruebaLab.slice(2, 6));
         correlativo = ultimoCorrelativo + 1;
       }
 
-      // Correlativo con seis dígitos, maximo 999 999
-      const correlativoStr = correlativo.toString().padStart(6, '0');
+      if (correlativo > 9999) {
+        return res.status(400).json({
+          ok: false,
+          msg: "El número máximo de pruebas ha sido alcanzado para este área.",
+        });
+      }
+
+      // Correlativo con seis dígitos, maximo 9999
+      const correlativoStr = correlativo.toString().padStart(4, '0');
       console.log(correlativoStr+' correlativo')
 
-      // Generar las iniciales de los apellidos
-      const inicialApePat = apePatCliente.charAt(0).toUpperCase();
-      console.log(inicialApePat)
-      const inicialApeMat = apeMatCliente.charAt(0).toUpperCase();
-      console.log(inicialApeMat)
+      // Crear el número de código
+      const codigoLab = `${areaLab}${correlativoStr}`;
 
-      // Crear el número de historia clínica sin guiones
-      const historiaClinica = `${anio}${mes}-${correlativoStr}${inicialApePat}${inicialApeMat}`;
-
-      // Crear el paciente con el número de historia clínica
-      // Crear usuario con el modelo
-      const nuevoPaciente = new Paciente({
+      // Crear la prueba con el código
+      const nuevaPruebaLab = new PruebaLab({
         ...req.body,
-        hc: historiaClinica, // Agregar el número de historia clínica generado
+        codPruebaLab: codigoLab, // Agregar el código de la prueba generado
       });
 
-      console.log(historiaClinica)
-      console.log(nuevoPaciente+"nuevo paciente aquiii")
+      console.log("Datos a grabar"+nuevaPruebaLab)
 
-      await nuevoPaciente.save();
+      await nuevaPruebaLab.save();
       // console.log(dbUser, "pasoo registro");
       //Generar respuesta exitosa
       return res.status(201).json({
         ok: true,
-        uid: nuevoPaciente.id,
+        uid: nuevaPruebaLab.id,
         //token: token,
       });
     } catch (error) {
@@ -102,18 +103,20 @@ const crearPaciente = async (req, res = response) => {
     }
   };
 
-  const mostrarUltimos30Pacientes = async(req, res = response) => {
+  const mostrarUltimasPruebas = async(req, res = response) => {
     
     try {
 
-        const pacientes = await Paciente.find()
+        const pruebasLab = await PruebaLab.find()
           //.sort({createdAt: -1})
-          .limit(30);        
+          .limit(30);
 
         return res.json({
             ok: true,
-            pacientes
+            pruebasLab
         })
+
+        
 
     } catch (error) {
         console.log(error);
@@ -131,7 +134,7 @@ const encontrarTermino = async(req, res = response) => {
 
   try {
 
-      const pacientes = await Paciente.find({
+      const pruebasLab = await PruebaLab.find({
         //nroDoc: { $regex: termino, $options: 'i'}
         
         $or: [
@@ -144,7 +147,7 @@ const encontrarTermino = async(req, res = response) => {
       });
       return res.json({
           ok: true,
-          pacientes //! favoritos: favoritos
+          pruebasLab //! favoritos: favoritos
       })
 
   } catch (error) {
@@ -156,7 +159,7 @@ const encontrarTermino = async(req, res = response) => {
   }
 }
 
-const actualizarPaciente = async (req, res = response) => {
+const actualizarPrueba = async (req, res = response) => {
   
   const idNroHC = req.params.nroHC; //recupera la hc
   const datosActualizados = req.body; //recupera los datos a grabar
@@ -175,12 +178,12 @@ const actualizarPaciente = async (req, res = response) => {
     //const token = await generarJWT(dbPaciente.id, dbPaciente.name, dbPaciente.rol);
     //Crear usuario de base de datos
 
-    const paciente = await Paciente.findOneAndUpdate({hc:idNroHC},datosActualizados);
+    const pruebaLab = await PruebaLab.findOneAndUpdate({hc:idNroHC},datosActualizados);
 
-    if (!paciente) {
+    if (!pruebaLab) {
       return res.status(404).json({
         ok: false,
-        msg: 'Paciente no encontrado con ese número de historia'
+        msg: 'Prueba no encontrado con ese número de historia'
       });
     }
 
@@ -192,7 +195,7 @@ const actualizarPaciente = async (req, res = response) => {
       //token: token,
     });
   } catch (error) {
-    console.error("Error al actualizar el paciente: ", error)
+    console.error("Error al actualizar la prueba: ", error)
     return res.status(500).json({
       ok: false,
       msg: "Error al momento de actualizar back end",
@@ -202,8 +205,8 @@ const actualizarPaciente = async (req, res = response) => {
 
 
 module.exports = {
-    crearPaciente,
-    mostrarUltimos30Pacientes,
+    crearPruebaLab,
+    mostrarUltimasPruebas,
     encontrarTermino,
-    actualizarPaciente
+    actualizarPrueba
   }

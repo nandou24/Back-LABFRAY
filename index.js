@@ -42,10 +42,13 @@ app.use(express.json()); //! Puedo leer archivos JSON
 app.use("/api/auth", require("./routes/auth"));
 
 //! Favorito
-app.use("/api/favorite", require("./routes/favorite"));
+//app.use("/api/favorite", require("./routes/favorite"));
 
 //! Paciente
 app.use("/api/paciente", require("./routes/pacienteRoute"));
+
+//! Paciente
+app.use("/api/pruebaLab", require("./routes/pruebaLabRoute"));
 
 // app.get("*", (req, res) => {
 //   res.sendFile(path.resolve(__dirname, "public/index.html"));
