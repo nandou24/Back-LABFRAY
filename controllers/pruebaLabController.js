@@ -5,35 +5,16 @@ const { generarJWT } = require('../helpers/jwt');
 const jwt = require("jsonwebtoken");
 
 const crearPruebaLab = async (req, res = response) => {
-
-    //debemos generar un número de historia clínica año-mes-correlativo-inicial de ape pater - inicial ape mat
+   
     const { 
         areaLab, 
-        nombrePruebaLab, 
-        condPreAnalitPaciente, 
-        condPreAnalitRefer,
-        metodoPruebaLab,
-        tipoMuestra,
-        tipoTuboEnvase,
-        tiempoEntrega,
-        precioPrueba,
-        observPruebas,
-        estadoPrueba,
-        compuestaPrueba,
-        tipoResultado,
-        valorRefCuali,
-        valorRefCuantiLimInf,
-        valorRefCuantiLimSup,
-        unidadesRef,
-        otrosValoresRef
-
+        nombrePruebaLab
         } = req.body;
     
   
     try {
-      //   console.log(name, email, password, rol, "holaaa");
   
-      // verificar si el nombre existe
+      // verificar si la prueba existe
       const pruebaLab = await PruebaLab.findOne({ nombrePruebaLab });
   
       if (pruebaLab) {
@@ -50,19 +31,21 @@ const crearPruebaLab = async (req, res = response) => {
       //Crear usuario de base de datos
 
       //creando codigo prueba
-      
       // Buscar el última prueba creada en el área
-      const ultimoPrueba = await PruebaLab.findOne({
-         where: { areaLab },
+      const ultimoPrueba = await PruebaLab.findOne({ areaLab: areaLab}).sort({codPruebaLab:-1})
+        /* 
+          where: { areaLab },
          order: [['codPruebaLab', 'DESC']],
-        });
+        });*/
       console.log(ultimoPrueba + 'aquíi')
       
       // Obtener el correlativo
       let correlativo = 1;
       if (ultimoPrueba) {
         const ultimoCorrelativo = parseInt(ultimoPrueba.codPruebaLab.slice(2, 6));
+        console.log(ultimoCorrelativo+' ultimoCorrelativo')
         correlativo = ultimoCorrelativo + 1;
+        console.log(correlativo+' correlativo')
       }
 
       if (correlativo > 9999) {
@@ -130,7 +113,6 @@ const crearPruebaLab = async (req, res = response) => {
 const encontrarTermino = async(req, res = response) => {
     
   const termino = req.query.search;
-  console.log('TERMINO DE BUSQUEDA '+ termino)
 
   try {
 
@@ -138,10 +120,8 @@ const encontrarTermino = async(req, res = response) => {
         //nroDoc: { $regex: termino, $options: 'i'}
         
         $or: [
-          { nombreCliente: { $regex: termino, $options: 'i' } },// Búsqueda en el campo "nombre"
-          { apePatCliente: { $regex: termino, $options: 'i' } },// Búsqueda en el campo "apellido paterno"
-          { apeMatCliente: { $regex: termino, $options: 'i' } },// Búsqueda en el campo "apellido materno"
-          { nroDoc: { $regex: termino, $options: 'i' } }// Búsqueda en el campo "nro documento"
+          { nombrePruebaLab: { $regex: termino, $options: 'i' } },// Búsqueda en el campo "nombre"
+          { codPruebaLab: { $regex: termino, $options: 'i' } },// Búsqueda en el campo "apellido paterno"
           // Agrega más campos si es necesario
         ]
       });
@@ -161,13 +141,14 @@ const encontrarTermino = async(req, res = response) => {
 
 const actualizarPrueba = async (req, res = response) => {
   
-  const idNroHC = req.params.nroHC; //recupera la hc
+  const codPrueba = req.params.codPruebaLab; //recupera el codPrueba
+  console.log(codPrueba)
   const datosActualizados = req.body; //recupera los datos a grabar
   delete datosActualizados._id; //quita los _id generados por el mongo y que no se pueden modificar
-  delete datosActualizados.phones._id;
+  delete datosActualizados.itemsCompenentes._id;
 
   try {
-    console.log(req.params.nroHC);
+    console.log(req.params.codPruebaLab);
     console.log('Datos recibidos:', req.body);
 
     //Hashear la contraseña mediante un hash
@@ -178,12 +159,12 @@ const actualizarPrueba = async (req, res = response) => {
     //const token = await generarJWT(dbPaciente.id, dbPaciente.name, dbPaciente.rol);
     //Crear usuario de base de datos
 
-    const pruebaLab = await PruebaLab.findOneAndUpdate({hc:idNroHC},datosActualizados);
+    const pruebaLab = await PruebaLab.findOneAndUpdate({codPruebaLab:codPrueba},datosActualizados);
 
     if (!pruebaLab) {
       return res.status(404).json({
         ok: false,
-        msg: 'Prueba no encontrado con ese número de historia'
+        msg: 'Prueba no encontrada con ese código'
       });
     }
 

@@ -1,6 +1,23 @@
 const mongoose = require('mongoose');
 const { Schema } = require('mongoose');
 
+const valoresSchema = new mongoose.Schema({
+
+    codItemLab: {
+        type: String,
+        required: true
+    },
+    nombreItemLab: {
+        type: String,
+        required: true
+    },
+    observItem: {
+        type: String,
+    }
+
+});
+
+
 const PruebaLabSchema = Schema({
   
     codPruebaLab: {
@@ -23,9 +40,6 @@ const PruebaLabSchema = Schema({
     condPreAnalitRefer: {
         type: String,
         required: true
-    },
-    metodoPruebaLab: {
-        type: String,
     },
     tipoMuestra: {
         type: [String],
@@ -50,29 +64,8 @@ const PruebaLabSchema = Schema({
         type: String,
         required: true
     },
-    compuestaPrueba: {
-        type: String,
-        required: true
-    },
-    tipoResultado: {
-        type: String,
-        required: true
-    },
-    valorRefCuali: {
-        type: String
-    },
-    valorRefCuantiLimInf: {
-        type: String
-    },
-    valorRefCuantiLimSup: {
-        type: String
-    },
-    unidadesRef: {
-        type: String
-    },
-    otrosValoresRef: {
-        type: String
-    }
+
+    itemsCompenentes: [valoresSchema]
 }, 
 { 
     timestamps: true 

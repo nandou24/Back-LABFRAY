@@ -42,13 +42,7 @@ router.post('/newPruebaLab', [
 
     check('estadoPrueba')
     .notEmpty().withMessage('Estado de la prueba es obligatorio'), 
-
-    check('compuestaPrueba')
-    .notEmpty().withMessage('Indique si la prueba es compuesta'), 
     
-    check('tipoResultado')
-    .notEmpty().withMessage('Indique el tipo de resultado'), 
-
     validarCampos
 
 ], crearPruebaLab);
@@ -69,7 +63,7 @@ router.get('/findTerm', [
 
 //POST
 //! Actualizar Paciente
-router.put('/:nroHC/updatePrueba', [
+router.put('/:codPruebaLab/updatePrueba', [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
 ], actualizarPrueba);

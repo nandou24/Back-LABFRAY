@@ -47,8 +47,11 @@ app.use("/api/auth", require("./routes/auth"));
 //! Paciente
 app.use("/api/paciente", require("./routes/pacienteRoute"));
 
-//! Paciente
+//! Prueba Lab
 app.use("/api/pruebaLab", require("./routes/pruebaLabRoute"));
+
+//! Item Lab
+app.use("/api/itemLab", require("./routes/itemLabRoute"));
 
 // app.get("*", (req, res) => {
 //   res.sendFile(path.resolve(__dirname, "public/index.html"));
