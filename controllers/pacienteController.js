@@ -102,26 +102,61 @@ const crearPaciente = async (req, res = response) => {
     }
   };
 
-  const mostrarUltimos30Pacientes = async(req, res = response) => {
-    
+
+const mostrarUltimosPacientes = async(req, res = response) => {
+
     try {
+            const cantidad = req.query.cant;
+            const limite = parseInt(cantidad);
+    
+            const pacientes = await Paciente.find()
+              //.sort({createdAt: -1})
+              .limit(limite);
+    
+            return res.json({
+                ok: true,
+                pacientes
+            })
+    
+        } catch (error) {
+            console.log(error);
+            return res.status(500).json({
+                ok: false,
+                msg: 'Error en la consulta'
+            })
+        }
+}
 
-        const pacientes = await Paciente.find()
-          //.sort({createdAt: -1})
-          .limit(30);        
+const mostrarUltimosPacientesCotizacion = async(req, res = response) => {
 
-        return res.json({
-            ok: true,
-            pacientes
-        })
-
-    } catch (error) {
-        console.log(error);
-        return res.status(500).json({
-            ok: false,
-            msg: 'Error en la consulta'
-        })
-    }
+  try {
+          const cantidad = req.query.cant;
+          const limite = parseInt(cantidad);
+  
+          const pacientes = await Paciente.find(
+            {}, // Filtro
+            { 
+              hc: 1, 
+              nombreCliente: 1, 
+              apePatCliente: 1, 
+              apeMatCliente: 1,
+              tipoDoc: 1, 
+              nroDoc: 1
+            } // Solo los campos necesarios
+        ).limit(limite).lean();
+  
+          return res.json({
+              ok: true,
+              pacientes
+          })
+  
+      } catch (error) {
+          console.log(error);
+          return res.status(500).json({
+              ok: false,
+              msg: 'Error en la consulta'
+          })
+      }
 }
 
 const encontrarTermino = async(req, res = response) => {
@@ -129,8 +164,17 @@ const encontrarTermino = async(req, res = response) => {
   const termino = req.query.search;
   console.log('TERMINO DE BUSQUEDA '+ termino)
 
+  if (!termino || termino.trim() === "") {
+    return res.status(400).json({
+        ok: false,
+        msg: "Debe proporcionar un término de búsqueda válido"
+    });
+  }
+
+
   try {
 
+      const regex = new RegExp(termino, 'i');
       const pacientes = await Paciente.find({
         //nroDoc: { $regex: termino, $options: 'i'}
         
@@ -138,7 +182,10 @@ const encontrarTermino = async(req, res = response) => {
           { nombreCliente: { $regex: termino, $options: 'i' } },// Búsqueda en el campo "nombre"
           { apePatCliente: { $regex: termino, $options: 'i' } },// Búsqueda en el campo "apellido paterno"
           { apeMatCliente: { $regex: termino, $options: 'i' } },// Búsqueda en el campo "apellido materno"
-          { nroDoc: { $regex: termino, $options: 'i' } }// Búsqueda en el campo "nro documento"
+          { nroDoc: { $regex: termino, $options: 'i' } },// Búsqueda en el campo "nro documento"
+          { $expr: { $regexMatch: { input: { $concat: ["$apePatCliente", " ", "$apeMatCliente", " ", "$nombreCliente"] }, regex: regex } } },
+          { $expr: { $regexMatch: { input: { $concat: ["$nombreCliente", " ", "$apePatCliente", " ", "$apeMatCliente"] }, regex: regex } } }
+
           // Agrega más campos si es necesario
         ]
       });
@@ -155,6 +202,61 @@ const encontrarTermino = async(req, res = response) => {
       })
   }
 }
+
+const encontrarTerminoCotizaicon = async(req, res = response) => {
+    
+  const termino = req.query.search;
+  console.log('TERMINO DE BUSQUEDA '+ termino)
+
+  if (!termino || termino.trim() === "") {
+    return res.status(400).json({
+        ok: false,
+        msg: "Debe proporcionar un término de búsqueda válido"
+    });
+  }
+
+
+  try {
+
+      const regex = new RegExp(termino, 'i');
+      const pacientes = await Paciente.find({
+        //nroDoc: { $regex: termino, $options: 'i'}
+        
+        $or: [
+          { nombreCliente: { $regex: termino, $options: 'i' } },// Búsqueda en el campo "nombre"
+          { apePatCliente: { $regex: termino, $options: 'i' } },// Búsqueda en el campo "apellido paterno"
+          { apeMatCliente: { $regex: termino, $options: 'i' } },// Búsqueda en el campo "apellido materno"
+          { nroDoc: { $regex: termino, $options: 'i' } },// Búsqueda en el campo "nro documento"
+          { $expr: { $regexMatch: { input: { $concat: ["$apePatCliente", " ", "$apeMatCliente", " ", "$nombreCliente"] }, regex: regex } } },
+          { $expr: { $regexMatch: { input: { $concat: ["$nombreCliente", " ", "$apePatCliente", " ", "$apeMatCliente"] }, regex: regex } } }
+
+          // Agrega más campos si es necesario
+          ]
+        }, 
+        { 
+          hc: 1, 
+          nombreCliente: 1, 
+          apePatCliente: 1, 
+          apeMatCliente: 1,
+          tipoDoc: 1, 
+          nroDoc: 1, 
+        }    
+      ).lean();
+      return res.json({
+          ok: true,
+          pacientes //! favoritos: favoritos
+      })
+
+  } catch (error) {
+      console.log(error);
+      return res.status(500).json({
+          ok: false,
+          msg: 'Error en la consulta'
+      })
+  }
+}
+
+
 
 const actualizarPaciente = async (req, res = response) => {
   
@@ -203,7 +305,9 @@ const actualizarPaciente = async (req, res = response) => {
 
 module.exports = {
     crearPaciente,
-    mostrarUltimos30Pacientes,
+    mostrarUltimosPacientes,
     encontrarTermino,
-    actualizarPaciente
+    actualizarPaciente,
+    encontrarTerminoCotizaicon,
+    mostrarUltimosPacientesCotizacion
   }

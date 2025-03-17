@@ -53,6 +53,15 @@ app.use("/api/pruebaLab", require("./routes/pruebaLabRoute"));
 //! Item Lab
 app.use("/api/itemLab", require("./routes/itemLabRoute"));
 
+//! Servicio
+app.use("/api/servicio", require("./routes/servicioRoute"));
+
+//! Rec Humano
+app.use("/api/recursoHumano", require("./routes/recHumanoRoute"));
+
+//! Cotizacion
+app.use("/api/cotizacion", require("./routes/cotizacionRoute"));
+
 // app.get("*", (req, res) => {
 //   res.sendFile(path.resolve(__dirname, "public/index.html"));
 // });

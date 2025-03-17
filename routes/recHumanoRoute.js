@@ -1,7 +1,7 @@
 const { Router } = require('express');
 const { check } = require('express-validator');
-const { crearPaciente, mostrarUltimosPacientes, encontrarTermino, actualizarPaciente,
-    encontrarTerminoCotizaicon, mostrarUltimosPacientesCotizacion } = require('../controllers/pacienteController');
+const { crearRecursoHumano, mostrarUltimosRecurHumanos, encontrarTermino, actualizarRecursoHumano, obtenerSolicitantes,
+    encontrarTerminoSolicitante} = require('../controllers/recursoHumanoController');
 const { validarCampos } = require('../middlewares/validar-campo');
 const { validarJWT } = require('../middlewares/validar-token');
 
@@ -13,7 +13,7 @@ const router = Router();
 //!Estructura: URL --> VALIDACIONES --> CONTROLADOR --> RESPUESTA
 
 //! crear un nuevo favorito
-router.post('/newPaciente', [
+router.post('/newRecHumano', [
     
     //validarJWT,
     
@@ -23,25 +23,25 @@ router.post('/newPaciente', [
     check('nroDoc')
     .notEmpty().withMessage('Número de doc es obligatorio'),
 
-    check('nombreCliente')
+    check('nombreRecHumano')
     .notEmpty().withMessage('Nombre es obligatorio'),
 
-    check('apePatCliente')
+    check('apePatRecHumano')
     .notEmpty().withMessage('Apellido Paterno es obligatorio'),
          
     check('fechaNacimiento')
     .notEmpty().withMessage('Fecha de nacimiento es obligatorio'),
 
-    check('sexoCliente')
+    check('sexoRecHumano')
     .notEmpty().withMessage('Sexo es obligatorio'),  
 
-    check('departamentoCliente')
+    check('departamentoRecHumano')
     .notEmpty().withMessage('Departamento es obligatorio'), 
 
-    check('provinciaCliente')
+    check('provinciaRecHumano')
     .notEmpty().withMessage('Provincia es obligatorio'), 
         
-    check('distritoCliente')
+    check('distritoRecHumano')
     .notEmpty().withMessage('Distrito es obligatorio'), 
 
     //check('phones')
@@ -49,38 +49,39 @@ router.post('/newPaciente', [
 
     validarCampos
 
-], crearPaciente);
+], crearRecursoHumano);
 
 //POST
-//! Listar últimos 30 pacientes
+//! Listar últimos 30 recursos humanos
 router.get('/latest', [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
-], mostrarUltimosPacientes);
+], mostrarUltimosRecurHumanos);
 
-router.get('/latestCotizacion', [
+//! Listar últimos solicitantes
+router.get('/latestSolicitantes', [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
-], mostrarUltimosPacientesCotizacion);
+], obtenerSolicitantes);
 
 //POST
-//! Buscar paciente
+//! Buscar recurso humano
 router.get('/findTerm', [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
 ], encontrarTermino);
 
-router.get('/findTermCotizacion', [
+//! Buscar solicitante
+router.get('/findTermSolicitante', [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
-], encontrarTerminoCotizaicon);
-
+], encontrarTerminoSolicitante);
 
 //POST
 //! Actualizar Paciente
-router.put('/:nroHC/updatePatient', [
+router.put('/:codRecHumano/updateRecHumano', [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
-], actualizarPaciente);
+], actualizarRecursoHumano);
 //para exportar rutas
 module.exports = router;
