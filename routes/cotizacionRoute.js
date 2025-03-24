@@ -1,6 +1,7 @@
 const { Router } = require('express');
 const { check } = require('express-validator');
-const { crearCotizacion, mostrarUltimosServicios, encontrarTermino, encontrarTipoExamen, actualizarServicio } = require('../controllers/cotizacionController');
+const { crearCotizacion, mostrarUltimasCotizaciones, encontrarTermino, actualizarServicio,
+    crearNuevaVersionCotiPersona} = require('../controllers/cotizacionController');
 const { validarCampos } = require('../middlewares/validar-campo');
 const { validarJWT } = require('../middlewares/validar-token');
 
@@ -11,7 +12,7 @@ const router = Router();
 //controlador de esa ruta
 //!Estructura: URL --> VALIDACIONES --> CONTROLADOR --> RESPUESTA
 
-//! crear un nuevo favorito
+//! crear un nueva cotizacion
 router.post('/newCotizacionPersona', [
     
     //validarJWT,
@@ -33,13 +34,36 @@ router.post('/newCotizacionPersona', [
 
 ], crearCotizacion);
 
-/*
+//! crear un nuevo version
+router.post('/newVersionCotizacionPersona', [
+    
+    //validarJWT,
+     
+    /*
+    check('tipoServicio')
+    .notEmpty().withMessage('Tipo de servicio es obligatorio'),
+
+    check('nombreServicio')
+    .notEmpty().withMessage('Nombre de servicio es obligatorio'),
+         
+    check('precioServicio')
+    .notEmpty().withMessage('Precio de servicio es obligatorio'),
+
+    check('estadoServicio')
+    .notEmpty().withMessage('Estado del servicio es obligatorio'), 
+    
+    validarCampos*/
+
+], crearNuevaVersionCotiPersona);
+
+
 //POST
 //! Listar últimos servicios
 router.get('/latest', [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
-], mostrarUltimosServicios);
+], mostrarUltimasCotizaciones);
+
 
 //POST
 //! Buscar servicio
@@ -48,20 +72,5 @@ router.get('/findTerm', [
     //.notEmpty().withMessage('Es token es obligatorio'),
 ], encontrarTermino);
 
-//! Buscar exámenes
-router.get('/tipoExamen', [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-], encontrarTipoExamen);
-
-//POST
-//! Actualizar Servicio
-router.put('/:codServicio/updateServicio', [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-], actualizarServicio);
-//para exportar rutas
-
-*/
 
 module.exports = router;

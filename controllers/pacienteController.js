@@ -110,7 +110,7 @@ const mostrarUltimosPacientes = async(req, res = response) => {
             const limite = parseInt(cantidad);
     
             const pacientes = await Paciente.find()
-              //.sort({createdAt: -1})
+              .sort({createdAt: -1})
               .limit(limite);
     
             return res.json({
@@ -143,7 +143,8 @@ const mostrarUltimosPacientesCotizacion = async(req, res = response) => {
               tipoDoc: 1, 
               nroDoc: 1
             } // Solo los campos necesarios
-        ).limit(limite).lean();
+        ).sort({createdAt: -1})
+        .limit(limite).lean();
   
           return res.json({
               ok: true,
