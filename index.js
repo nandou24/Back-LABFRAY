@@ -62,6 +62,9 @@ app.use("/api/recursoHumano", require("./routes/recHumanoRoute"));
 //! Cotizacion
 app.use("/api/cotizacion", require("./routes/cotizacionRoute"));
 
+//! Pago
+app.use("/api/pagos", require("./routes/pagoRoute"));
+
 // app.get("*", (req, res) => {
 //   res.sendFile(path.resolve(__dirname, "public/index.html"));
 // });

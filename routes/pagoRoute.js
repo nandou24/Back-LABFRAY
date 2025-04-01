@@ -1,7 +1,7 @@
 const { Router } = require('express');
 const { check } = require('express-validator');
-const { crearCotizacion, mostrarUltimasCotizaciones, encontrarTermino, mostrarUltimasCotizacionesPorPagar,
-    crearNuevaVersionCotiPersona, mostrarUltimasCotizacionesPagadas} = require('../controllers/cotizacionController');
+const { generarPagoPersona, mostrarUltimasCotizaciones, encontrarTermino, 
+    encontrarDetallePago, crearNuevaVersionCotiPersona} = require('../controllers/pagoController');
 const { validarCampos } = require('../middlewares/validar-campo');
 const { validarJWT } = require('../middlewares/validar-token');
 
@@ -13,7 +13,7 @@ const router = Router();
 //!Estructura: URL --> VALIDACIONES --> CONTROLADOR --> RESPUESTA
 
 //! crear un nueva cotizacion
-router.post('/newCotizacionPersona', [
+router.post('/newPagoPersona', [
     
     //validarJWT,
      
@@ -32,7 +32,7 @@ router.post('/newCotizacionPersona', [
     
     validarCampos*/
 
-], crearCotizacion);
+], generarPagoPersona);
 
 //! crear un nuevo version
 router.post('/newVersionCotizacionPersona', [
@@ -58,23 +58,12 @@ router.post('/newVersionCotizacionPersona', [
 
 
 //POST
-//! Listar últimas cotizaciones
+//! Listar últimos servicios
 router.get('/latest', [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
 ], mostrarUltimasCotizaciones);
 
-//! Listar últimas cotizaciones por pagar
-router.get('/latestPorPagar', [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-], mostrarUltimasCotizacionesPorPagar);
-
-//! Listar últimas cotizaciones pagadas
-router.get('/latestPagadas', [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-], mostrarUltimasCotizacionesPagadas);
 
 //POST
 //! Buscar servicio
@@ -82,6 +71,14 @@ router.get('/findTerm', [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
 ], encontrarTermino);
+
+encontrarDetallePago
+//POST
+//! Buscar servicio
+router.get('/findPayDetail', [
+    //check('token')
+    //.notEmpty().withMessage('Es token es obligatorio'),
+], encontrarDetallePago);
 
 
 module.exports = router;

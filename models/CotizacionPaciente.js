@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const { Schema } = require('mongoose');
 
-const serviciosSchema = new mongoose.Schema({
+const ServiciosSchema = new mongoose.Schema({
 
  codServicio: { type: String, required: true },
  tipoServicio: { type: String },
@@ -15,7 +15,7 @@ const serviciosSchema = new mongoose.Schema({
 
 });
 
-const historialSchema = new Schema({
+const HistorialSchema = new Schema({
     version: { type: Number, required: true }, // 📌 Control de versiones
     fechaModificacion: { type: Date, default: Date.now }, // 📌 Fecha de la modificación
     estadoRegistroPaciente: { type: Boolean, required: true },
@@ -38,14 +38,14 @@ const historialSchema = new Schema({
     subTotal: { type: Number },
     igv: { type: Number },
     total: { type: Number },
-    serviciosCotizacion: [serviciosSchema]
+    serviciosCotizacion: [ServiciosSchema]
 })
 
 const CotizacionSchema = Schema({
  
  codCotizacion: { type: String, required: true },
- estado: {type: String, required: true},
- historial: [historialSchema]
+ estadoCotizacion: {type: String, required: true},
+ historial: [HistorialSchema]
 
 }, 
 { 

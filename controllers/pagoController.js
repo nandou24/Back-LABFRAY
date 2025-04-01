@@ -2,103 +2,150 @@ const { response } = require("express");
 const bcrypt = require('bcryptjs');
 const { generarJWT } = require('../helpers/jwt');
 const jwt = require("jsonwebtoken");
+const Pago = require("../models/PagoPaciente");
 const Cotizacion = require("../models/CotizacionPaciente");
+const mongoose = require('mongoose');
 
-const crearCotizacion = async (req, res = response) => {  
+const generarPagoPersona = async (req, res = response) => { 
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
   
     try {
 
         const {
-            historial,
-            codCotizacion
-            } = req.body;
+            serviciosCotizacion,
+            detallePagos,
+            totalFacturar,
+            faltaPagar,
+            codCotizacion,
+            estadoCotizacion
+        } = req.body;
 
-  
-        // verificar si la cotización existe
-        const cotizacion = await Cotizacion.findOne({ codCotizacion });
-  
-        if (cotizacion) {
+        // 1. Validar que serviciosCotizacion no esté vacío
+        if (!serviciosCotizacion || !Array.isArray(serviciosCotizacion) || serviciosCotizacion.length === 0) {
             return res.status(400).json({
             ok: false,
-            msg: "Ya existe una cotización con ese código",
+            msg: 'No se han registrado servicios en la cotización.'
             });
         }
 
-        // 📌 Validación: Los servicios cotizados son requeridos
-        if (!historial || historial.length === 0 || !historial[0].serviciosCotizacion || historial[0].serviciosCotizacion.length === 0) {
-        return res.status(400).json({ ok: false, msg: 'Debe agregar al menos un servicio' });
+        // 2. Validar que detallePagos no esté vacío
+        if (!detallePagos || !Array.isArray(detallePagos) || detallePagos.length === 0) {
+            return res.status(400).json({
+            ok: false,
+            msg: 'Debe registrar al menos un pago en la cotización.'
+            });
+        }
+
+        // 3. Validar totalFacturar > 0
+        if (typeof totalFacturar !== 'number' || totalFacturar <= 0) {
+            return res.status(400).json({
+            ok: false,
+            msg: 'El total a facturar debe ser mayor que cero.'
+            });
+        }
+    
+        // 4. Validar faltaPagar >= 0
+        if (typeof faltaPagar !== 'number' || faltaPagar < 0) {
+            return res.status(400).json({
+            ok: false,
+            msg: 'El monto de "falta pagar" no puede ser negativo.'
+            });
         }
       
+        // Validar coherencia entre pagos y faltaPagar
+        const totalPagado = detallePagos.reduce((acc, p) => acc + (p.monto || 0), 0);
+        const totalFormulario = req.body.total;
+
+        const diferencia = Math.abs((totalFormulario - totalPagado) - faltaPagar);
+        if (diferencia > 0.01) {
+            return res.status(400).json({
+                ok: false,
+                msg: 'Los valores de pagos y falta pagar no coinciden con el total.'
+            });
+        }
 
         console.log('Datos recibidos:', req.body);
  
         //Generar el JWT
         //const token = await generarJWT(dbPaciente.id, dbPaciente.name, dbPaciente.rol);
-        //Crear usuario de base de datos
-
-        //creando codigo prueba
-        // Buscar el última prueba creada en el área
-        const anioActual = new Date().getFullYear();
-        const ultimaCotizacion = await Cotizacion.findOne({ codCotizacion: new RegExp(`^${anioActual}-`)})
-        .sort({codCotizacion:-1})
-        .lean()
         
-        console.log(ultimaCotizacion + ' último servicio del área')
-      
-        // Obtener el correlativo
-        let correlativo = 1;
-        if (ultimaCotizacion) {
-        const ultimoCodigo  = ultimaCotizacion.codCotizacion;
-        const ultimoNumero = parseInt(ultimoCodigo.split('-')[1], 10);
-        console.log(ultimoNumero +' ultimoCorrelativo')
-        correlativo = ultimoNumero  + 1;
-        console.log(correlativo+' correlativo')
-        }
+        // Crear el código del pago
+        const nuevoCodPago = await generarCodigoPago();
 
-        if (correlativo > 999999) {
-            return res.status(400).json({
-                ok: false,
-                msg: "El número máximo de cotizacione ha sido alcanzado para este año.",
-            });
-        }
-
-        //Crear el nuevo código (Ejemplo: 2024-000001)
-        const nuevoCodigo = `${anioActual}-${String(correlativo).padStart(6, '0')}`;
-
-        // Crear la prueba con el código
-        const nuevaCotizacion = new Cotizacion({
+        // Crear el pago
+        const nuevoPago = new Pago({
         ...req.body,
-        codCotizacion: nuevoCodigo, // Agregar el código de la prueba generado
-        historial: [{
-            ...historial[0], // Tomamos los datos de la primera versión del historial
-            version: 1, // Primera versión
-            fechaModificacion: new Date(), // Fecha de creación
-            }]
+        codPago: nuevoCodPago, // Agregar el código de la prueba generado
         });
 
-        console.log("Datos a grabar"+nuevaCotizacion)
+        console.log("Datos a grabar"+nuevoPago)
 
-        await nuevaCotizacion.save();
-        // console.log(dbUser, "pasoo registro");
+        await nuevoPago.save();
+
+        await Cotizacion.findOneAndUpdate(
+            { codCotizacion },
+            { $set: { estadoCotizacion: estadoCotizacion } },
+            { session }
+        );
+
+        await session.commitTransaction();
+        session.endSession();
+
         //Generar respuesta exitosa
         return res.status(200).json({
             ok: true,
-            msg: 'Cotización registrada con éxito',
-            cotizacion: nuevaCotizacion,
+            msg: 'Pago registrado con éxito y actualizado el estado de la cotización.',
+            data: nuevoPago.codPago,
             //token: token,
         });
     } catch (error) {
-        console.error('Error al registrar la cotización:', error);
+        if (error.name === 'LimitePagoError') {
+            return res.status(400).json({
+              ok: false,
+              msg: error.message
+            });
+        }
+
+        console.error('Error al registrar el pago:', error);
         return res.status(500).json({
             ok: false,
-            msg: "Error al momento de registrar",
+            msg: "Error al momento de registrar el pago.",
         });
     }
 };
 
+const generarCodigoPago = async () => {
+    const anioActual = new Date().getFullYear();
+    const prefijo = `P${anioActual}`;
+  
+    // Buscar el último código que comience con el prefijo del año actual
+    const ultimoPago = await Pago.findOne({ codPago: new RegExp(`^${prefijo}`) })
+                                 .sort({ codPago: -1 })
+                                 .lean();
+  
+    let nuevoNumero = 1;
+
+    if (ultimoPago?.codPago) {
+    const ultimaParte = ultimoPago.codPago.split('-')[1]; // ejemplo: "000237"
+    nuevoNumero = parseInt(ultimaParte, 10) + 1;
+    }
+
+    if (nuevoNumero > 999999) {
+        const error = new Error(`Se alcanzó el límite máximo de códigos de pago para el año ${anioActual}.`);
+        error.name = 'LimitePagoError';
+        throw error;  
+    }
+
+    const correlativo = nuevoNumero.toString().padStart(6, '0');
+  
+    return `${prefijo}-${correlativo}`;
+};
+
 const mostrarUltimasCotizaciones = async(req, res = response) => {
     
-    //console.log("entro a controlador mostrar cotizaciones")
+  console.log("entro a controlador mostrar cotizaciones")
 
     try {
         const cantidad = req.query.cant;
@@ -131,78 +178,6 @@ const mostrarUltimasCotizaciones = async(req, res = response) => {
 }
 
 
-const mostrarUltimasCotizacionesPorPagar = async(req, res = response) => {
-    
-    //console.log("entro a controlador mostrar cotizaciones por pagar")
-  
-    try {
-    const cantidad = req.query.cant;
-    const limite = parseInt(cantidad);
-
-    const cotizaciones = await Cotizacion.find({
-        estadoCotizacion: { $in: ['GENERADA', 'MODIFICADA', 'PAGO PARCIAL'] }
-    })
-    .sort({createdAt: -1})
-    .limit(limite)
-    .lean();
-
-        // 📌 Obtener solo la última versión del historial en cada cotización
-    
-    const cotizacionesConUltimaVersion = cotizaciones.map(cot => ({
-        ...cot,
-        historial: cot.historial.length > 0 ? [cot.historial[cot.historial.length - 1]] : [],
-    }))
-
-        return res.json({
-            ok: true,
-            cotizaciones : cotizacionesConUltimaVersion
-        })
-
-    } catch (error) {
-        console.error("❌ Error al consultar cotizaciones:", error);
-        return res.status(500).json({
-            ok: false,
-            msg: 'Error en la consulta'
-        })
-    }
-}
-
-const mostrarUltimasCotizacionesPagadas = async(req, res = response) => {
-    
-    console.log("entro a controlador mostrar cotizaciones pagadas")
-  
-    try {
-    const cantidad = req.query.cant;
-    const limite = parseInt(cantidad);
-
-    const cotizaciones = await Cotizacion.find({
-        estadoCotizacion: { $in: ['PAGO TOTAL'] }
-    })
-    .sort({createdAt: -1})
-    .limit(limite)
-    .lean();
-
-        // 📌 Obtener solo la última versión del historial en cada cotización
-    
-    const cotizacionesConUltimaVersion = cotizaciones.map(cot => ({
-        ...cot,
-        historial: cot.historial.length > 0 ? [cot.historial[cot.historial.length - 1]] : [],
-    }))
-
-        return res.json({
-            ok: true,
-            cotizaciones : cotizacionesConUltimaVersion
-        })
-
-    } catch (error) {
-        console.error("❌ Error al consultar cotizaciones:", error);
-        return res.status(500).json({
-            ok: false,
-            msg: 'Error en la consulta'
-        })
-    }
-}
-
 const encontrarTermino = async(req, res = response) => {
     
   const termino = req.query.search;
@@ -210,7 +185,7 @@ const encontrarTermino = async(req, res = response) => {
 
   try {
 
-      const cotizaciones = await Cotizacion.find({       
+      const cotizaciones = await Pago.find({       
         historial: {
             $elemMatch: {
                 $or: [
@@ -236,12 +211,52 @@ const encontrarTermino = async(req, res = response) => {
   }
 }
 
+const encontrarDetallePago = async(req, res = response) => {
+    
+    const termino = req.query.codCoti;
+    console.log('termino',termino)
+  
+    try {
+  
+        if (!termino) {
+            return res.status(400).json({
+              ok: false,
+              msg: 'El código de cotización es requerido.',
+              detallePago: []
+            });
+          }
+
+        const pagos  = await Pago.findOne({ codCotizacion: termino });
+
+        if (!pagos || pagos.length === 0) {
+            return res.status(404).json({
+              ok: false,
+              msg: 'No se encontraron pagos para esta cotización.',
+              detallePago: []
+            });
+          }
+
+        
+        return res.status(200).json({
+            ok: true,
+            detallePago: pagos.detallePagos
+        });
+  
+    } catch (error) {
+        console.error('❌ Error en backend:', error);
+        return res.status(500).json({
+            ok: false,
+            msg: 'Error al obtener el detalle de pagos',
+            detallePago: []
+            });
+        }
+  }
 
 const crearNuevaVersionCotiPersona = async (req, res = response) => {
   
   try {
 
-    const { codCotizacion, historial, estadoCotizacion } = req.body;
+    const { codCotizacion, historial, estado } = req.body;
 
     const cotizacionExistente = await Cotizacion.findOne({ codCotizacion });
     
@@ -312,7 +327,7 @@ const crearNuevaVersionCotiPersona = async (req, res = response) => {
         { codCotizacion },
         {
             $push: { historial: nuevaVersion }, // 📌 Agregar nueva versión al historial
-            $set: { estadoCotizacion: estadoCotizacion || "MODIFICADA" } // 📌 Actualizar estado
+            $set: { estado: estado || "modificada" } // 📌 Actualizar estado
         }
     );
 
@@ -337,10 +352,9 @@ const crearNuevaVersionCotiPersona = async (req, res = response) => {
 
 
 module.exports = {
-    crearCotizacion,
+    generarPagoPersona,
     mostrarUltimasCotizaciones,
     encontrarTermino,
     crearNuevaVersionCotiPersona,
-    mostrarUltimasCotizacionesPorPagar,
-    mostrarUltimasCotizacionesPagadas
+    encontrarDetallePago
   }
