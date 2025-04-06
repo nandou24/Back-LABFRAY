@@ -8,6 +8,7 @@ const DetallePagoSchema = new Schema({
     numOperacion: String,
     fechaPago: Date,
     banco: String,
+    esAntiguo: Boolean
 })
 
 const ServiciosSchema = new mongoose.Schema({
@@ -47,7 +48,8 @@ const PagoSchema = new Schema({
     subTotalFacturar: Number,
     igvFacturar: Number,
     totalFacturar: Number,
-    estadoPago: String
+    estadoPago: String,
+    tienePagosAnteriores: Boolean,
 })
 
 //aquí se define o elige la colección/tabla en la que queremos que se guarde

@@ -19,7 +19,8 @@ const generarPagoPersona = async (req, res = response) => {
             totalFacturar,
             faltaPagar,
             codCotizacion,
-            estadoCotizacion
+            estadoCotizacion,
+            tienePagosAnteriores
         } = req.body;
 
         // 1. Validar que serviciosCotizacion no esté vacío
@@ -67,6 +68,43 @@ const generarPagoPersona = async (req, res = response) => {
         }
 
         console.log('Datos recibidos:', req.body);
+
+        // Caso: ya existen pagos -> actualizar documento
+        if (tienePagosAnteriores) {
+                const nuevosPagos = detallePagos.filter(p => !p.esAntiguo).map(p => ({
+                ...p,
+                esAntiguo: true
+            }));
+    
+            await Pago.updateOne(
+                { codCotizacion },
+                { $push: { detallePagos: { $each: nuevosPagos } } },
+                { session }
+            );
+    
+            await Cotizacion.findOneAndUpdate(
+                { codCotizacion },
+                { $set: { estadoCotizacion } },
+                { session }
+            );
+    
+            await session.commitTransaction();
+                session.endSession();
+    
+            return res.status(200).json({
+                ok: true,
+                msg: 'Pago actualizado con éxito y estado de la cotización actualizado.'
+            });
+        }
+
+
+
+
+        // Caso: primer pago -> crear nuevo documento sea parcial o total
+        const detalleConAntiguedad = req.body.detallePagos.map(p => ({
+            ...p,
+            esAntiguo: true  // Marca que estos pagos ya fueron registrados
+        }));
  
         //Generar el JWT
         //const token = await generarJWT(dbPaciente.id, dbPaciente.name, dbPaciente.rol);
@@ -76,8 +114,9 @@ const generarPagoPersona = async (req, res = response) => {
 
         // Crear el pago
         const nuevoPago = new Pago({
-        ...req.body,
-        codPago: nuevoCodPago, // Agregar el código de la prueba generado
+            ...req.body,
+            detallePagos: detalleConAntiguedad,
+            codPago: nuevoCodPago, // Agregar el código de la prueba generado
         });
 
         console.log("Datos a grabar"+nuevoPago)
@@ -101,6 +140,13 @@ const generarPagoPersona = async (req, res = response) => {
             //token: token,
         });
     } catch (error) {
+
+        await session.abortTransaction();
+        session.endSession();
+
+        console.error('Error al registrar el pago:', error);
+        console.log('❌ Transacción revertida correctamente');
+
         if (error.name === 'LimitePagoError') {
             return res.status(400).json({
               ok: false,
@@ -236,7 +282,6 @@ const encontrarDetallePago = async(req, res = response) => {
             });
           }
 
-        
         return res.status(200).json({
             ok: true,
             detallePago: pagos.detallePagos
@@ -250,7 +295,7 @@ const encontrarDetallePago = async(req, res = response) => {
             detallePago: []
             });
         }
-  }
+}
 
 const crearNuevaVersionCotiPersona = async (req, res = response) => {
   
