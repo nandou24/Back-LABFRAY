@@ -49,6 +49,7 @@ const PagoSchema = new Schema({
     igvFacturar: Number,
     totalFacturar: Number,
     estadoPago: String,
+    estadoCotizacion: String,
     tienePagosAnteriores: Boolean,
 })
 

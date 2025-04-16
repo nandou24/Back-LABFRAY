@@ -1,6 +1,6 @@
 const { Router } = require('express');
 const { check } = require('express-validator');
-const { generarPagoPersona, mostrarUltimasCotizaciones, encontrarTermino, 
+const { generarPagoPersona, mostrarUltimosPagos, encontrarTermino, 
     encontrarDetallePago, crearNuevaVersionCotiPersona} = require('../controllers/pagoController');
 const { validarCampos } = require('../middlewares/validar-campo');
 const { validarJWT } = require('../middlewares/validar-token');
@@ -62,8 +62,7 @@ router.post('/newVersionCotizacionPersona', [
 router.get('/latest', [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
-], mostrarUltimasCotizaciones);
-
+], mostrarUltimosPagos);
 
 //POST
 //! Buscar servicio
@@ -79,6 +78,7 @@ router.get('/findPayDetail', [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
 ], encontrarDetallePago);
+
 
 
 module.exports = router;

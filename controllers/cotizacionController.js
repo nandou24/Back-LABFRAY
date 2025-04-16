@@ -140,7 +140,7 @@ const mostrarUltimasCotizacionesPorPagar = async(req, res = response) => {
     const limite = parseInt(cantidad);
 
     const cotizaciones = await Cotizacion.find({
-        estadoCotizacion: { $in: ['GENERADA', 'MODIFICADA', 'PAGO PARCIAL'] }
+        estadoCotizacion: { $in: ['GENERADA', 'MODIFICADA'] }
     })
     .sort({createdAt: -1})
     .limit(limite)
@@ -176,7 +176,7 @@ const mostrarUltimasCotizacionesPagadas = async(req, res = response) => {
     const limite = parseInt(cantidad);
 
     const cotizaciones = await Cotizacion.find({
-        estadoCotizacion: { $in: ['PAGO TOTAL'] }
+        estadoCotizacion: { $in: ['PAGO TOTAL', 'PAGO PARCIAL'] }
     })
     .sort({createdAt: -1})
     .limit(limite)
@@ -189,10 +189,10 @@ const mostrarUltimasCotizacionesPagadas = async(req, res = response) => {
         historial: cot.historial.length > 0 ? [cot.historial[cot.historial.length - 1]] : [],
     }))
 
-        return res.json({
-            ok: true,
-            cotizaciones : cotizacionesConUltimaVersion
-        })
+    return res.json({
+        ok: true,
+        cotizaciones : cotizacionesConUltimaVersion
+    })
 
     } catch (error) {
         console.error("❌ Error al consultar cotizaciones:", error);

@@ -14,10 +14,13 @@ const generarPagoPersona = async (req, res = response) => {
     try {
 
         const {
+            codPago,
             serviciosCotizacion,
             detallePagos,
             totalFacturar,
             faltaPagar,
+            subTotalFacturar,
+            igvFacturar,
             codCotizacion,
             estadoCotizacion,
             tienePagosAnteriores
@@ -75,10 +78,14 @@ const generarPagoPersona = async (req, res = response) => {
                 ...p,
                 esAntiguo: true
             }));
+
+            console.log("Datos a grabar",nuevosPagos)
     
             await Pago.updateOne(
                 { codCotizacion },
-                { $push: { detallePagos: { $each: nuevosPagos } } },
+                { $push: { detallePagos: { $each: nuevosPagos }},
+                    $set: { faltaPagar, subTotalFacturar,
+                        igvFacturar, totalFacturar} },
                 { session }
             );
     
@@ -96,9 +103,6 @@ const generarPagoPersona = async (req, res = response) => {
                 msg: 'Pago actualizado con éxito y estado de la cotización actualizado.'
             });
         }
-
-
-
 
         // Caso: primer pago -> crear nuevo documento sea parcial o total
         const detalleConAntiguedad = req.body.detallePagos.map(p => ({
@@ -189,33 +193,28 @@ const generarCodigoPago = async () => {
     return `${prefijo}-${correlativo}`;
 };
 
-const mostrarUltimasCotizaciones = async(req, res = response) => {
+const mostrarUltimosPagos = async(req, res = response) => {
     
-  console.log("entro a controlador mostrar cotizaciones")
-
+    console.log("entro a controlador mostrar pagos")
+  
     try {
-        const cantidad = req.query.cant;
-        const limite = parseInt(cantidad);
+    const cantidad = req.query.cant;
+    const limite = parseInt(cantidad);
 
-        const cotizaciones = await Cotizacion.find()
-          .sort({createdAt: -1})
-          .limit(limite)
-          .lean();
+    const pagos = await Pago.find({
+        estadoCotizacion: { $in: ['PAGO TOTAL', 'PAGO PARCIAL'] }
+    })
+    .sort({createdAt: -1})
+    .limit(limite)
+    .lean();
 
-         // 📌 Obtener solo la última versión del historial en cada cotización
-        /*
-         const cotizacionesConUltimaVersion = cotizaciones.map(cot => ({
-            ...cot,
-            historial: cot.historial.length > 0 ? [cot.historial[cot.historial.length - 1]] : [],
-        }))*/
-
-        return res.json({
-            ok: true,
-            cotizaciones : cotizaciones
-        })
+    return res.json({
+        ok: true,
+        pagos : pagos
+    })
 
     } catch (error) {
-        console.error("❌ Error al consultar cotizaciones:", error);
+        console.error("❌ Error al consultar pagos:", error);
         return res.status(500).json({
             ok: false,
             msg: 'Error en la consulta'
@@ -398,7 +397,7 @@ const crearNuevaVersionCotiPersona = async (req, res = response) => {
 
 module.exports = {
     generarPagoPersona,
-    mostrarUltimasCotizaciones,
+    mostrarUltimosPagos,
     encontrarTermino,
     crearNuevaVersionCotiPersona,
     encontrarDetallePago
