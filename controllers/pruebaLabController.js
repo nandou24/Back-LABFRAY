@@ -6,87 +6,88 @@ const jwt = require("jsonwebtoken");
 
 const crearPruebaLab = async (req, res = response) => {
    
-    const { 
-        areaLab, 
-        nombrePruebaLab
-        } = req.body;
-    
-  
-    try {
-  
-      // verificar si la prueba existe
-      const pruebaLab = await PruebaLab.findOne({ nombrePruebaLab });
-  
-      if (pruebaLab) {
-        return res.status(400).json({
-          ok: false,
-          msg: "Ya existe una prueba con ese nombre",
-        });
-      }
-      
-      console.log('Datos recibidos:', req.body);
- 
-      //Generar el JWT
-      //const token = await generarJWT(dbPaciente.id, dbPaciente.name, dbPaciente.rol);
-      //Crear usuario de base de datos
+  const {  
+      nombrePruebaLab
+      } = req.body;
 
-      //creando codigo prueba
-      // Buscar el última prueba creada en el área
-      const ultimoPrueba = await PruebaLab.findOne({ areaLab: areaLab}).sort({codPruebaLab:-1})
-        /* 
-          where: { areaLab },
-         order: [['codPruebaLab', 'DESC']],
-        });*/
-      console.log(ultimoPrueba + 'aquíi')
-      
-      // Obtener el correlativo
-      let correlativo = 1;
-      if (ultimoPrueba) {
-        const ultimoCorrelativo = parseInt(ultimoPrueba.codPruebaLab.slice(2, 6));
-        console.log(ultimoCorrelativo+' ultimoCorrelativo')
-        correlativo = ultimoCorrelativo + 1;
-        console.log(correlativo+' correlativo')
-      }
+  const prefijoCodigo = "LC";
 
-      if (correlativo > 9999) {
-        return res.status(400).json({
-          ok: false,
-          msg: "El número máximo de pruebas ha sido alcanzado para este área.",
-        });
-      }
+  try {
 
-      // Correlativo con seis dígitos, maximo 9999
-      const correlativoStr = correlativo.toString().padStart(4, '0');
-      console.log(correlativoStr+' correlativo')
+    // verificar si la prueba existe
+    const pruebaLab = await PruebaLab.findOne({ nombrePruebaLab });
 
-      // Crear el número de código
-      const codigoLab = `${areaLab}${correlativoStr}`;
-
-      // Crear la prueba con el código
-      const nuevaPruebaLab = new PruebaLab({
-        ...req.body,
-        codPruebaLab: codigoLab, // Agregar el código de la prueba generado
-      });
-
-      console.log("Datos a grabar"+nuevaPruebaLab)
-
-      await nuevaPruebaLab.save();
-      // console.log(dbUser, "pasoo registro");
-      //Generar respuesta exitosa
-      return res.status(201).json({
-        ok: true,
-        uid: nuevaPruebaLab.id,
-        //token: token,
-      });
-    } catch (error) {
-      return res.status(500).json({
+    if (pruebaLab) {
+      return res.status(400).json({
         ok: false,
-        msg: "Error al momento de registrar",
+        msg: "Ya existe una prueba con ese nombre",
       });
     }
-  };
+    
+    console.log('Datos recibidos:', req.body);
 
-  const mostrarUltimasPruebas = async(req, res = response) => {
+    //Generar el JWT
+    //const token = await generarJWT(dbPaciente.id, dbPaciente.name, dbPaciente.rol);
+    //Crear usuario de base de datos
+
+    //creando codigo prueba
+    // Buscar el última prueba creada en el área
+    const ultimaPrueba = await PruebaLab.findOne().sort({ codPruebaLab: -1 });
+      /* 
+        where: { areaLab },
+        order: [['codPruebaLab', 'DESC']],
+      });*/
+    console.log(ultimaPrueba, 'última prueba')
+    
+    // Obtener el correlativo
+    let correlativo = 1;
+    if (ultimaPrueba) {
+      const ultimoCorrelativo = parseInt(ultimaPrueba.codPruebaLab.slice(2, 6));
+      console.log(ultimoCorrelativo+' ultimoCorrelativo')
+      correlativo = ultimoCorrelativo + 1;
+      console.log(correlativo+' correlativo')
+    }
+
+    if (correlativo > 9999) {
+      return res.status(400).json({
+        ok: false,
+        msg: "El número máximo de pruebas ha sido alcanzado para este área.",
+      });
+    }
+
+    // Correlativo con seis dígitos, maximo 9999
+    const correlativoStr = correlativo.toString().padStart(4, '0');
+    console.log(correlativoStr+' correlativo')
+
+    // Crear el número de código
+    const codigoLab = `${prefijoCodigo}${correlativoStr}`;
+
+    // Crear la prueba con el código
+    const nuevaPruebaLab = new PruebaLab({
+      ...req.body,
+      codPruebaLab: codigoLab, // Agregar el código de la prueba generado
+    });
+
+    console.log("Datos a grabar"+nuevaPruebaLab)
+
+    await nuevaPruebaLab.save();
+    // console.log(dbUser, "pasoo registro");
+    //Generar respuesta exitosa
+    return res.status(201).json({
+      ok: true,
+      uid: nuevaPruebaLab.id,
+      //token: token,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      msg: "Error al momento de registrar",
+    });
+  }
+
+};
+
+const mostrarUltimasPruebas = async(req, res = response) => {
     
     try {
 
@@ -145,7 +146,7 @@ const actualizarPrueba = async (req, res = response) => {
   console.log(codPrueba)
   const datosActualizados = req.body; //recupera los datos a grabar
   delete datosActualizados._id; //quita los _id generados por el mongo y que no se pueden modificar
-  delete datosActualizados.itemsCompenentes._id;
+  delete datosActualizados.itemsComponentes._id;
 
   try {
     console.log(req.params.codPruebaLab);

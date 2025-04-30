@@ -37,9 +37,6 @@ router.post('/newPruebaLab', [
     check('tiempoEntrega')
     .notEmpty().withMessage('Tiempo de respuesta es obligatorio'),
 
-    check('precioPrueba')
-    .notEmpty().withMessage('Precio de la prueba es obligatorio'),
-
     check('estadoPrueba')
     .notEmpty().withMessage('Estado de la prueba es obligatorio'), 
     
