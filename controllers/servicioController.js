@@ -8,20 +8,46 @@ const Servicio = require("../models/Servicio");
 const crearServicio = async (req, res = response) => {
    
     const { 
-      tipoServicio, 
+        tipoServicio,
         nombreServicio
-        } = req.body;
+    } = req.body;
     
   
     try {
   
+      console.log('tipoServicio',tipoServicio)
+
+      let tipo = ''
+
+      switch (tipoServicio) {
+        case 'Laboratorio':
+          tipo = 'LAB'
+          break;
+        case 'Ecografía':
+          tipo = 'ECO'
+          break;
+        case 'Consulta Médica':
+          tipo = 'CON'
+          break;
+        case 'Procedimiento':
+          tipo = 'PRO'
+          break;
+        default:
+          return res.status(400).json({
+            ok: false,
+            msg: 'Tipo de examen no válido',
+          });
+      }
+
+      console.log('tipo',tipo)
+
       // verificar si la prueba existe
       const servicio = await Servicio.findOne({ nombreServicio });
   
       if (servicio) {
         return res.status(400).json({
           ok: false,
-          msg: "Ya existe una prueba con ese nombre",
+          msg: "Ya existe una servicio con ese nombre",
         });
       }
       
@@ -58,7 +84,7 @@ const crearServicio = async (req, res = response) => {
       console.log(correlativoStr+' correlativo')
 
       // Crear el número de código
-      const codigoServicio = `${tipoServicio}${correlativoStr}`;
+      const codigoServicio = `${tipo}${correlativoStr}`;
       console.log(codigoServicio+' codigo generado')
 
       // Crear la prueba con el código
@@ -78,6 +104,7 @@ const crearServicio = async (req, res = response) => {
         //token: token,
       });
     } catch (error) {
+      console.error(error);
       return res.status(500).json({
         ok: false,
         msg: "Error al momento de registrar",
@@ -90,12 +117,12 @@ const mostrarUltimosServicios = async(req, res = response) => {
   console.log("entro a controlador mostrar servicios")
 
     try {
-        const cantidad = req.query.cant;
-        const limite = parseInt(cantidad);
+        // const cantidad = req.query.cant;
+        // const limite = parseInt(cantidad);
 
         const servicios = await Servicio.find()
           //.sort({createdAt: -1})
-          .limit(limite);
+          //.limit(limite);
 
         return res.json({
             ok: true,
@@ -143,20 +170,40 @@ const encontrarTermino = async(req, res = response) => {
 
 const encontrarTipoExamen = async(req, res = response) => {
     
-  const termino = req.query.search;
+  const tipo = req.query.search;
 
   try {
       let examenes = [];
   
-      // 🔥 Escoger la colección correcta según el tipo de servicio
-      if (termino === 'LAB') {
-        examenes = await PruebaLab.find();  // Colección de pruebas de laboratorio
-      } else if (termino === 'ECO') {
-        examenes = await Ecografia.find();  // Colección de ecografías
-      } else if (termino === 'CON') {
-        examenes = await Consulta.find();  // Colección de consultas médicas
-      } else if (termino === 'PRO') {
-        examenes = await Procedimiento.find();  // Colección de procedimientos médicos
+      // // 🔥 Escoger la colección correcta según el tipo de servicio
+      // if (termino === 'Laboratorio') {
+      //   examenes = await PruebaLab.find();  // Colección de pruebas de laboratorio
+      // } else if (termino === 'Ecografía') {
+      //   examenes = await Ecografia.find();  // Colección de ecografías
+      // } else if (termino === 'Consulta Médica') {
+      //   examenes = await Consulta.find();  // Colección de consultas médicas
+      // } else if (termino === 'Procedimiento') {
+      //   examenes = await Procedimiento.find();  // Colección de procedimientos médicos
+      // }
+
+      switch (tipo) {
+        case 'Laboratorio':
+          examenes = await PruebaLab.find();
+          break;
+        case 'Ecografía':
+          examenes = await Ecografia.find();
+          break;
+        case 'Consulta Médica':
+          examenes = await Consulta.find();
+          break;
+        case 'Procedimiento':
+          examenes = await Procedimiento.find();
+          break;
+        default:
+          return res.status(400).json({
+            ok: false,
+            msg: 'Tipo de examen no válido',
+          });
       }
   
       return res.json({
@@ -165,24 +212,35 @@ const encontrarTipoExamen = async(req, res = response) => {
       })
 
     } catch (error) {
-      res.status(500).json({ 
+      console.error('[ERROR encontrarExamenesPorTipo]:', error);
+      return res.status(500).json({ 
         ok: false,
-        msg: 'Error en la consulta',
-        error });
+        msg: 'Error interno al obtener exámenes por tipo'
+       });
     }
 }
 
 const actualizarServicio = async (req, res = response) => {
-
-  console.log(req)
   
   const codigoServicio = req.params.codServicio; //recupera el codPrueba
   console.log(codigoServicio)
   const datosActualizados = req.body; //recupera los datos a grabar
+  const nombreServicio =req.body.nombreServicio
+  console.log(codigoServicio)
   delete datosActualizados._id; //quita los _id generados por el mongo y que no se pueden modificar
   delete datosActualizados.examenesServicio._id;
 
   try {
+
+    // verificar si la prueba existe
+    const nombre = await Servicio.findOne({ nombreServicio });
+  
+    if (nombre) {
+      return res.status(400).json({
+        ok: false,
+        msg: "Ya existe un servicio con ese nombre",
+      });
+    }
     
     console.log('Datos recibidos:', req.body);
 
