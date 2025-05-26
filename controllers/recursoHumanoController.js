@@ -71,7 +71,7 @@ const crearRecursoHumano = async (req, res = response) => {
 
 
       // Crear el número de historia clínica sin guiones
-      const codigo = `RH${String(correlativo).padStart(6, '0')}`;
+      const codigo = `RH${String(correlativo).padStart(4, '0')}`;
 
       // Crear el paciente con el número de historia clínica
       // Crear usuario con el modelo
@@ -105,10 +105,16 @@ const mostrarUltimosRecurHumanos = async(req, res = response) => {
     try {
             const cantidad = req.query.cant;
             const limite = parseInt(cantidad);
-    
-            const recHumanos = await RecurHumano.find()
+            let recHumanos
+
+            if(cantidad == 0){
+              recHumanos = await RecurHumano.find()
+            }
+            else{
+              recHumanos = await RecurHumano.find()
               //.sort({createdAt: -1})
               .limit(limite);
+            }            
     
             return res.json({
                 ok: true,
