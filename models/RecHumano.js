@@ -39,7 +39,7 @@ const profesionesSchema = new mongoose.Schema({
     nroColegiatura: {
         type: String
     },
-    universProcedenciaProfesion: {
+    centroEstudiosProfesion: {
         type: String
     },
     anioEgresoProfesion: {
@@ -61,7 +61,7 @@ const especialidadesSchema = new mongoose.Schema({
         type: String,
         required: true
     },
-    universProcedenciaEspecialidad: {
+    centroEstudiosEspecialidad: {
         type: String
     },
     anioEgresoEspecialidad: {
