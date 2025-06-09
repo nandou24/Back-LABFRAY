@@ -1,6 +1,6 @@
 const { Router } = require('express');
 const { check } = require('express-validator');
-const { crearServicio, mostrarUltimosServicios, encontrarTermino, encontrarTipoExamen, actualizarServicio } = require('../controllers/servicioController');
+const { crearServicio, mostrarUltimosServicios, encontrarTermino, encontrarTipoExamen, actualizarServicio, mostrarServiciosFavoritos } = require('../controllers/servicioController');
 const { validarCampos } = require('../middlewares/validar-campo');
 const { validarJWT } = require('../middlewares/validar-token');
 
@@ -38,6 +38,11 @@ router.get('/latest', [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
 ], mostrarUltimosServicios);
+
+router.get('/latestFavorites', [
+    //check('token')
+    //.notEmpty().withMessage('Es token es obligatorio'),
+], mostrarServiciosFavoritos);
 
 //POST
 //! Buscar servicio

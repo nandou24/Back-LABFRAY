@@ -59,7 +59,7 @@ const crearServicio = async (req, res = response) => {
 
       //creando codigo prueba
       // Buscar el última prueba creada en el área
-      const ultimoServicio = await Servicio.findOne({ tipoServicio: tipoServicio}).sort({codServicio:-1})
+      const ultimoServicio = await Servicio.findOne({ tipoServicio: tipo}).sort({codServicio:-1})
        
       console.log(ultimoServicio + ' último servicio del área')
       
@@ -138,6 +138,33 @@ const mostrarUltimosServicios = async(req, res = response) => {
     }
 }
 
+const mostrarServiciosFavoritos = async(req, res = response) => {
+    
+  console.log("entro a controlador mostrar servicios favoritos")
+
+    try {
+        // const cantidad = req.query.cant;
+        // const limite = parseInt(cantidad);
+
+        const servicios = await Servicio.find({favoritoServicio: true})
+                                        .sort({ nombreServicio: 1 })  
+
+          //.sort({createdAt: -1})
+          //.limit(limite);
+
+        return res.json({
+            ok: true,
+            servicios
+        })
+
+    } catch (error) {
+        console.log(error);
+        return res.status(500).json({
+            ok: false,
+            msg: 'Error en la consulta'
+        })
+    }
+}
 
 const encontrarTermino = async(req, res = response) => {
     
@@ -233,16 +260,16 @@ const actualizarServicio = async (req, res = response) => {
   try {
 
     // verificar si la prueba existe
-    const nombre = await Servicio.findOne({ nombreServicio });
+    // const nombre = await Servicio.findOne({ nombreServicio });
   
-    if (nombre) {
-      return res.status(400).json({
-        ok: false,
-        msg: "Ya existe un servicio con ese nombre",
-      });
-    }
+    // if (nombre) {
+    //   return res.status(400).json({
+    //     ok: false,
+    //     msg: "Ya existe un servicio con ese nombre",
+    //   });
+    // }
     
-    console.log('Datos recibidos:', req.body);
+    // console.log('Datos recibidos:', req.body);
 
     //Hashear la contraseña mediante un hash
     //const numAletorio = bcrypt.genSaltSync();
@@ -283,5 +310,6 @@ module.exports = {
     mostrarUltimosServicios,
     encontrarTermino,
     encontrarTipoExamen,
-    actualizarServicio
+    actualizarServicio,
+    mostrarServiciosFavoritos
   }

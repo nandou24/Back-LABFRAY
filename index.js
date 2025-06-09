@@ -59,6 +59,9 @@ app.use("/api/servicio", require("./routes/servicioRoute"));
 //! Rec Humano
 app.use("/api/recursoHumano", require("./routes/recHumanoRoute"));
 
+//! Referencia Medico
+app.use("/api/referenciaMedico", require("./routes/refMedicoRoute"));
+
 //! Cotizacion
 app.use("/api/cotizacion", require("./routes/cotizacionRoute"));
 
