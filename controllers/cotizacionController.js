@@ -140,7 +140,7 @@ const mostrarUltimasCotizacionesPorPagar = async(req, res = response) => {
     const limite = parseInt(cantidad);
 
     const cotizaciones = await Cotizacion.find({
-        estadoCotizacion: { $in: ['GENERADA', 'MODIFICADA'] }
+        estadoCotizacion: { $in: ['GENERADA', 'MODIFICADA','PAGO ANULADO'] }
     })
     .sort({createdAt: -1})
     .limit(limite)

@@ -64,7 +64,7 @@ const crearPaciente = async (req, res = response) => {
       }
 
       // Correlativo con seis dígitos, maximo 999 999
-      const correlativoStr = correlativo.toString().padStart(6, '0');
+      const correlativoStr = correlativo.toString().padStart(4, '0');
       console.log(correlativoStr+' correlativo')
 
       // Generar las iniciales de los apellidos

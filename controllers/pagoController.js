@@ -22,15 +22,18 @@ const generarPagoPersona = async (req, res = response) => {
             subTotalFacturar,
             igvFacturar,
             codCotizacion,
-            estadoCotizacion,
+            //estadoCotizacion,
             tienePagosAnteriores
         } = req.body;
+
+        const totalFormulario = req.body.total;
+        const faltaPagarFrontend = req.body.faltaPagar;
 
         // 1. Validar que serviciosCotizacion no esté vacío
         if (!serviciosCotizacion || !Array.isArray(serviciosCotizacion) || serviciosCotizacion.length === 0) {
             return res.status(400).json({
             ok: false,
-            msg: 'No se han registrado servicios en la cotización.'
+            msg: 'No se han registrado servicios en la cotización a pagar.'
             });
         }
 
@@ -49,20 +52,41 @@ const generarPagoPersona = async (req, res = response) => {
             msg: 'El total a facturar debe ser mayor que cero.'
             });
         }
+
+        // 4. Calcular totalPagado (monto + recargo)
+        const totalPagadoCalculado = detallePagos.reduce((acc, p) => {
+            const monto = Number(p.monto) || 0;
+            //const recargo = Number(p.montoConRecargo || 0) - monto;
+            return acc + monto;// + recargo;
+        }, 0);
+
+        // 5. Calcular faltaPagar real
+        const faltaPagarCalculado = +(totalFormulario - totalPagadoCalculado).toFixed(3);
+
+        // 6. Comparar con el faltaPagar recibido del frontend
+        const diferenciaFaltaPagar = Math.abs(faltaPagarCalculado - faltaPagarFrontend);
+        if (diferenciaFaltaPagar > 0.01) {
+        return res.status(400).json({
+            ok: false,
+            msg: 'Inconsistencia detectada entre el monto de falta por pagar enviado y el calculado.'
+        });
+        }
     
-        // 4. Validar faltaPagar >= 0
-        if (typeof faltaPagar !== 'number' || faltaPagar < 0) {
-            return res.status(400).json({
+        // 7. Validar faltaPagar no negativo
+        if (faltaPagarCalculado < 0) {
+        return res.status(400).json({
             ok: false,
             msg: 'El monto de "falta pagar" no puede ser negativo.'
-            });
+        });
         }
-      
-        // Validar coherencia entre pagos y faltaPagar
-        const totalPagado = detallePagos.reduce((acc, p) => acc + (p.monto || 0), 0);
-        const totalFormulario = req.body.total;
 
-        const diferencia = Math.abs((totalFormulario - totalPagado) - faltaPagar);
+        // 8. Determinar estadoCotizacion en base a faltaPagar
+        const estadoCotizacion = faltaPagarCalculado > 0 ? 'PAGO PARCIAL' : 'PAGO TOTAL';
+      
+        // 9. Validar coherencia entre pagos y faltaPagar
+        //const totalPagado = detallePagos.reduce((acc, p) => acc + (p.monto || 0), 0);
+
+        const diferencia = Math.abs((totalFormulario - totalPagadoCalculado) - faltaPagarCalculado);
         if (diferencia > 0.01) {
             return res.status(400).json({
                 ok: false,
@@ -84,8 +108,11 @@ const generarPagoPersona = async (req, res = response) => {
             await Pago.updateOne(
                 { codCotizacion },
                 { $push: { detallePagos: { $each: nuevosPagos }},
-                    $set: { faltaPagar, subTotalFacturar,
-                        igvFacturar, totalFacturar} },
+                    $set: { 
+                        faltaPagar: faltaPagarCalculado,
+                        subTotalFacturar,
+                        igvFacturar, 
+                        totalFacturar} },
                 { session }
             );
     
@@ -104,9 +131,15 @@ const generarPagoPersona = async (req, res = response) => {
             });
         }
 
+        console.log("detalle a grabar",detallePagos)
         // Caso: primer pago -> crear nuevo documento sea parcial o total
-        const detalleConAntiguedad = req.body.detallePagos.map(p => ({
-            ...p,
+        const detalleConAntiguedad = detallePagos.map(p => ({
+            medioPago: p.medioPago,
+            monto: p.monto,
+            recargo: p.recargo,
+            numOperacion: p.numOperacion,
+            fechaPago: p.fechaPago,
+            banco: p.banco,
             esAntiguo: true  // Marca que estos pagos ya fueron registrados
         }));
  
@@ -121,6 +154,7 @@ const generarPagoPersona = async (req, res = response) => {
             ...req.body,
             detallePagos: detalleConAntiguedad,
             codPago: nuevoCodPago, // Agregar el código de la prueba generado
+            faltaPagar: faltaPagarCalculado
         });
 
         console.log("Datos a grabar"+nuevoPago)
@@ -129,7 +163,7 @@ const generarPagoPersona = async (req, res = response) => {
 
         await Cotizacion.findOneAndUpdate(
             { codCotizacion },
-            { $set: { estadoCotizacion: estadoCotizacion } },
+            { $set: { estadoCotizacion } },
             { session }
         );
 
@@ -182,13 +216,13 @@ const generarCodigoPago = async () => {
     nuevoNumero = parseInt(ultimaParte, 10) + 1;
     }
 
-    if (nuevoNumero > 999999) {
+    if (nuevoNumero > 99999) {
         const error = new Error(`Se alcanzó el límite máximo de códigos de pago para el año ${anioActual}.`);
         error.name = 'LimitePagoError';
         throw error;  
     }
 
-    const correlativo = nuevoNumero.toString().padStart(6, '0');
+    const correlativo = nuevoNumero.toString().padStart(5, '0');
   
     return `${prefijo}-${correlativo}`;
 };
@@ -296,109 +330,95 @@ const encontrarDetallePago = async(req, res = response) => {
         }
 }
 
-const crearNuevaVersionCotiPersona = async (req, res = response) => {
-  
-  try {
+const anularPago  = async(req, res = response) => {
 
-    const { codCotizacion, historial, estado } = req.body;
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-    const cotizacionExistente = await Cotizacion.findOne({ codCotizacion });
-    
-    if (!cotizacionExistente) {
-        return res.status(404).json({
-            ok: false,
-            msg: "La cotización no existe.",
-        });
-    }
+    try {
+        const { motivo, observacion } = req.body;
+        const { codPago } = req.params;
 
-    console.log('Datos recibidos:', req.body);
+        console.log('Datos recibidos para anular pago:', req.body);
 
-    const ultimaVersion = cotizacionExistente.historial[cotizacionExistente.historial.length - 1];
-
-    const nuevaVersion = {
-        ...historial[0], // Tomamos el único historial enviado desde el frontend
-        version: ultimaVersion ? ultimaVersion.version + 1 : 1, // Incrementamos la versión
-        fechaModificacion: new Date(), // Generamos la nueva fecha
-      };
-
-    //Generar el JWT
-    //const token = await generarJWT(dbPaciente.id, dbPaciente.name, dbPaciente.rol);
-    //Crear usuario de base de datos
-
-    const objetosSonIguales = (obj1, obj2) => {
-
-        // Clonamos los objetos profundamente para evitar mutaciones
-        const obj1Clonado = JSON.parse(JSON.stringify(obj1));
-        const obj2Clonado = JSON.parse(JSON.stringify(obj2));
-
-        // Clonamos los objetos y eliminamos `fechaModificacion`
-        delete obj1Clonado.fechaModificacion;
-        delete obj2Clonado.fechaModificacion;
-        delete obj1Clonado.version;
-        delete obj2Clonado.version;
-        delete obj1Clonado._id;
-        delete obj2Clonado._id;
-         // 📌 Si existe `serviciosCotizacion`, eliminamos `_id` en cada servicio
-        if (obj1Clonado.serviciosCotizacion && obj2Clonado.serviciosCotizacion) {
-            obj1Clonado.serviciosCotizacion.forEach(servicio => delete servicio._id);
-            obj2Clonado.serviciosCotizacion.forEach(servicio => delete servicio._id);
-
-             // 📌 Ordenamos los servicios para evitar diferencias por el orden
-            obj1Clonado.serviciosCotizacion.sort((a, b) => a.codServicio.localeCompare(b.codServicio));
-            obj2Clonado.serviciosCotizacion.sort((a, b) => a.codServicio.localeCompare(b.codServicio));
+        // Validar que se envíe el código de pago
+        if (!codPago || !motivo ) {
+            return res.status(400).json({
+                ok: false,
+                msg: 'El código de pago y el motivo son requeridos.'
+            });
         }
-      
-        //console.log(JSON.stringify(obj1Clonado) === JSON.stringify(obj2Clonado))
-        //console.log(JSON.stringify(obj1Clonado.serviciosCotizacion) === JSON.stringify(obj2Clonado.serviciosCotizacion))
-        console.log("obj1",obj1Clonado)
-        console.log("obj2",obj2Clonado)
 
-        return JSON.stringify(obj1Clonado) === JSON.stringify(obj2Clonado)
-    };
+        // Buscar el pago por su código
+        const pago = await Pago.findOne({ codPago });
 
-    
-    // 🔄 Verificación opcional: Evitar versiones duplicadas si no hubo cambios
-    if (objetosSonIguales(nuevaVersion, ultimaVersion)) {
-
-        return res.status(400).json({
-            ok: false,
-            msg: "No hay cambios para generar una nueva versión.",
-        });
-    }
-    
-    
-    const cotizacionActualizada = await Cotizacion.findOneAndUpdate(
-        { codCotizacion },
-        {
-            $push: { historial: nuevaVersion }, // 📌 Agregar nueva versión al historial
-            $set: { estado: estado || "modificada" } // 📌 Actualizar estado
+        // Validar que el pago exista
+        if (!pago) {
+            return res.status(404).json({
+                ok: false,
+                msg: 'Pago no encontrado.'
+            });
         }
-    );
 
-    if (cotizacionActualizada) {
-      //Generar respuesta exitosa
+        // Verificar si el pago ya está anulado
+        if (pago.estadoPago === 'ANULADO' || pago.estadoPago === 'FACTURADO') {
+            return res.status(400).json({
+                ok: false,
+                msg: 'El pago ya fue anulado previamente.'
+            });
+        }
+
+        // Actualizar el estado del pago a ANULADO y agregar la información de anulación
+        await Pago.updateOne(
+            { codPago },
+            { 
+                $set: { 
+                    estadoPago: 'ANULADO',
+                    anulacion: {
+                        motivo: motivo,
+                        observacion: observacion,
+                        fecha: new Date()
+                    }
+                }
+            },
+            { session }
+        );
+
+        // Actualizar el estado de la cotización a MODIFICADO
+        await Cotizacion.updateOne(
+            { codCotizacion: pago.codCotizacion },
+            { $set: { estadoCotizacion: 'PAGO ANULADO' } },
+            { session }
+        );
+
+
+        await session.commitTransaction();
+        session.endSession();
+
         return res.status(200).json({
             ok: true,
-            msg: "Nueva versión de la cotización agregada con éxito.",
-            //uid: dbPaciente.id,
-            //token: token,
+            msg: 'Pago anulado con éxito.'
+        });
+
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        
+        console.error('❌ Error al anular el pago:', error);
+        return res.status(500).json({
+            ok: false,
+            msg: 'Error al anular el pago.'
         });
     }
-        
-  } catch (error) {
-    console.error("Error al generar nueva versión de la cotización:", error);
-    return res.status(500).json({
-        ok: false,
-        msg: "Error interno al generar la nueva versión de la cotización.",
-    });
-  }
-};
+
+}
+
 
 
 module.exports = {
     generarPagoPersona,
     mostrarUltimosPagos,
     encontrarTermino,
-    crearNuevaVersionCotiPersona,
-    encontrarDetallePago
+    encontrarDetallePago,
+    anularPago
   }

@@ -43,11 +43,12 @@ const HistorialSchema = new Schema({
 
 const CotizacionSchema = Schema({
  
- codCotizacion: { type: String, required: true },
- estadoCotizacion: {type: String, required: true},
- historial: [HistorialSchema]
+    codCotizacion: { type: String, required: true },
+    estadoCotizacion: {type: String, required: true, enum: ['GENERADO', 'MODIFICADO', 'PAGO PARCIAL', 'PAGO TOTAL', 'PAGO ANUALDO', 'ANULADO', 'FACTURADO']},
+    historial: [HistorialSchema]
 
-}, 
+},
+
 { 
  timestamps: true 
 })
