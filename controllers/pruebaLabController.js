@@ -1,19 +1,15 @@
 const { response } = require("express");
 const PruebaLab = require("../models/PruebaLab");
-const bcrypt = require('bcryptjs');
-const { generarJWT } = require('../helpers/jwt');
+const bcrypt = require("bcryptjs");
+const { generarJWT } = require("../helpers/jwt");
 const jwt = require("jsonwebtoken");
 
 const crearPruebaLab = async (req, res = response) => {
-   
-  const {  
-      nombrePruebaLab
-      } = req.body;
+  const { nombrePruebaLab } = req.body;
 
   const prefijoCodigo = "LC";
 
   try {
-
     // verificar si la prueba existe
     const pruebaLab = await PruebaLab.findOne({ nombrePruebaLab });
 
@@ -23,29 +19,16 @@ const crearPruebaLab = async (req, res = response) => {
         msg: "Ya existe una prueba con ese nombre",
       });
     }
-    
-    console.log('Datos recibidos:', req.body);
-
-    //Generar el JWT
-    //const token = await generarJWT(dbPaciente.id, dbPaciente.name, dbPaciente.rol);
-    //Crear usuario de base de datos
 
     //creando codigo prueba
     // Buscar el última prueba creada en el área
     const ultimaPrueba = await PruebaLab.findOne().sort({ codPruebaLab: -1 });
-      /* 
-        where: { areaLab },
-        order: [['codPruebaLab', 'DESC']],
-      });*/
-    console.log(ultimaPrueba, 'última prueba')
-    
+
     // Obtener el correlativo
     let correlativo = 1;
     if (ultimaPrueba) {
       const ultimoCorrelativo = parseInt(ultimaPrueba.codPruebaLab.slice(2, 6));
-      console.log(ultimoCorrelativo+' ultimoCorrelativo')
       correlativo = ultimoCorrelativo + 1;
-      console.log(correlativo+' correlativo')
     }
 
     if (correlativo > 9999) {
@@ -56,8 +39,7 @@ const crearPruebaLab = async (req, res = response) => {
     }
 
     // Correlativo con seis dígitos, maximo 9999
-    const correlativoStr = correlativo.toString().padStart(4, '0');
-    console.log(correlativoStr+' correlativo')
+    const correlativoStr = correlativo.toString().padStart(4, "0");
 
     // Crear el número de código
     const codigoLab = `${prefijoCodigo}${correlativoStr}`;
@@ -67,8 +49,6 @@ const crearPruebaLab = async (req, res = response) => {
       ...req.body,
       codPruebaLab: codigoLab, // Agregar el código de la prueba generado
     });
-
-    console.log("Datos a grabar"+nuevaPruebaLab)
 
     await nuevaPruebaLab.save();
     // console.log(dbUser, "pasoo registro");
@@ -84,92 +64,72 @@ const crearPruebaLab = async (req, res = response) => {
       msg: "Error al momento de registrar",
     });
   }
-
 };
 
-const mostrarUltimasPruebas = async(req, res = response) => {
-    
-    try {
+const mostrarUltimasPruebas = async (req, res = response) => {
+  try {
+    const pruebasLab = await PruebaLab.find()
+      //.sort({createdAt: -1})
+      .limit(30);
 
-        const pruebasLab = await PruebaLab.find()
-          //.sort({createdAt: -1})
-          .limit(30);
+    return res.json({
+      ok: true,
+      pruebasLab,
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      ok: false,
+      msg: "Error en la consulta",
+    });
+  }
+};
 
-        return res.json({
-            ok: true,
-            pruebasLab
-        })
-
-        
-
-    } catch (error) {
-        console.log(error);
-        return res.status(500).json({
-            ok: false,
-            msg: 'Error en la consulta'
-        })
-    }
-}
-
-const encontrarTermino = async(req, res = response) => {
-    
+const encontrarTermino = async (req, res = response) => {
   const termino = req.query.search;
 
   try {
+    const pruebasLab = await PruebaLab.find({
+      //nroDoc: { $regex: termino, $options: 'i'}
 
-      const pruebasLab = await PruebaLab.find({
-        //nroDoc: { $regex: termino, $options: 'i'}
-        
-        $or: [
-          { nombrePruebaLab: { $regex: termino, $options: 'i' } },// Búsqueda en el campo "nombre"
-          { codPruebaLab: { $regex: termino, $options: 'i' } },// Búsqueda en el campo "apellido paterno"
-          // Agrega más campos si es necesario
-        ]
-      });
-      return res.json({
-          ok: true,
-          pruebasLab //! favoritos: favoritos
-      })
-
+      $or: [
+        { nombrePruebaLab: { $regex: termino, $options: "i" } }, // Búsqueda en el campo "nombre"
+        { codPruebaLab: { $regex: termino, $options: "i" } }, // Búsqueda en el campo "apellido paterno"
+        // Agrega más campos si es necesario
+      ],
+    });
+    return res.json({
+      ok: true,
+      pruebasLab, //! favoritos: favoritos
+    });
   } catch (error) {
-      console.log(error);
-      return res.status(500).json({
-          ok: false,
-          msg: 'Error en la consulta'
-      })
+    console.log(error);
+    return res.status(500).json({
+      ok: false,
+      msg: "Error en la consulta",
+    });
   }
-}
+};
 
 const actualizarPrueba = async (req, res = response) => {
-  
   const codPrueba = req.params.codPruebaLab; //recupera el codPrueba
-  console.log(codPrueba)
   const datosActualizados = req.body; //recupera los datos a grabar
   delete datosActualizados._id; //quita los _id generados por el mongo y que no se pueden modificar
   delete datosActualizados.itemsComponentes._id;
 
   try {
-    console.log(req.params.codPruebaLab);
-    console.log('Datos recibidos:', req.body);
-
-    //Hashear la contraseña mediante un hash
-    //const numAletorio = bcrypt.genSaltSync();
-    //dbPaciente.password = bcrypt.hashSync(password, numAletorio);
-
-    //Generar el JWT
-    //const token = await generarJWT(dbPaciente.id, dbPaciente.name, dbPaciente.rol);
-    //Crear usuario de base de datos
-
-    const pruebaLab = await PruebaLab.findOneAndUpdate({codPruebaLab:codPrueba},datosActualizados);
+    const pruebaLab = await PruebaLab.findOneAndUpdate(
+      { codPruebaLab: codPrueba },
+      datosActualizados
+    );
 
     if (!pruebaLab) {
       return res.status(404).json({
         ok: false,
-        msg: 'Prueba no encontrada con ese código'
+        msg: "Prueba no encontrada con ese código",
       });
     }
 
-        
     //Generar respuesta exitosa
     return res.status(201).json({
       ok: true,
@@ -177,7 +137,7 @@ const actualizarPrueba = async (req, res = response) => {
       //token: token,
     });
   } catch (error) {
-    console.error("Error al actualizar la prueba: ", error)
+    console.error("Error al actualizar la prueba: ", error);
     return res.status(500).json({
       ok: false,
       msg: "Error al momento de actualizar back end",
@@ -185,10 +145,9 @@ const actualizarPrueba = async (req, res = response) => {
   }
 };
 
-
 module.exports = {
-    crearPruebaLab,
-    mostrarUltimasPruebas,
-    encontrarTermino,
-    actualizarPrueba
-  }
+  crearPruebaLab,
+  mostrarUltimasPruebas,
+  encontrarTermino,
+  actualizarPrueba,
+};

@@ -2,6 +2,7 @@ const { response } = require("express");
 const Usuario = require("../models/Usuario");
 const bcrypt = require("bcryptjs");
 const { generarJWT } = require("../helpers/jwt");
+const RecurHumano = require("../models/RecHumano");
 
 const crearUsuario = async (req, res = response) => {
   // console.log(req.body)
@@ -48,38 +49,54 @@ const crearUsuario = async (req, res = response) => {
 };
 
 const loginUsuario = async (req, res) => {
-  const { email, password } = req.body; //! DESTRUCTURACIÓN
+  const { nombreUsuario, password } = req.body; //! DESTRUCTURACIÓN
   //* const email = req.body.email
   //* const password = req.body.password
   try {
-    //* verificar si es que existe el usuario
-    const dbUser = await Usuario.findOne({ email: email }); //!SELECT WHERE
-    //    console.log(dbUser);
-    if (!dbUser) {
-      return res.status(400).json({
-        ok: false,
-        msg: "Su cuenta no existe",
-      });
+    const usuario = await RecurHumano.findOne({
+      "datosLogueo.nombreUsuario": nombreUsuario,
+    }).populate({
+      path: "datosLogueo.rol",
+      populate: {
+        path: "rutasPermitidas",
+      },
+    });
+
+    const esValido = bcrypt.compareSync(
+      password,
+      usuario.datosLogueo.passwordHash
+    );
+
+    if (!esValido || !usuario) {
+      return res
+        .status(400)
+        .json({ ok: false, msg: "Credenciales incorrectas" });
     }
 
-    //Confirmar si el password hace match con la base de datos, devuelve true o false
-    const validPassword = bcrypt.compareSync(password, dbUser.password);
-    // console.log(!validPassword);
-    //TODO: EXPLICACIÓN
-    if (!validPassword) {
-      return res.status(400).json({
-        ok: false,
-        msg: "Contraseña incorrecta",
-      });
+    if (!usuario.datosLogueo || !usuario.datosLogueo.estado) {
+      return res.status(400).json({ ok: false, msg: "Acceso no autorizado" });
     }
+
+    const rutasPermitidas = usuario.datosLogueo.rol.rutasPermitidas.map(
+      (r) => ({
+        codRuta: r.codRuta,
+        nombreRuta: r.nombreRuta,
+        urlRuta: r.urlRuta,
+        iconoRuta: r.iconoRuta,
+      })
+    );
+
     //Generar el jwt
-    const token = await generarJWT(dbUser.id, dbUser.name, dbUser.rol);
+    const token = await generarJWT(
+      usuario.codRecHumano,
+      usuario.datosLogueo.nombreUsuario,
+      usuario.datosLogueo.rol.nombreRol,
+      rutasPermitidas
+    );
     // console.log('IDUSUARIO'+dbUser.id);
     //Respuesta del servicio
     return res.json({
       ok: true,
-      uid: dbUser.id,
-      name: dbUser.name,
       token, //! token : token
     });
   } catch (error) {

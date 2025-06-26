@@ -50,13 +50,9 @@ router.post(
 //! Login de usuario
 //* /api/auth
 router.post(
-  "/",
+  "/login",
   [
-    check("email")
-      .notEmpty()
-      .withMessage("El email es obligatorio")
-      .isEmail()
-      .withMessage("Email ingresado no cumple con el formato"),
+    check("nombreUsuario").notEmpty().withMessage("El usuario es obligatorio"),
 
     check("password")
       .notEmpty()

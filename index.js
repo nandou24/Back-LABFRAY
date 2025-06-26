@@ -39,10 +39,7 @@ app.use(express.json()); //! Puedo leer archivos JSON
 //RUTAS DE LAS PETICIONES: GET, POST, PUT
 //! Usuario
 //! Familia de rutas
-app.use("/api/auth", require("./routes/auth"));
-
-//! Favorito
-//app.use("/api/favorite", require("./routes/favorite"));
+app.use("/api/auth", require("./routes/authRoute"));
 
 //! Paciente
 app.use("/api/paciente", require("./routes/pacienteRoute"));
@@ -67,6 +64,15 @@ app.use("/api/cotizacion", require("./routes/cotizacionRoute"));
 
 //! Pago
 app.use("/api/pagos", require("./routes/pagoRoute"));
+
+//! Rutas
+app.use("/api/rutas", require("./routes/rutaRoute"));
+
+//! Roles
+app.use("/api/roles", require("./routes/rolRoute"));
+
+//! Roles
+app.use("/api/solicitudAtencion", require("./routes/solicitudAtencionRoute"));
 
 // app.get("*", (req, res) => {
 //   res.sendFile(path.resolve(__dirname, "public/index.html"));
