@@ -7,7 +7,7 @@ const ServicioSolicitudSchema = new mongoose.Schema({
   estado: {
     type: String,
     required: true,
-    enum: ["PENDIENTE", "EN PROCESO", "TERMINADO"],
+    enum: ["PENDIENTE", "EN PROCESO", "TERMINADO", "ANULADO"],
     trim: true,
   },
 });

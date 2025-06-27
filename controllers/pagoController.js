@@ -428,7 +428,17 @@ const anularPago = async (req, res = response) => {
     // Actualizar el estado de las solicitudes asociadas
     await SolicitudAtencion.updateMany(
       { cotizacionId: pago.codCotizacion },
-      { $set: { estado: "ANULADO" } },
+      {
+        $set: { estado: "ANULADO" },
+      },
+      { session }
+    );
+
+    await SolicitudAtencion.updateMany(
+      { cotizacionId: pago.codCotizacion },
+      {
+        $set: { "servicios.$[].estado": "ANULADO" },
+      },
       { session }
     );
 

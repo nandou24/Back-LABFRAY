@@ -110,13 +110,32 @@ exports.actualizarEstado = async (req, res) => {
 // Traer solicitudes por rango de fechas
 const obtenerPorRangoFechas = async (req, res) => {
   try {
-    const { fechaInicio, fechaFin } = req.query;
-    const solicitudes = await SolicitudAtencion.find({
+    const { fechaInicio, fechaFin, terminoBusqueda } = req.query;
+    console.log("Fechas recibidas:", fechaInicio, fechaFin);
+    console.log("Término de búsqueda:", terminoBusqueda);
+
+    const filtro = {
       fechaEmision: {
         $gte: new Date(fechaInicio),
         $lte: new Date(fechaFin),
       },
-    }).sort({ fechaEmision: -1 });
+    };
+
+    if (terminoBusqueda.trim() !== "") {
+      const regex = new RegExp(terminoBusqueda.trim(), "i"); // 'i' = case-insensitive
+      filtro.$or = [
+        { pacienteNombre: regex },
+        { cotizacionId: regex },
+        { nroDocumento: regex },
+      ];
+    }
+
+    const solicitudes = await SolicitudAtencion.find(filtro).sort({
+      fechaEmision: -1,
+    });
+
+    console.log("Solicitudes encontradas:", solicitudes.length);
+
     res.json(solicitudes);
   } catch (error) {
     res.status(400).json({ error: error.message });
