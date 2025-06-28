@@ -49,7 +49,7 @@ const crearPaciente = async (req, res = response) => {
     // Obtener el correlativo
     let correlativo = 1;
     if (ultimoPaciente) {
-      const ultimoCorrelativo = parseInt(ultimoPaciente.hc.slice(7, 13));
+      const ultimoCorrelativo = parseInt(ultimoPaciente.hc.slice(7, 11));
       correlativo = ultimoCorrelativo + 1;
     }
 

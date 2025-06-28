@@ -24,6 +24,16 @@ const generarPagoPersona = async (req, res = response) => {
       codCotizacion,
     }).lean();
 
+    const tieneHC =
+      cotizacionOriginal.historial[cotizacionOriginal.historial.length - 1].hc;
+    if (!tieneHC) {
+      return res.status(404).json({
+        ok: false,
+        msg: "Debe registrar primero al paciente.",
+        errors: { faltaHC: true },
+      });
+    }
+
     // Paso 3: Buscar si el codPago ya existe
     const pagoExistente = await Pago.findOne({ codPago }).lean();
 
@@ -155,6 +165,7 @@ const crearPago = async (datos, session, cotizacionOriginal) => {
           nombreServicio: serv.nombreServicio,
           estado: "PENDIENTE",
         })),
+        hc: ultimoHistorial.hc,
         tipoDocumento: tipoDoc,
         nroDocumento: nroDoc,
         pacienteNombre: nomCliente.toUpperCase(),
@@ -428,7 +439,7 @@ const anularPago = async (req, res = response) => {
     // Actualizar el estado de las solicitudes asociadas
     await SolicitudAtencion.updateMany(
       { cotizacionId: pago.codCotizacion },
-      { $set: { estado: "ANULADO", "servicios.$[].estado": "ANULADO" }},      
+      { $set: { estado: "ANULADO", "servicios.$[].estado": "ANULADO" } },
       { session }
     );
 

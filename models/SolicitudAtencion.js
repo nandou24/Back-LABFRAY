@@ -30,6 +30,7 @@ const SolicitudAtencionSchema = new mongoose.Schema(
       trim: true,
     },
     servicios: { type: [ServicioSolicitudSchema], required: true },
+    hc: { type: String, required: true, trim: true },
     tipoDocumento: {
       type: String,
       required: true,

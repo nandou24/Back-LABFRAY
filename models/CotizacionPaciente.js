@@ -17,6 +17,7 @@ const HistorialSchema = new Schema({
   version: { type: Number, required: true }, // 📌 Control de versiones
   fechaModificacion: { type: Date, default: Date.now }, // 📌 Fecha de la modificación
   estadoRegistroPaciente: { type: Boolean, required: true },
+  hc: { type: String }, // Historia clínica del paciente
   codCliente: { type: String, default: null },
   nomCliente: { type: String },
   tipoDoc: { type: String },
