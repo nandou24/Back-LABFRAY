@@ -394,7 +394,7 @@ const anularPago = async (req, res = response) => {
     }
 
     // Verificar si el pago ya está anulado
-    if (pago.estadoPago === "ANULADO" || pago.estadoPago === "FACTURADO") {
+    if (pago.estadoPago === "ANULADO") {
       return res.status(400).json({
         ok: false,
         msg: "El pago ya fue anulado previamente.",
@@ -428,17 +428,7 @@ const anularPago = async (req, res = response) => {
     // Actualizar el estado de las solicitudes asociadas
     await SolicitudAtencion.updateMany(
       { cotizacionId: pago.codCotizacion },
-      {
-        $set: { estado: "ANULADO" },
-      },
-      { session }
-    );
-
-    await SolicitudAtencion.updateMany(
-      { cotizacionId: pago.codCotizacion },
-      {
-        $set: { "servicios.$[].estado": "ANULADO" },
-      },
+      { $set: { estado: "ANULADO", "servicios.$[].estado": "ANULADO" }},      
       { session }
     );
 
