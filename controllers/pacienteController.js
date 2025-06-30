@@ -3,6 +3,8 @@ const Paciente = require("../models/Paciente");
 const bcrypt = require("bcryptjs");
 const { generarJWT } = require("../helpers/jwt");
 const jwt = require("jsonwebtoken");
+const Cotizacion = require("../models/CotizacionPaciente");
+const mongoose = require("mongoose");
 
 const crearPaciente = async (req, res = response) => {
   //debemos generar un número de historia clínica año-mes-correlativo-inicial de ape pater - inicial ape mat
@@ -321,6 +323,109 @@ const actualizarPaciente = async (req, res = response) => {
   }
 };
 
+const registrarPacienteSinnHC = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    session.startTransaction();
+
+    const tipoDoc = req.body.tipoDoc;
+    const nroDoc = req.body.nroDoc;
+    const apePatCliente = req.body.apePatCliente || "";
+    const apeMatCliente = req.body.apeMatCliente || "";
+    const nombreCliente = req.body.nombreCliente || ""; // Asegurarse de que no sea undefined
+
+    const paciente = await Paciente.findOne({ tipoDoc, nroDoc });
+
+    if (paciente) {
+      return res.status(400).json({
+        ok: false,
+        msg: "Ya existe un usuario con ese documento de identidad",
+      });
+    }
+
+    //Para crear HC
+    const fecha = new Date();
+    const anio = fecha.getFullYear();
+    const mes = (fecha.getMonth() + 1).toString().padStart(2, "0");
+
+    //creando codigo HC
+    // Buscar el último paciente creado en el año actual
+    const ultimoPaciente = await Paciente.findOne({
+      hc: new RegExp(`^${anio}${mes}`),
+    }).sort({ hc: -1 });
+
+    // Obtener el correlativo
+    let correlativo = 1;
+    if (ultimoPaciente) {
+      const ultimoCorrelativo = parseInt(ultimoPaciente.hc.slice(7, 11));
+      correlativo = ultimoCorrelativo + 1;
+    }
+
+    // Correlativo con seis dígitos, maximo 999 999
+    const correlativoStr = correlativo.toString().padStart(4, "0");
+
+    // Generar las iniciales de los apellidos
+    const inicialApePat = apePatCliente.charAt(0).toUpperCase();
+    const inicialApeMat = apeMatCliente.charAt(0).toUpperCase();
+
+    // Crear el número de historia clínica sin guiones
+    const historiaClinica = `${anio}${mes}-${correlativoStr}${inicialApePat}${inicialApeMat}`;
+
+    const nuevoPaciente = new Paciente({
+      ...req.body,
+      hc: historiaClinica, // Agregar el número de historia clínica generado
+    });
+
+    await nuevoPaciente.save({ session });
+
+    // Obtener el código de cotización desde el body o req
+    const codCotizacion = req.body.codCotizacion;
+
+    // Buscar la cotización y actualizar el último historial
+    const cotizacion = await Cotizacion.findOne({ codCotizacion }).session(
+      session
+    );
+
+    if (!cotizacion) {
+      throw new Error("Cotización no encontrada");
+    }
+
+    if (!cotizacion.historial || cotizacion.historial.length === 0) {
+      throw new Error("La cotización no tiene historial");
+    }
+
+    // Obtener el índice del último historial
+    const lastIndex = cotizacion.historial.length - 1;
+
+    // Actualizar la hc en el último historial
+    cotizacion.historial[lastIndex].hc = historiaClinica;
+    cotizacion.historial[lastIndex].tipoDoc = tipoDoc;
+    cotizacion.historial[lastIndex].nroDoc = nroDoc;
+    cotizacion.historial[lastIndex].nombreCompleto =
+      apePatCliente + " " + apeMatCliente + " " + nombreCliente;
+
+    // No es necesario crear una nueva cotización, solo actualizar la existente
+    // Ya se actualizó el campo hc en el historial correspondiente arriba
+    // Guardar la cotización actualizada
+    await cotizacion.save({ session }); //actualizará porq viene después de un cotizacion.findone
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.json({
+      ok: true,
+      msg: "Paciente registrado y cotización actualizada.",
+      hc: historiaClinica,
+      paciente: nuevoPaciente,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
+  }
+};
+
 module.exports = {
   crearPaciente,
   mostrarUltimosPacientes,
@@ -328,4 +433,5 @@ module.exports = {
   actualizarPaciente,
   encontrarTerminoCotizaicon,
   mostrarUltimosPacientesCotizacion,
+  registrarPacienteSinnHC,
 };

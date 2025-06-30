@@ -1,9 +1,16 @@
-const { Router } = require('express');
-const { check } = require('express-validator');
-const { crearCotizacion, mostrarUltimasCotizaciones, encontrarTermino, mostrarUltimasCotizacionesPorPagar,
-    crearNuevaVersionCotiPersona, mostrarUltimasCotizacionesPagadas} = require('../controllers/cotizacionController');
-const { validarCampos } = require('../middlewares/validar-campo');
-const { validarJWT } = require('../middlewares/validar-token');
+const { Router } = require("express");
+const { check } = require("express-validator");
+const {
+  crearCotizacion,
+  mostrarUltimasCotizaciones,
+  encontrarTermino,
+  mostrarUltimasCotizacionesPorPagar,
+  crearNuevaVersionCotiPersona,
+  mostrarUltimasCotizacionesPagadas,
+  verificarHcRegistrada,
+} = require("../controllers/cotizacionController");
+const { validarCampos } = require("../middlewares/validar-campo");
+const { validarJWT } = require("../middlewares/validar-token");
 
 //Rutas
 const router = Router();
@@ -13,10 +20,10 @@ const router = Router();
 //!Estructura: URL --> VALIDACIONES --> CONTROLADOR --> RESPUESTA
 
 //! crear un nueva cotizacion
-router.post('/newCotizacionPersona', [
-    
+router.post(
+  "/newCotizacionPersona",
+  [
     //validarJWT,
-     
     /*
     check('tipoServicio')
     .notEmpty().withMessage('Tipo de servicio es obligatorio'),
@@ -31,14 +38,15 @@ router.post('/newCotizacionPersona', [
     .notEmpty().withMessage('Estado del servicio es obligatorio'), 
     
     validarCampos*/
-
-], crearCotizacion);
+  ],
+  crearCotizacion
+);
 
 //! crear un nuevo version
-router.post('/newVersionCotizacionPersona', [
-    
+router.post(
+  "/newVersionCotizacionPersona",
+  [
     //validarJWT,
-     
     /*
     check('tipoServicio')
     .notEmpty().withMessage('Tipo de servicio es obligatorio'),
@@ -53,35 +61,59 @@ router.post('/newVersionCotizacionPersona', [
     .notEmpty().withMessage('Estado del servicio es obligatorio'), 
     
     validarCampos*/
-
-], crearNuevaVersionCotiPersona);
-
+  ],
+  crearNuevaVersionCotiPersona
+);
 
 //POST
 //! Listar últimas cotizaciones
-router.get('/latest', [
+router.get(
+  "/latest",
+  [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
-], mostrarUltimasCotizaciones);
+  ],
+  mostrarUltimasCotizaciones
+);
 
 //! Listar últimas cotizaciones por pagar
-router.get('/latestPorPagar', [
+router.get(
+  "/latestPorPagar",
+  [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
-], mostrarUltimasCotizacionesPorPagar);
+  ],
+  mostrarUltimasCotizacionesPorPagar
+);
 
 //! Listar últimas cotizaciones pagadas
-router.get('/latestPagadas', [
+router.get(
+  "/latestPagadas",
+  [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
-], mostrarUltimasCotizacionesPagadas);
+  ],
+  mostrarUltimasCotizacionesPagadas
+);
 
-//POST
 //! Buscar servicio
-router.get('/findTerm', [
+router.get(
+  "/findTerm",
+  [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
-], encontrarTermino);
+  ],
+  encontrarTermino
+);
 
+//GET
+router.get(
+  "/findHC",
+  [
+    //check('token')
+    //.notEmpty().withMessage('Es token es obligatorio'),
+  ],
+  verificarHcRegistrada
+);
 
 module.exports = router;

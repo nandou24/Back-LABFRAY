@@ -13,7 +13,7 @@ const crearSolicitud = async (req, res) => {
       hc,
       tipoDocumento,
       nroDocumento,
-      pacienteNombre,
+      nombreCompleto,
       codUsuarioEmisor,
       usuarioEmisor,
     } = req.body;
@@ -43,7 +43,7 @@ const crearSolicitud = async (req, res) => {
       hc: hc,
       tipoDocumento: tipoDocumento,
       nroDocumento: nroDocumento,
-      pacienteNombre: pacienteNombre.toUpperCase(),
+      nombreCompleto: nombreCompleto.toUpperCase(),
       fechaEmision: new Date(),
       codUsuarioEmisor: codUsuarioEmisor,
       usuarioEmisor: usuarioEmisor,

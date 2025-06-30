@@ -26,9 +26,10 @@ const ServiciosSchema = new mongoose.Schema({
 const PagoSchema = new Schema({
   codPago: { type: String, unique: true },
   codCotizacion: { type: String },
+  fechaCotizacion: { type: Date },
   version: { type: String },
-  codCliente: { type: String },
-  nomCliente: { type: String },
+  hc: { type: String },
+  nombreCompleto: { type: String },
   tipoDoc: { type: String },
   nroDoc: { type: String },
   codSolicitante: { type: String },

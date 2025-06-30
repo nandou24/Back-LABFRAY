@@ -24,16 +24,6 @@ const generarPagoPersona = async (req, res = response) => {
       codCotizacion,
     }).lean();
 
-    const tieneHC =
-      cotizacionOriginal.historial[cotizacionOriginal.historial.length - 1].hc;
-    if (!tieneHC) {
-      return res.status(404).json({
-        ok: false,
-        msg: "Debe registrar primero al paciente.",
-        errors: { faltaHC: true },
-      });
-    }
-
     // Paso 3: Buscar si el codPago ya existe
     const pagoExistente = await Pago.findOne({ codPago }).lean();
 
@@ -78,7 +68,7 @@ const crearPago = async (datos, session, cotizacionOriginal) => {
     serviciosCotizacion,
     tipoDoc,
     nroDoc,
-    nomCliente,
+    nombreCompleto,
   } = datos;
 
   console.log("Datos recibidos para crear pago:", cotizacionOriginal);
@@ -168,7 +158,7 @@ const crearPago = async (datos, session, cotizacionOriginal) => {
         hc: ultimoHistorial.hc,
         tipoDocumento: tipoDoc,
         nroDocumento: nroDoc,
-        pacienteNombre: nomCliente.toUpperCase(),
+        nombreCompleto: nombreCompleto.toUpperCase(),
         fechaEmision: new Date(),
         codUsuarioEmisor: "codigoUsuarioEmisor",
         usuarioEmisor: "usuarioEmisor",
@@ -320,7 +310,7 @@ const encontrarTermino = async (req, res = response) => {
       historial: {
         $elemMatch: {
           $or: [
-            { nomCliente: { $regex: termino, $options: "i" } }, // Nombre del cliente
+            { pacienteNombreCompleto: { $regex: termino, $options: "i" } }, // Nombre del cliente
             { nroDoc: { $regex: termino, $options: "i" } }, // Número de documento
           ],
         },

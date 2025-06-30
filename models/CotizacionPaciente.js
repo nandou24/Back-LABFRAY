@@ -18,10 +18,13 @@ const HistorialSchema = new Schema({
   fechaModificacion: { type: Date, default: Date.now }, // 📌 Fecha de la modificación
   estadoRegistroPaciente: { type: Boolean, required: true },
   hc: { type: String }, // Historia clínica del paciente
-  codCliente: { type: String, default: null },
-  nomCliente: { type: String },
-  tipoDoc: { type: String },
-  nroDoc: { type: String },
+  tipoDoc: { type: String, required: true },
+  nroDoc: { type: String, required: true },
+  nombreCompleto: {
+    type: String,
+    required: true,
+    set: (value) => value.toUpperCase(),
+  },
   estadoRegistroSolicitante: { type: Boolean, required: true },
   codSolicitante: { type: String },
   nomSolicitante: { type: String },

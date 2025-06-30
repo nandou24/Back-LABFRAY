@@ -38,7 +38,7 @@ const SolicitudAtencionSchema = new mongoose.Schema(
       trim: true,
     },
     nroDocumento: { type: String, required: true, trim: true },
-    pacienteNombre: {
+    nombreCompleto: {
       type: String,
       required: true,
       set: (value) => value.toUpperCase(),

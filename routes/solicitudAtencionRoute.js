@@ -26,7 +26,7 @@ router.post(
     check("nroDocumento")
       .notEmpty()
       .withMessage("El número de documento es obligatorio"),
-    check("pacienteNombre")
+    check("nombreCompleto")
       .notEmpty()
       .withMessage("El nombre del paciente es obligatorio"),
     check("codUsuarioEmisor")

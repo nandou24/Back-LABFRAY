@@ -291,11 +291,6 @@ const crearNuevaVersionCotiPersona = async (req, res = response) => {
         );
       }
 
-      //console.log(JSON.stringify(obj1Clonado) === JSON.stringify(obj2Clonado))
-      //console.log(JSON.stringify(obj1Clonado.serviciosCotizacion) === JSON.stringify(obj2Clonado.serviciosCotizacion))
-      // console.log("obj1",obj1Clonado)
-      // console.log("obj2",obj2Clonado)
-
       return JSON.stringify(obj1Clonado) === JSON.stringify(obj2Clonado);
     };
 
@@ -311,7 +306,10 @@ const crearNuevaVersionCotiPersona = async (req, res = response) => {
       { codCotizacion },
       {
         $push: { historial: nuevaVersion }, // 📌 Agregar nueva versión al historial
-        $set: { estadoCotizacion: estadoCotizacion || "MODIFICADA" }, // 📌 Actualizar estado
+        $set: {
+          estadoCotizacion: estadoCotizacion || "MODIFICADA",
+          fechaModificacion: nuevaVersion.fechaModificacion,
+        }, // 📌 Actualizar estado
       }
     );
 
@@ -333,6 +331,43 @@ const crearNuevaVersionCotiPersona = async (req, res = response) => {
   }
 };
 
+const verificarHcRegistrada = async (req, res = response) => {
+  try {
+    const { codCotizacion } = req.query;
+
+    const cotizacion = await Cotizacion.findOne({ codCotizacion }).lean();
+
+    if (!cotizacion) {
+      return res.status(404).json({
+        ok: false,
+        msg: "Cotización no encontrada.",
+      });
+    }
+
+    // Se asume que la propiedad 'hc' está en el objeto cotización o en la última versión del historial
+    let hcRegistrada = false;
+
+    if (
+      cotizacion.historial &&
+      cotizacion.historial.length > 0 &&
+      cotizacion.historial[cotizacion.historial.length - 1].hc
+    ) {
+      hcRegistrada = true;
+    }
+
+    return res.json({
+      ok: true,
+      hcRegistrada,
+    });
+  } catch (error) {
+    console.error("Error al verificar HC registrada:", error);
+    return res.status(500).json({
+      ok: false,
+      msg: "Error al verificar HC registrada.",
+    });
+  }
+};
+
 module.exports = {
   crearCotizacion,
   mostrarUltimasCotizaciones,
@@ -340,4 +375,5 @@ module.exports = {
   crearNuevaVersionCotiPersona,
   mostrarUltimasCotizacionesPorPagar,
   mostrarUltimasCotizacionesPagadas,
+  verificarHcRegistrada,
 };
