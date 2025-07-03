@@ -1,7 +1,7 @@
 const { response } = require("express");
-const ItemLab = require("../models/ItemLab");
+const ItemLab = require("../../models/ItemLab");
 const bcrypt = require("bcryptjs");
-const { generarJWT } = require("../helpers/jwt");
+const { generarJWT } = require("../../helpers/jwt");
 const jwt = require("jsonwebtoken");
 
 const crearItemLab = async (req, res = response) => {

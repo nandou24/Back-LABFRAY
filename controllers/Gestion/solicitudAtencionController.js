@@ -1,4 +1,4 @@
-const SolicitudAtencion = require("../models/SolicitudAtencion");
+const SolicitudAtencion = require("../../models/SolicitudAtencion");
 const { response } = require("express");
 //const moment = require("moment");
 

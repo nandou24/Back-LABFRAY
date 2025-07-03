@@ -1,7 +1,7 @@
 const { response } = require("express");
-const RecurHumano = require("../models/RecHumano");
+const RecurHumano = require("../../models/RecHumano");
 const bcrypt = require("bcryptjs");
-const { generarJWT } = require("../helpers/jwt");
+const { generarJWT } = require("../../helpers/jwt");
 const jwt = require("jsonwebtoken");
 
 const crearRecursoHumano = async (req, res = response) => {
@@ -173,6 +173,81 @@ const obtenerSolicitantes = async (req, res = response) => {
   }
 };
 
+const obtenerProfesionalesConsultas = async (req, res = response) => {
+  try {
+    const { profesion, especialidad } = req.query;
+
+    // Validación: debe llegar al menos uno
+    if (!profesion && !especialidad) {
+      return res.status(400).json({
+        ok: false,
+        msg: "Debe proporcionar al menos 'profesion' o 'especialidad' como parámetro.",
+      });
+    }
+
+    const filtro = {
+      atiendeConsultas: true,
+      profesionesRecurso: {
+        $elemMatch: especialidad
+          ? { "especialidades.nombreEspecialidad": especialidad }
+          : {
+              profesion: profesion,
+              $or: [
+                { especialidades: { $exists: false } },
+                { especialidades: { $size: 0 } },
+              ],
+            },
+      },
+    };
+
+    const medicos = await RecurHumano.find(filtro, {
+      codRecHumano: 1,
+      nombreRecHumano: 1,
+      apePatRecHumano: 1,
+      apeMatRecHumano: 1,
+      profesionesRecurso: 1,
+    });
+
+    const resultado = medicos.map((medico) => {
+      // Tomar la profesión principal
+      const profesion = medico.profesionesRecurso.find((prof) => {
+        if (especialidad) {
+          return prof.especialidades?.some(
+            (esp) => esp.nombreEspecialidad === especialidad
+          );
+        } else {
+          return prof.profesion === profesion;
+        }
+      });
+
+      const especialidadEncontrada = profesion?.especialidades?.find(
+        (esp) => esp.nombreEspecialidad === especialidad
+      );
+
+      return {
+        _id: medico._id,
+        codRecHumano: medico.codRecHumano,
+        nombreCompletoPersonal: `${medico.nombreRecHumano} ${medico.apePatRecHumano} ${medico.apeMatRecHumano}`,
+        nroColegiatura: profesion?.nroColegiatura || "",
+        colegiatura: profesion?.nroColegiatura || "",
+        especialidad: especialidadEncontrada?.nombreEspecialidad || null,
+        rne: especialidadEncontrada?.rne || null,
+      };
+    });
+
+    return res.status(200).json({
+      ok: true,
+      recHumanos: resultado,
+    });
+  } catch (error) {
+    console.error("Error al obtener los solicitantes:", error);
+    res.status(500).json({
+      ok: false,
+      msg: "Error al obtener los solicitantes",
+    });
+  }
+};
+
 const encontrarTermino = async (req, res = response) => {
   const termino = req.query.search;
 
@@ -297,13 +372,6 @@ const encontrarTerminoSolicitante = async (req, res = response) => {
 const actualizarRecursoHumano = async (req, res = response) => {
   const codigo = req.params.codRecHumano; //recupera la hc
   const datosActualizados = req.body; //recupera los datos a grabar
-  delete datosActualizados._id; //quita los _id generados por el mongo y que no se pueden modificar
-  delete datosActualizados.phones._id;
-  delete datosActualizados.profesionesRecurso._id;
-  delete datosActualizados.especialidadesRecurso._id;
-  if (datosActualizados.profesionSolicitante) {
-    delete datosActualizados.profesionSolicitante._id;
-  }
 
   try {
     // Solo encripta si el campo passwordHash viene con datos nuevos
@@ -320,7 +388,7 @@ const actualizarRecursoHumano = async (req, res = response) => {
 
     const recHumano = await RecurHumano.findOneAndUpdate(
       { codRecHumano: codigo },
-      datosActualizados
+      { $set: datosActualizados }
     );
     console.log(recHumano);
 
@@ -351,4 +419,5 @@ module.exports = {
   actualizarRecursoHumano,
   obtenerSolicitantes,
   encontrarTerminoSolicitante,
+  obtenerProfesionalesConsultas,
 };

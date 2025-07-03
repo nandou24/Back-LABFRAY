@@ -6,8 +6,8 @@ const {
   eliminarRuta,
   listarRutas,
   buscarRuta,
-} = require("../controllers/rutaController");
-const { validarCampos } = require("../middlewares/validar-campo");
+} = require("../../controllers/Mantenimiento/rutaController");
+const { validarCampos } = require("../../middlewares/validar-campo");
 
 const router = Router();
 

@@ -1,4 +1,4 @@
-const Rol = require("../models/permisos/roles");
+const Rol = require("../../models/permisos/roles");
 
 // Crear un nuevo rol con código autogenerado tipo ROL001
 const crearRol = async (req, res) => {

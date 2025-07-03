@@ -2,11 +2,9 @@ const { Router } = require("express");
 const { check } = require("express-validator");
 const {
   crearSolicitud,
-  actualizarRol,
-  eliminarRol,
   obtenerPorRangoFechas,
-} = require("../controllers/solicitudAtencionController");
-const { validarCampos } = require("../middlewares/validar-campo");
+} = require("../../controllers/Gestion/solicitudAtencionController");
+const { validarCampos } = require("../../middlewares/validar-campo");
 
 const router = Router();
 

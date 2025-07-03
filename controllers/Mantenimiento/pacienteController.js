@@ -1,9 +1,9 @@
 const { response } = require("express");
-const Paciente = require("../models/Paciente");
+const Paciente = require("../../models/Paciente");
 const bcrypt = require("bcryptjs");
-const { generarJWT } = require("../helpers/jwt");
+const { generarJWT } = require("../../helpers/jwt");
 const jwt = require("jsonwebtoken");
-const Cotizacion = require("../models/CotizacionPaciente");
+const Cotizacion = require("../../models/CotizacionPaciente");
 const mongoose = require("mongoose");
 
 const crearPaciente = async (req, res = response) => {
@@ -294,13 +294,26 @@ const encontrarTerminoCotizaicon = async (req, res = response) => {
 const actualizarPaciente = async (req, res = response) => {
   const idNroHC = req.params.nroHC; //recupera la hc
   const datosActualizados = req.body; //recupera los datos a grabar
-  delete datosActualizados._id; //quita los _id generados por el mongo y que no se pueden modificar
-  delete datosActualizados.phones._id;
+
+  const tipoDoc = datosActualizados.tipoDoc;
+  const nroDoc = datosActualizados.nroDoc;
+
+  const existePaciente = await Paciente.findOne({
+    tipoDoc,
+    nroDoc,
+    hc: { $ne: idNroHC },
+  });
+  if (existePaciente) {
+    return res.status(400).json({
+      ok: false,
+      msg: "Ya existe un paciente con ese documento",
+    });
+  }
 
   try {
     const paciente = await Paciente.findOneAndUpdate(
       { hc: idNroHC },
-      datosActualizados
+      { $set: datosActualizados }
     );
 
     if (!paciente) {

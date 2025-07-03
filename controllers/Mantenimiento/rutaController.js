@@ -1,4 +1,4 @@
-const Ruta = require("../models/permisos/rutas");
+const Ruta = require("../../models/permisos/rutas");
 
 // Crear una nueva ruta
 const crearRuta = async (req, res) => {

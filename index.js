@@ -42,37 +42,46 @@ app.use(express.json()); //! Puedo leer archivos JSON
 app.use("/api/auth", require("./routes/authRoute"));
 
 //! Paciente
-app.use("/api/paciente", require("./routes/pacienteRoute"));
+app.use("/api/paciente", require("./routes/Mantenimiento/pacienteRoute"));
 
 //! Prueba Lab
-app.use("/api/pruebaLab", require("./routes/pruebaLabRoute"));
+app.use("/api/pruebaLab", require("./routes/Mantenimiento/pruebaLabRoute"));
 
 //! Item Lab
-app.use("/api/itemLab", require("./routes/itemLabRoute"));
+app.use("/api/itemLab", require("./routes/Mantenimiento/itemLabRoute"));
 
 //! Servicio
-app.use("/api/servicio", require("./routes/servicioRoute"));
+app.use("/api/servicio", require("./routes/Mantenimiento/servicioRoute"));
 
 //! Rec Humano
-app.use("/api/recursoHumano", require("./routes/recHumanoRoute"));
+app.use("/api/recursoHumano", require("./routes/Mantenimiento/recHumanoRoute"));
 
 //! Referencia Medico
-app.use("/api/referenciaMedico", require("./routes/refMedicoRoute"));
+app.use(
+  "/api/referenciaMedico",
+  require("./routes/Mantenimiento/refMedicoRoute")
+);
 
 //! Cotizacion
-app.use("/api/cotizacion", require("./routes/cotizacionRoute"));
+app.use("/api/cotizacion", require("./routes/Gestion/cotizacionRoute"));
 
 //! Pago
-app.use("/api/pagos", require("./routes/pagoRoute"));
+app.use("/api/pagos", require("./routes/Gestion/pagoRoute"));
 
 //! Rutas
-app.use("/api/rutas", require("./routes/rutaRoute"));
+app.use("/api/rutas", require("./routes/Mantenimiento/rutaRoute"));
 
 //! Roles
-app.use("/api/roles", require("./routes/rolRoute"));
+app.use("/api/roles", require("./routes/Mantenimiento/rolRoute"));
 
-//! Roles
-app.use("/api/solicitudAtencion", require("./routes/solicitudAtencionRoute"));
+//! Solicitud de Atención
+app.use(
+  "/api/solicitudAtencion",
+  require("./routes/Gestion/solicitudAtencionRoute")
+);
+
+//! Profesiones
+app.use("/api/profesion", require("./routes/Mantenimiento/profesionRoute"));
 
 // app.get("*", (req, res) => {
 //   res.sendFile(path.resolve(__dirname, "public/index.html"));

@@ -8,9 +8,9 @@ const {
   encontrarTerminoCotizaicon,
   mostrarUltimosPacientesCotizacion,
   registrarPacienteSinnHC,
-} = require("../controllers/pacienteController");
-const { validarCampos } = require("../middlewares/validar-campo");
-const { validarJWT } = require("../middlewares/validar-token");
+} = require("../../controllers/Mantenimiento/pacienteController");
+const { validarCampos } = require("../../middlewares/validar-campo");
+const { validarJWT } = require("../../middlewares/validar-token");
 
 //Rutas
 const router = Router();

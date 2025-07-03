@@ -8,9 +8,9 @@ const {
   crearNuevaVersionCotiPersona,
   mostrarUltimasCotizacionesPagadas,
   verificarHcRegistrada,
-} = require("../controllers/cotizacionController");
-const { validarCampos } = require("../middlewares/validar-campo");
-const { validarJWT } = require("../middlewares/validar-token");
+} = require("../../controllers/Gestion/cotizacionController");
+const { validarCampos } = require("../../middlewares/validar-campo");
+const { validarJWT } = require("../../middlewares/validar-token");
 
 //Rutas
 const router = Router();

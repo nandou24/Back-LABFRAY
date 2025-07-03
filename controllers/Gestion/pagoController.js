@@ -1,10 +1,12 @@
 const { response } = require("express");
-const { generarCodigoSolicitud } = require("./solicitudAtencionController");
-const Pago = require("../models/PagoPaciente");
-const Cotizacion = require("../models/CotizacionPaciente");
-const SolicitudAtencion = require("../models/SolicitudAtencion");
+const {
+  generarCodigoSolicitud,
+} = require("../Gestion/solicitudAtencionController");
+const Pago = require("../../models/PagoPaciente");
+const Cotizacion = require("../../models/CotizacionPaciente");
+const SolicitudAtencion = require("../../models/SolicitudAtencion");
 const mongoose = require("mongoose");
-const { validarEntradaPago } = require("../utils/pagos/validacionesPago");
+const { validarEntradaPago } = require("../../utils/pagos/validacionesPago");
 
 const generarPagoPersona = async (req, res = response) => {
   const session = await mongoose.startSession();

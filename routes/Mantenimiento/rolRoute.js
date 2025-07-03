@@ -6,8 +6,8 @@ const {
   eliminarRol,
   listarRoles,
   buscarRol,
-} = require("../controllers/rolController");
-const { validarCampos } = require("../middlewares/validar-campo");
+} = require("../../controllers/Mantenimiento/rolController");
+const { validarCampos } = require("../../middlewares/validar-campo");
 
 const router = Router();
 

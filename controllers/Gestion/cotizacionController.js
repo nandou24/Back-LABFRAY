@@ -1,5 +1,5 @@
 const { response } = require("express");
-const Cotizacion = require("../models/CotizacionPaciente");
+const Cotizacion = require("../../models/CotizacionPaciente");
 
 const crearCotizacion = async (req, res = response) => {
   try {

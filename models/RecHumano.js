@@ -6,26 +6,22 @@ const telefonoSchema = new mongoose.Schema({
   descriptionPhone: { type: String, required: true },
 });
 
-const profesionSolicitanteSchema = new mongoose.Schema({
-  profesion: { type: String },
-  nroColegiatura: { type: String },
+const especialidadesSchema = new mongoose.Schema({
+  nombreEspecialidad: { type: String, required: true },
+  rne: { type: String, required: true },
+  centroEstudiosEspecialidad: { type: String },
+  anioEgresoEspecialidad: { type: String },
 });
 
 const profesionesSchema = new mongoose.Schema({
   nivelProfesion: { type: String, required: true },
-  titulo: { type: String },
+  titulo: { type: Boolean, default: false },
   profesion: { type: String, required: true },
   nroColegiatura: { type: String },
   centroEstudiosProfesion: { type: String },
   anioEgresoProfesion: { type: String },
-  profesionSolicitante: { type: String },
-});
-
-const especialidadesSchema = new mongoose.Schema({
-  especialidad: { type: String, required: true },
-  rne: { type: String, required: true },
-  centroEstudiosEspecialidad: { type: String },
-  anioEgresoEspecialidad: { type: String },
+  profesionSolicitante: { type: Boolean, default: false },
+  especialidades: [especialidadesSchema],
 });
 
 const RecursoHumanoSchema = Schema(
@@ -52,10 +48,9 @@ const RecursoHumanoSchema = Schema(
     direcRecHumano: { type: String },
     mailRecHumano: { type: String },
     phones: [telefonoSchema],
+    atiendeConsultas: { type: Boolean, default: false },
     gradoInstruccion: { type: String },
     profesionesRecurso: [profesionesSchema],
-    profesionSolicitante: profesionSolicitanteSchema,
-    especialidadesRecurso: [especialidadesSchema],
     usuarioSistema: { type: Boolean },
     datosLogueo: {
       nombreUsuario: { type: String, required: true },
