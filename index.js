@@ -83,6 +83,12 @@ app.use(
 //! Profesiones
 app.use("/api/profesion", require("./routes/Mantenimiento/profesionRoute"));
 
+//! Especialidades
+app.use(
+  "/api/especialidad",
+  require("./routes/Mantenimiento/especialidadRoute")
+);
+
 // app.get("*", (req, res) => {
 //   res.sendFile(path.resolve(__dirname, "public/index.html"));
 // });

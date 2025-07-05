@@ -109,7 +109,7 @@ const eliminarProfesion = async (req, res) => {
         .status(404)
         .json({ ok: false, msg: "Profesión no encontrada" });
     }
-    res.json({ ok: true, msg: "RuProfesiónta eliminada" });
+    res.json({ ok: true, msg: "Profesión eliminada" });
   } catch (error) {
     res
       .status(500)
