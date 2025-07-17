@@ -103,7 +103,7 @@ router.get(
 );
 
 //POST
-//! Actualizar Paciente
+//! Actualizar recurso humano
 router.put(
   "/:codRecHumano/updateRecHumano",
   [
