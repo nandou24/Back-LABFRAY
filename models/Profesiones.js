@@ -1,16 +1,6 @@
 const mongoose = require("mongoose");
 const { Schema } = require("mongoose");
 
-// const especialidadesSchema = new mongoose.Schema({
-//   codEspecialidad: { type: Number, required: true, unique: true },
-//   nombreEspecialidad: {
-//     type: String,
-//     unique: true,
-//     required: true,
-//     set: (value) => value.toUpperCase(),
-//   },
-// });
-
 const ProfesionSchema = Schema(
   {
     codProfesion: { type: String, required: true, unique: true },

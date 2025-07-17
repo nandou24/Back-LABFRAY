@@ -2,17 +2,11 @@ const { response } = require("express");
 const Profesion = require("../../models/Profesiones");
 
 const crearProfesion = async (req, res = response) => {
-  //debemos generar un número de historia clínica año-mes-correlativo-inicial de ape pater - inicial ape mat
   const profesion = req.body;
-
   const nombreProfesion = profesion.nombreProfesion.toUpperCase();
-  //   //Para crear HC
-  //   const fecha = new Date();
-  //   const anio = fecha.getFullYear();
-  //   const mes = (fecha.getMonth() + 1).toString().padStart(2, "0");
 
   try {
-    // verificar el email si es que existe
+    // verificar si ya existe una profesión con ese nombre
     const profesionBuscada = await Profesion.findOne({ nombreProfesion });
 
     if (profesionBuscada) {
@@ -23,7 +17,7 @@ const crearProfesion = async (req, res = response) => {
     }
 
     //creando codigo
-    // Buscar el último recursoHumano creado
+    // Buscar el última profesión creado
     const ultimaProfesion = await Profesion.findOne({}, { codProfesion: 1 })
       .sort({ codProfesion: -1 })
       .lean();
@@ -36,23 +30,17 @@ const crearProfesion = async (req, res = response) => {
       correlativo = ultimoCorrelativo + 1;
     }
 
-    // Crear el número de historia clínica sin guiones
     const codigo = `${String(correlativo).padStart(3, "0")}`;
 
-    // Crear el paciente con el número de historia clínica
-    // Crear usuario con el modelo
     const nuevaProfesion = new Profesion({
       ...profesion,
       codProfesion: codigo, // Agregar el código generado
     });
 
     await nuevaProfesion.save();
-    // console.log(dbUser, "pasoo registro");
     //Generar respuesta exitosa
     return res.status(201).json({
       ok: true,
-      //uid: nuevaProfesion.id,
-      //token: token,
     });
   } catch (error) {
     console.error("❌ Error al registrar la profesión:", error);
@@ -69,7 +57,6 @@ const actualizarProfesion = async (req, res) => {
 
     const datosActualizados = req.body;
 
-    // Verificar si otra ruta ya tiene esa url
     const existeProfesion = await Profesion.findOne({
       nombreProfesion,
       codProfesion: { $ne: codProfesion },
@@ -99,7 +86,6 @@ const actualizarProfesion = async (req, res) => {
   }
 };
 
-// Eliminar una ruta
 const eliminarProfesion = async (req, res) => {
   try {
     const { codProfesion } = req.params;
@@ -117,7 +103,6 @@ const eliminarProfesion = async (req, res) => {
   }
 };
 
-// Listar todas las profeisiones
 const listarProfesion = async (req, res) => {
   try {
     const profesiones = await Profesion.find();

@@ -7,16 +7,26 @@ const telefonoSchema = new mongoose.Schema({
 });
 
 const especialidadesSchema = new mongoose.Schema({
-  nombreEspecialidad: { type: String, required: true },
+  especialidadRef: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    ref: "especialidadesCollection", // Referencia a la colección de profesiones
+  },
+  //nombreEspecialidad: { type: String, required: true },
   rne: { type: String, required: true },
   centroEstudiosEspecialidad: { type: String },
   anioEgresoEspecialidad: { type: String },
 });
 
 const profesionesSchema = new mongoose.Schema({
+  profesionRef: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    ref: "profesionesCollection", // Referencia a la colección de profesiones
+  },
   nivelProfesion: { type: String, required: true },
   titulo: { type: Boolean, default: false },
-  profesion: { type: String, required: true },
+  //profesion: { type: String, required: true },
   nroColegiatura: { type: String },
   centroEstudiosProfesion: { type: String },
   anioEgresoProfesion: { type: String },
@@ -53,13 +63,12 @@ const RecursoHumanoSchema = Schema(
     profesionesRecurso: [profesionesSchema],
     usuarioSistema: { type: Boolean },
     datosLogueo: {
-      nombreUsuario: { type: String, required: true },
+      nombreUsuario: { type: String },
       correoLogin: { type: String },
-      passwordHash: { type: String, required: true },
+      passwordHash: { type: String },
       rol: {
         type: Schema.Types.ObjectId,
         ref: "rolCollection",
-        required: true,
       }, // rol del usuario
       sedeAsignada: { type: String },
       estado: { type: Boolean }, // activo o no para el sistema
