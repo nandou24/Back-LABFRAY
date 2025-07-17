@@ -106,7 +106,6 @@ const actualizarEspecialidad = async (req, res) => {
         .status(404)
         .json({ ok: false, msg: "Código de especialidad no encontrado" });
     }
-
     res.json({ ok: true, especialidad: actualizada });
   } catch (error) {
     res
@@ -120,13 +119,11 @@ const eliminarEspecialidad = async (req, res) => {
   try {
     const { codEspecialidad } = req.params;
     const eliminada = await Especialidad.findOneAndDelete({ codEspecialidad });
-
     if (!eliminada) {
       return res
         .status(404)
         .json({ ok: false, msg: "Especialidad no encontrada" });
     }
-
     res.json({ ok: true, msg: "Especialidad eliminada" });
   } catch (error) {
     res
