@@ -7,6 +7,16 @@ const examenesSchema = new mongoose.Schema({
   tipoExamen: { type: String, required: false },
 });
 
+const profAsociadasSchema = new mongoose.Schema({
+  profesionId: { type: Schema.Types.ObjectId, ref: "profesionCollection" },
+  especialidadId: {
+    type: Schema.Types.ObjectId,
+    ref: "especialidadCollection",
+    required: false,
+    default: null,
+  },
+});
+
 const ServicioSchema = Schema(
   {
     codServicio: { type: String, required: true, unique: true },
@@ -21,11 +31,7 @@ const ServicioSchema = Schema(
     estadoServicio: { type: String, required: true },
     favoritoServicio: { type: Boolean, default: false },
     examenesServicio: [examenesSchema],
-    profesionId: { type: Schema.Types.ObjectId, ref: "profesionCollection" },
-    especialidadId: {
-      type: Schema.Types.ObjectId,
-      ref: "especialidadCollection",
-    },
+    profesionesAsociadas: [profAsociadasSchema],
   },
   {
     timestamps: true,

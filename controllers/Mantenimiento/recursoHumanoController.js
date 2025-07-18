@@ -252,6 +252,39 @@ const obtenerProfesionalesConsultas = async (req, res = response) => {
   }
 };
 
+const obtenerProfesionalesQueAtiendenConsultas = async (
+  req,
+  res = response
+) => {
+  try {
+    const recHumanos = await RecurHumano.find(
+      { atiendeConsultas: true },
+      {
+        codRecHumano: 1,
+        nombreRecHumano: 1,
+        apePatRecHumano: 1,
+        apeMatRecHumano: 1,
+        profesionesRecurso: 1,
+        especialidadesRecurso: 1,
+      }
+    ).lean();
+
+    return res.status(200).json({
+      ok: true,
+      recHumanos: recHumanos,
+    });
+  } catch (error) {
+    console.error(
+      "Error al obtener profesionales que atienden consultas:",
+      error
+    );
+    return res.status(500).json({
+      ok: false,
+      msg: "Error al obtener profesionales que atienden consultas",
+    });
+  }
+};
+
 const encontrarTermino = async (req, res = response) => {
   const termino = req.query.search;
 
@@ -279,99 +312,6 @@ const encontrarTermino = async (req, res = response) => {
     });
   }
 };
-
-// const encontrarTerminoSolicitante = async (req, res = response) => {
-//   const termino = req.query.search;
-
-//   if (!termino || termino.trim() === "") {
-//     return res.status(400).json({
-//       ok: false,
-//       msg: "Debe proporcionar un término de búsqueda válido",
-//     });
-//   }
-
-//   try {
-//     const regex = new RegExp(termino, "i");
-//     const palabras = termino.trim().split(/\s+/); // 🔹 Divide el término en palabras
-
-//     const recHumanos = await RecurHumano.find(
-//       {
-//         $and: [
-//           { esSolicitante: true },
-//           {
-//             $or: [
-//               { codRecHumano: regex },
-//               { nombreRecHumano: regex }, // Búsqueda en el campo "nombre"
-//               { apePatRecHumano: regex }, // Búsqueda en el campo "apellido paterno"
-//               { apeMatRecHumano: regex }, // Búsqueda en el campo "apellido materno"
-//               { "profesionSolicitante.nroColegiatura": regex }, // Búsqueda en el campo "nro documento"
-//               {
-//                 $expr: {
-//                   $regexMatch: {
-//                     input: {
-//                       $concat: [
-//                         "$nombreRecHumano",
-//                         " ",
-//                         "$apePatRecHumano",
-//                         " ",
-//                         "$apeMatRecHumano",
-//                       ],
-//                     },
-//                     regex: regex,
-//                   },
-//                 },
-//               },
-//               {
-//                 $expr: {
-//                   $regexMatch: {
-//                     input: {
-//                       $concat: [
-//                         "$apePatRecHumano",
-//                         " ",
-//                         "$apeMatRecHumano",
-//                         " ",
-//                         "$nombreRecHumano",
-//                       ],
-//                     },
-//                     regex: regex,
-//                   },
-//                 },
-//               },
-//               // Agrega más campos si es necesario
-//               // 🔹 Buscar si todas las palabras aparecen en diferentes campos
-//               ...palabras.map((palabra) => ({
-//                 $or: [
-//                   { nombreRecHumano: { $regex: palabra, $options: "i" } },
-//                   { apePatRecHumano: { $regex: palabra, $options: "i" } },
-//                   { apeMatRecHumano: { $regex: palabra, $options: "i" } },
-//                 ],
-//               })),
-//             ],
-//           },
-//         ],
-//       }, // Filtro
-//       {
-//         codRecHumano: 1,
-//         nombreRecHumano: 1,
-//         apePatRecHumano: 1,
-//         apeMatRecHumano: 1,
-//         profesionSolicitante: 1,
-//         especialidadesRecurso: 1,
-//       } // Solo los campos necesarios
-//     ).lean();
-
-//     return res.json({
-//       ok: true,
-//       recHumanos, //! favoritos: favoritos
-//     });
-//   } catch (error) {
-//     console.log(error);
-//     return res.status(500).json({
-//       ok: false,
-//       msg: "Error en la consulta",
-//     });
-//   }
-// };
 
 const actualizarRecursoHumano = async (req, res = response) => {
   const codigo = req.params.codRecHumano; //recupera la hc
@@ -422,6 +362,6 @@ module.exports = {
   encontrarTermino,
   actualizarRecursoHumano,
   obtenerSolicitantes,
-  //encontrarTerminoSolicitante,
+  obtenerProfesionalesQueAtiendenConsultas,
   obtenerProfesionalesConsultas,
 };

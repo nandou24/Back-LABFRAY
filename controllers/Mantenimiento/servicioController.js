@@ -9,7 +9,7 @@ const crearServicio = async (req, res = response) => {
   const { tipoServicio, nombreServicio } = req.body;
 
   try {
-    // console.log('tipoServicio',tipoServicio)
+    console.log("req.body crear servicio", req.body);
 
     let tipo = "";
 
@@ -20,7 +20,7 @@ const crearServicio = async (req, res = response) => {
       case "Ecografía":
         tipo = "ECO";
         break;
-      case "Consulta Médica":
+      case "Consulta":
         tipo = "CON";
         break;
       case "Procedimiento":
