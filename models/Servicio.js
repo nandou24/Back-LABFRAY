@@ -21,6 +21,11 @@ const ServicioSchema = Schema(
     estadoServicio: { type: String, required: true },
     favoritoServicio: { type: Boolean, default: false },
     examenesServicio: [examenesSchema],
+    profesionId: { type: Schema.Types.ObjectId, ref: "profesionCollection" },
+    especialidadId: {
+      type: Schema.Types.ObjectId,
+      ref: "especialidadCollection",
+    },
   },
   {
     timestamps: true,

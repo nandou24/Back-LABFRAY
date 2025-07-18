@@ -6,7 +6,8 @@ const {
   encontrarTermino,
   actualizarRecursoHumano,
   obtenerSolicitantes,
-  encontrarTerminoSolicitante,
+  obtenerProfesionalesConsultas,
+  //encontrarTerminoSolicitante,
 } = require("../../controllers/Mantenimiento/recursoHumanoController");
 const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
@@ -81,7 +82,7 @@ router.get(
   obtenerSolicitantes
 );
 
-//POST
+//GET
 //! Buscar recurso humano
 router.get(
   "/findTerm",
@@ -92,15 +93,26 @@ router.get(
   encontrarTermino
 );
 
-//! Buscar solicitante
+//GET
+//! Buscar profesionales que atienden consultas
 router.get(
-  "/findTermSolicitante",
+  "/findPersonalSaludParaConsultas",
   [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
   ],
-  encontrarTerminoSolicitante
+  obtenerProfesionalesConsultas
 );
+
+//! Buscar solicitante
+// router.get(
+//   "/findTermSolicitante",
+//   [
+//     //check('token')
+//     //.notEmpty().withMessage('Es token es obligatorio'),
+//   ],
+//   encontrarTerminoSolicitante
+// );
 
 //POST
 //! Actualizar recurso humano

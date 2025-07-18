@@ -104,8 +104,7 @@ const mostrarUltimosServicios = async (req, res = response) => {
     // const cantidad = req.query.cant;
     // const limite = parseInt(cantidad);
 
-    const servicios = await Servicio.find();
-    //.sort({createdAt: -1})
+    const servicios = await Servicio.find().sort({ createdAt: -1 });
     //.limit(limite);
 
     return res.json({

@@ -30,7 +30,6 @@ const profesionesSchema = new mongoose.Schema({
   nroColegiatura: { type: String },
   centroEstudiosProfesion: { type: String },
   anioEgresoProfesion: { type: String },
-  profesionSolicitante: { type: Boolean, default: false },
   especialidades: [especialidadesSchema],
 });
 

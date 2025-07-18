@@ -28,14 +28,14 @@ const crearRecursoHumano = async (req, res = response) => {
     datosLogueo, // Aquí se espera que contenga el passwordHash
   } = req.body;
 
+  console.log("Datos del recurso humano:", req.body);
+
   //Para crear HC
   const fecha = new Date();
   const anio = fecha.getFullYear();
   const mes = (fecha.getMonth() + 1).toString().padStart(2, "0");
 
   try {
-    //   console.log(name, email, password, rol, "holaaa");
-
     // verificar el email si es que existe
     const recursoHumano = await RecurHumano.findOne({ tipoDoc, nroDoc });
 
@@ -108,13 +108,17 @@ const mostrarUltimosRecurHumanos = async (req, res = response) => {
     const limite = parseInt(cantidad);
     let recHumanos;
 
+    // Si no se especifica cantidad, mostrar todos los recursos humanos
     if (cantidad == 0) {
-      recHumanos = await RecurHumano.find().populate("datosLogueo.rol").lean();
+      recHumanos = await RecurHumano.find()
+        .populate("datosLogueo.rol")
+        .sort({ createdAt: -1 })
+        .lean();
+      // Si se especifica una cantidad, limitar la consulta
     } else {
       recHumanos = await RecurHumano.find()
         .populate("datosLogueo.rol")
-
-        //.sort({createdAt: -1})
+        .sort({ createdAt: -1 })
         .limit(limite)
         .lean();
     }
@@ -276,98 +280,98 @@ const encontrarTermino = async (req, res = response) => {
   }
 };
 
-const encontrarTerminoSolicitante = async (req, res = response) => {
-  const termino = req.query.search;
+// const encontrarTerminoSolicitante = async (req, res = response) => {
+//   const termino = req.query.search;
 
-  if (!termino || termino.trim() === "") {
-    return res.status(400).json({
-      ok: false,
-      msg: "Debe proporcionar un término de búsqueda válido",
-    });
-  }
+//   if (!termino || termino.trim() === "") {
+//     return res.status(400).json({
+//       ok: false,
+//       msg: "Debe proporcionar un término de búsqueda válido",
+//     });
+//   }
 
-  try {
-    const regex = new RegExp(termino, "i");
-    const palabras = termino.trim().split(/\s+/); // 🔹 Divide el término en palabras
+//   try {
+//     const regex = new RegExp(termino, "i");
+//     const palabras = termino.trim().split(/\s+/); // 🔹 Divide el término en palabras
 
-    const recHumanos = await RecurHumano.find(
-      {
-        $and: [
-          { esSolicitante: true },
-          {
-            $or: [
-              { codRecHumano: regex },
-              { nombreRecHumano: regex }, // Búsqueda en el campo "nombre"
-              { apePatRecHumano: regex }, // Búsqueda en el campo "apellido paterno"
-              { apeMatRecHumano: regex }, // Búsqueda en el campo "apellido materno"
-              { "profesionSolicitante.nroColegiatura": regex }, // Búsqueda en el campo "nro documento"
-              {
-                $expr: {
-                  $regexMatch: {
-                    input: {
-                      $concat: [
-                        "$nombreRecHumano",
-                        " ",
-                        "$apePatRecHumano",
-                        " ",
-                        "$apeMatRecHumano",
-                      ],
-                    },
-                    regex: regex,
-                  },
-                },
-              },
-              {
-                $expr: {
-                  $regexMatch: {
-                    input: {
-                      $concat: [
-                        "$apePatRecHumano",
-                        " ",
-                        "$apeMatRecHumano",
-                        " ",
-                        "$nombreRecHumano",
-                      ],
-                    },
-                    regex: regex,
-                  },
-                },
-              },
-              // Agrega más campos si es necesario
-              // 🔹 Buscar si todas las palabras aparecen en diferentes campos
-              ...palabras.map((palabra) => ({
-                $or: [
-                  { nombreRecHumano: { $regex: palabra, $options: "i" } },
-                  { apePatRecHumano: { $regex: palabra, $options: "i" } },
-                  { apeMatRecHumano: { $regex: palabra, $options: "i" } },
-                ],
-              })),
-            ],
-          },
-        ],
-      }, // Filtro
-      {
-        codRecHumano: 1,
-        nombreRecHumano: 1,
-        apePatRecHumano: 1,
-        apeMatRecHumano: 1,
-        profesionSolicitante: 1,
-        especialidadesRecurso: 1,
-      } // Solo los campos necesarios
-    ).lean();
+//     const recHumanos = await RecurHumano.find(
+//       {
+//         $and: [
+//           { esSolicitante: true },
+//           {
+//             $or: [
+//               { codRecHumano: regex },
+//               { nombreRecHumano: regex }, // Búsqueda en el campo "nombre"
+//               { apePatRecHumano: regex }, // Búsqueda en el campo "apellido paterno"
+//               { apeMatRecHumano: regex }, // Búsqueda en el campo "apellido materno"
+//               { "profesionSolicitante.nroColegiatura": regex }, // Búsqueda en el campo "nro documento"
+//               {
+//                 $expr: {
+//                   $regexMatch: {
+//                     input: {
+//                       $concat: [
+//                         "$nombreRecHumano",
+//                         " ",
+//                         "$apePatRecHumano",
+//                         " ",
+//                         "$apeMatRecHumano",
+//                       ],
+//                     },
+//                     regex: regex,
+//                   },
+//                 },
+//               },
+//               {
+//                 $expr: {
+//                   $regexMatch: {
+//                     input: {
+//                       $concat: [
+//                         "$apePatRecHumano",
+//                         " ",
+//                         "$apeMatRecHumano",
+//                         " ",
+//                         "$nombreRecHumano",
+//                       ],
+//                     },
+//                     regex: regex,
+//                   },
+//                 },
+//               },
+//               // Agrega más campos si es necesario
+//               // 🔹 Buscar si todas las palabras aparecen en diferentes campos
+//               ...palabras.map((palabra) => ({
+//                 $or: [
+//                   { nombreRecHumano: { $regex: palabra, $options: "i" } },
+//                   { apePatRecHumano: { $regex: palabra, $options: "i" } },
+//                   { apeMatRecHumano: { $regex: palabra, $options: "i" } },
+//                 ],
+//               })),
+//             ],
+//           },
+//         ],
+//       }, // Filtro
+//       {
+//         codRecHumano: 1,
+//         nombreRecHumano: 1,
+//         apePatRecHumano: 1,
+//         apeMatRecHumano: 1,
+//         profesionSolicitante: 1,
+//         especialidadesRecurso: 1,
+//       } // Solo los campos necesarios
+//     ).lean();
 
-    return res.json({
-      ok: true,
-      recHumanos, //! favoritos: favoritos
-    });
-  } catch (error) {
-    console.log(error);
-    return res.status(500).json({
-      ok: false,
-      msg: "Error en la consulta",
-    });
-  }
-};
+//     return res.json({
+//       ok: true,
+//       recHumanos, //! favoritos: favoritos
+//     });
+//   } catch (error) {
+//     console.log(error);
+//     return res.status(500).json({
+//       ok: false,
+//       msg: "Error en la consulta",
+//     });
+//   }
+// };
 
 const actualizarRecursoHumano = async (req, res = response) => {
   const codigo = req.params.codRecHumano; //recupera la hc
@@ -418,6 +422,6 @@ module.exports = {
   encontrarTermino,
   actualizarRecursoHumano,
   obtenerSolicitantes,
-  encontrarTerminoSolicitante,
+  //encontrarTerminoSolicitante,
   obtenerProfesionalesConsultas,
 };
