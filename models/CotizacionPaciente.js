@@ -1,6 +1,16 @@
 const mongoose = require("mongoose");
 const { Schema } = require("mongoose");
 
+const profAsociadasSchema = new mongoose.Schema({
+  profesionId: { type: Schema.Types.ObjectId, ref: "profesionCollection" },
+  especialidadId: {
+    type: Schema.Types.ObjectId,
+    ref: "especialidadCollection",
+    required: false,
+    default: null,
+  },
+});
+
 const ServiciosSchema = new mongoose.Schema({
   codServicio: { type: String, required: true },
   tipoServicio: { type: String },
@@ -11,6 +21,21 @@ const ServiciosSchema = new mongoose.Schema({
   precioVenta: { type: Number, required: true },
   descuentoPorcentaje: { type: Number, required: true },
   totalUnitario: { type: Number, required: true },
+  profesionesAsociadas: [profAsociadasSchema],
+  medicoAtiende: {
+    medicoId: {
+      type: Schema.Types.ObjectId,
+      ref: "recursosHumanosCollection",
+      required: false,
+      default: null,
+    },
+    codRecHumano: { type: String },
+    nombreRecHumano: { type: String },
+    apePatRecHumano: { type: String },
+    apeMatRecHumano: { type: String },
+    nroColegiatura: { type: String },
+    rne: { type: String },
+  },
 });
 
 const HistorialSchema = new Schema({
@@ -18,16 +43,34 @@ const HistorialSchema = new Schema({
   fechaModificacion: { type: Date, default: Date.now }, // 📌 Fecha de la modificación
   estadoRegistroPaciente: { type: Boolean, required: true },
   hc: { type: String }, // Historia clínica del paciente
+  clienteId: {
+    type: Schema.Types.ObjectId,
+    ref: "pacienteCollection",
+    required: true,
+  },
   tipoDoc: { type: String, required: true },
   nroDoc: { type: String, required: true },
-  nombreCompleto: {
+  nombreCliente: {
     type: String,
     required: true,
     set: (value) => value.toUpperCase(),
   },
+  apePatCliente: {
+    type: String,
+    required: true,
+    set: (value) => value.toUpperCase(),
+  },
+  apeMatCliente: { type: String, set: (value) => value.toUpperCase() },
   estadoRegistroSolicitante: { type: Boolean, required: true },
+  solicitanteId: {
+    type: Schema.Types.ObjectId,
+    ref: "referenciaMedicoCollection",
+    required: false,
+  },
   codSolicitante: { type: String },
-  nomSolicitante: { type: String },
+  nombreRefMedico: { type: String },
+  apePatRefMedico: { type: String },
+  apeMatRefMedico: { type: String },
   profesionSolicitante: { type: String },
   colegiatura: { type: String },
   especialidadSolicitante: { type: String },

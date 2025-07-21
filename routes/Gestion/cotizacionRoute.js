@@ -24,20 +24,6 @@ router.post(
   "/newCotizacionPersona",
   [
     //validarJWT,
-    /*
-    check('tipoServicio')
-    .notEmpty().withMessage('Tipo de servicio es obligatorio'),
-
-    check('nombreServicio')
-    .notEmpty().withMessage('Nombre de servicio es obligatorio'),
-         
-    check('precioServicio')
-    .notEmpty().withMessage('Precio de servicio es obligatorio'),
-
-    check('estadoServicio')
-    .notEmpty().withMessage('Estado del servicio es obligatorio'), 
-    
-    validarCampos*/
   ],
   crearCotizacion
 );
@@ -47,20 +33,6 @@ router.post(
   "/newVersionCotizacionPersona",
   [
     //validarJWT,
-    /*
-    check('tipoServicio')
-    .notEmpty().withMessage('Tipo de servicio es obligatorio'),
-
-    check('nombreServicio')
-    .notEmpty().withMessage('Nombre de servicio es obligatorio'),
-         
-    check('precioServicio')
-    .notEmpty().withMessage('Precio de servicio es obligatorio'),
-
-    check('estadoServicio')
-    .notEmpty().withMessage('Estado del servicio es obligatorio'), 
-    
-    validarCampos*/
   ],
   crearNuevaVersionCotiPersona
 );

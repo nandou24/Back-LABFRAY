@@ -1,9 +1,12 @@
 const { response } = require("express");
 const Cotizacion = require("../../models/CotizacionPaciente");
+const mongoose = require("mongoose");
 
 const crearCotizacion = async (req, res = response) => {
   try {
     const { historial, codCotizacion } = req.body;
+
+    console.log("Datos recibidos:", req.body);
 
     // verificar si la cotización existe
     const cotizacion = await Cotizacion.findOne({ codCotizacion });
@@ -27,14 +30,39 @@ const crearCotizacion = async (req, res = response) => {
         .json({ ok: false, msg: "Debe agregar al menos un servicio" });
     }
 
-    // console.log('Datos recibidos:', req.body);
+    // Validación de clienteId
+    const clienteId = historial[0].clienteId;
+    if (!mongoose.Types.ObjectId.isValid(clienteId)) {
+      return res.status(400).json({
+        ok: false,
+        msg: "El ID del cliente no es válido",
+      });
+    }
 
-    //Generar el JWT
-    //const token = await generarJWT(dbPaciente.id, dbPaciente.name, dbPaciente.rol);
-    //Crear usuario de base de datos
+    // Validación de solicitanteId
+    const solicitanteId = historial[0].solicitanteId;
+    if (solicitanteId) {
+      if (!mongoose.Types.ObjectId.isValid(solicitanteId)) {
+        return res.status(400).json({
+          ok: false,
+          msg: "El ID del solicitante no es válido",
+        });
+      }
+    }
 
-    //creando codigo prueba
-    // Buscar el última prueba creada en el área
+    // Validar IDs de médicos en servicios (si se usan)
+    for (const servicio of historial[0].serviciosCotizacion) {
+      if (servicio.medicoAtiende?.medicoId) {
+        if (!mongoose.Types.ObjectId.isValid(servicio.medicoAtiende.medicoId)) {
+          return res.status(400).json({
+            ok: false,
+            msg: "Uno de los IDs de médicos no es válido",
+          });
+        }
+      }
+    }
+
+    // Generación de código correlativo
     const anioActual = new Date().getFullYear();
     const ultimaCotizacion = await Cotizacion.findOne({
       codCotizacion: new RegExp(`^${anioActual}-`),
@@ -61,10 +89,10 @@ const crearCotizacion = async (req, res = response) => {
       });
     }
 
-    //Crear el nuevo código (Ejemplo: 2024-000001)
-    const nuevoCodigo = `${anioActual}-${String(correlativo).padStart(6, "0")}`;
+    //Crear el nuevo código (Ejemplo: 2024-00001)
+    const nuevoCodigo = `${anioActual}-${String(correlativo).padStart(5, "0")}`;
 
-    // Crear la prueba con el código
+    // Crear el documento
     const nuevaCotizacion = new Cotizacion({
       ...req.body,
       codCotizacion: nuevoCodigo, // Agregar el código de la prueba generado
@@ -80,7 +108,6 @@ const crearCotizacion = async (req, res = response) => {
     // console.log("Datos a grabar"+nuevaCotizacion)
 
     await nuevaCotizacion.save();
-    // console.log(dbUser, "pasoo registro");
     //Generar respuesta exitosa
     return res.status(200).json({
       ok: true,
@@ -98,23 +125,16 @@ const crearCotizacion = async (req, res = response) => {
 };
 
 const mostrarUltimasCotizaciones = async (req, res = response) => {
-  //console.log("entro a controlador mostrar cotizaciones")
-
   try {
-    const cantidad = req.query.cant;
-    const limite = parseInt(cantidad);
+    // Calcular la fecha de hace 7 días
+    const fechaHaceUnaSemana = new Date();
+    fechaHaceUnaSemana.setDate(fechaHaceUnaSemana.getDate() - 7);
 
-    const cotizaciones = await Cotizacion.find()
+    const cotizaciones = await Cotizacion.find({
+      createdAt: { $gte: fechaHaceUnaSemana },
+    })
       .sort({ createdAt: -1 })
-      .limit(limite)
       .lean();
-
-    // 📌 Obtener solo la última versión del historial en cada cotización
-    /*
-         const cotizacionesConUltimaVersion = cotizaciones.map(cot => ({
-            ...cot,
-            historial: cot.historial.length > 0 ? [cot.historial[cot.historial.length - 1]] : [],
-        }))*/
 
     return res.json({
       ok: true,
@@ -209,17 +229,16 @@ const encontrarTermino = async (req, res = response) => {
 
   try {
     const cotizaciones = await Cotizacion.find({
-      historial: {
-        $elemMatch: {
-          $or: [
-            { nomCliente: { $regex: termino, $options: "i" } }, // Nombre del cliente
-            { nroDoc: { $regex: termino, $options: "i" } }, // Número de documento
-          ],
-        },
-      },
+      $or: [
+        { codCotizacion: { $regex: termino, $options: "i" } },
+        { "historial.nroDoc": { $regex: termino, $options: "i" } },
+        { "historial.nombreCliente": { $regex: termino, $options: "i" } },
+        { "historial.apePatCliente": { $regex: termino, $options: "i" } },
+        { "historial.apeMatCliente": { $regex: termino, $options: "i" } },
+      ],
     })
-      .sort({ updatedAt: -1 }) // 📌 Ordena de más nuevas a más antiguas
-      .limit(10); // 📌 Limita a 10 resultados;
+      .sort({ updatedAt: -1 })
+      .limit(50); // 📌 Limita a 50 resultados;
     return res.json({
       ok: true,
       cotizaciones, //! favoritos: favoritos

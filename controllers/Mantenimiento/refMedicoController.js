@@ -66,6 +66,70 @@ const mostrarUltimosRefMedicos = async (req, res = response) => {
   }
 };
 
+const mostrarUltimosRefMedicosParaCotizacion = async (req, res = response) => {
+  try {
+    const cantidad = req.query.cant;
+    const limite = parseInt(cantidad);
+    let refMedicos;
+    const campos =
+      "apePatRefMedico apeMatRefMedico nombreRefMedico especialidadesRefMedico profesionSolicitante _id";
+    if (cantidad == 0) {
+      refMedicos = await RefMedico.find({}, campos);
+    } else {
+      refMedicos = await RefMedico.find({}, campos).limit(limite);
+    }
+
+    // Extraer especialidades como string
+    refMedicos = refMedicos.map((medico) => {
+      let especialidades = "";
+      if (Array.isArray(medico.especialidadesRefMedico)) {
+        especialidades = medico.especialidadesRefMedico
+          .map((esp) => esp.especialidad)
+          .filter(Boolean)
+          .join(", ");
+      }
+      return {
+        ...medico._doc,
+        especialidades: especialidades,
+      };
+    });
+
+    return res.json({
+      ok: true,
+      refMedicos,
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      ok: false,
+      msg: "Error en la consulta",
+    });
+  }
+};
+// const mostrarUltimosRefMedicosParaCotizacion = async (req, res = response) => {
+
+//   try {
+//     const cantidad = req.query.cant;
+//     const limite = parseInt(cantidad);
+//     let refMedicos;
+//     if (cantidad == 0) {
+//       refMedicos = await RefMedico.find();
+//     } else {
+//       refMedicos = await RefMedico.find().limit(limite);
+//     }
+//     return res.json({
+//       ok: true,
+//       refMedicos,
+//     });
+//   } catch (error) {
+//     console.log(error);
+//     return res.status(500).json({
+//       ok: false,
+//       msg: "Error en la consulta",
+//     });
+//   }
+// };
+
 const encontrarTerminoRefMedico = async (req, res = response) => {
   const termino = req.query.search;
   try {
@@ -129,4 +193,5 @@ module.exports = {
   mostrarUltimosRefMedicos,
   encontrarTerminoRefMedico,
   actualizarRefMedico,
+  mostrarUltimosRefMedicosParaCotizacion,
 };

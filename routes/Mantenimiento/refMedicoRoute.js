@@ -5,6 +5,7 @@ const {
   mostrarUltimosRefMedicos,
   encontrarTerminoRefMedico,
   actualizarRefMedico,
+  mostrarUltimosRefMedicosParaCotizacion,
 } = require("../../controllers/Mantenimiento/refMedicoController");
 const { validarCampos } = require("../../middlewares/validar-campo");
 // const { validarJWT } = require('../middlewares/validar-token');
@@ -41,6 +42,10 @@ router.post(
 );
 
 router.get("/latest", mostrarUltimosRefMedicos);
+router.get(
+  "/latestRefMedicosCotizacion",
+  mostrarUltimosRefMedicosParaCotizacion
+);
 router.get("/findTerm", encontrarTerminoRefMedico);
 router.put("/:codRefMedico/updateRefMedico", actualizarRefMedico);
 
