@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { Schema } = require("mongoose");
 
 // Define the ServicioSolicitud subdocument schema
 const ServicioSolicitudSchema = new mongoose.Schema({
@@ -10,40 +11,55 @@ const ServicioSolicitudSchema = new mongoose.Schema({
     enum: ["PENDIENTE", "EN PROCESO", "TERMINADO", "ANULADO"],
     trim: true,
   },
+  medicoAtiende: {
+    medicoId: {
+      type: Schema.Types.ObjectId,
+      ref: "recursosHumanosCollection",
+      required: false,
+      default: null,
+    },
+    codRecHumano: { type: String },
+    nombreRecHumano: { type: String },
+    apePatRecHumano: { type: String },
+    apeMatRecHumano: { type: String },
+    nroColegiatura: { type: String },
+    rne: { type: String },
+  },
 });
 
-const SolicitudAtencionSchema = new mongoose.Schema(
+const SolicitudAtencionSchema = new Schema(
   {
-    codigoSolicitud: { type: String, required: true, unique: true, trim: true },
-    codigoPago: { type: String, default: null, trim: true },
-    cotizacionId: { type: String, required: true, index: true },
+    codSolicitud: { type: String, required: true, unique: true, trim: true },
+    codPago: { type: String, default: null, trim: true },
+    codCotizacion: { type: String, required: true, index: true },
+    fechaCotizacion: { type: Date },
     tipo: {
       type: String,
       required: true,
-      enum: [
-        "Laboratorio",
-        "Ecografía",
-        "Consulta Médica",
-        "Procedimiento",
-        "Otro",
-      ],
+      enum: ["Laboratorio", "Ecografía", "Consulta", "Procedimiento", "Otro"],
       trim: true,
     },
     servicios: { type: [ServicioSolicitudSchema], required: true },
     hc: { type: String, required: true, trim: true },
-    tipoDocumento: {
-      type: String,
+
+    clienteId: {
+      type: Schema.Types.ObjectId,
+      ref: "pacienteCollection",
       required: true,
-      enum: ["DNI", "CE", "Pasaporte"],
-      trim: true,
     },
-    nroDocumento: { type: String, required: true, trim: true },
-    nombreCompleto: {
+    tipoDoc: { type: String, required: true },
+    nroDoc: { type: String, required: true },
+    nombreCliente: {
       type: String,
       required: true,
       set: (value) => value.toUpperCase(),
-      trim: true,
     },
+    apePatCliente: {
+      type: String,
+      required: true,
+      set: (value) => value.toUpperCase(),
+    },
+    apeMatCliente: { type: String, set: (value) => value.toUpperCase() },
     fechaEmision: { type: Date, required: true },
     //codUsuarioEmisor: { type: String, required: true },
     usuarioEmisor: { type: String, required: true },

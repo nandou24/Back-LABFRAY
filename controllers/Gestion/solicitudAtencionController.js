@@ -6,7 +6,7 @@ const { response } = require("express");
 const crearSolicitud = async (req, res) => {
   try {
     const {
-      cotizacionId,
+      codCotizacion,
       codigoPago,
       tipo,
       servicios,
@@ -20,7 +20,7 @@ const crearSolicitud = async (req, res) => {
 
     // Validación básica
     if (
-      !cotizacionId ||
+      !codCotizacion ||
       !tipo ||
       servicios.length === 0 ||
       !hc ||
@@ -33,7 +33,7 @@ const crearSolicitud = async (req, res) => {
 
     const nuevaSolicitud = new SolicitudAtencion({
       codigoSolicitud: nuevCodigoSolicitud,
-      cotizacionId: cotizacionId,
+      codCotizacion: codCotizacion,
       codigoPago: codigoPago, // Puede ser null si no se proporciona
       tipo: tipo,
       servicios: servicios.map((serv) => ({
@@ -70,17 +70,17 @@ async function generarCodigoSolicitud(session) {
 
   // Buscar la última solicitud creada este mes
   const ultimaSolicitud = await SolicitudAtencion.findOne({
-    codigoSolicitud: { $regex: `^${prefijo}` },
+    codSolicitud: { $regex: `^${prefijo}` },
   })
-    .sort({ codigoSolicitud: -1 })
+    .sort({ codSolicitud: -1 })
     .session(session) // Usar la sesión si se está en una transacción
     .lean();
 
   //console.log("Última solicitud encontrada:", ultimaSolicitud);
 
   let consecutivo = 1;
-  if (ultimaSolicitud && ultimaSolicitud.codigoSolicitud) {
-    const ultimos4 = ultimaSolicitud.codigoSolicitud.slice(-4);
+  if (ultimaSolicitud && ultimaSolicitud.codSolicitud) {
+    const ultimos4 = ultimaSolicitud.codSolicitud.slice(-4);
     consecutivo = parseInt(ultimos4, 10) + 1;
   }
 
@@ -125,7 +125,7 @@ const obtenerPorRangoFechas = async (req, res) => {
       const regex = new RegExp(terminoBusqueda.trim(), "i"); // 'i' = case-insensitive
       filtro.$or = [
         { pacienteNombre: regex },
-        { cotizacionId: regex },
+        { codCotizacion: regex },
         { nroDocumento: regex },
       ];
     }

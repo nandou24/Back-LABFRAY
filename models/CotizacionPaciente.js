@@ -12,6 +12,7 @@ const profAsociadasSchema = new mongoose.Schema({
 });
 
 const ServiciosSchema = new mongoose.Schema({
+  servicioId: { type: Schema.Types.ObjectId, ref: "servicioCollection" },
   codServicio: { type: String, required: true },
   tipoServicio: { type: String },
   nombreServicio: { type: String },
@@ -43,13 +44,14 @@ const HistorialSchema = new Schema({
   fechaModificacion: { type: Date, default: Date.now }, // 📌 Fecha de la modificación
   estadoRegistroPaciente: { type: Boolean, required: true },
   hc: { type: String }, // Historia clínica del paciente
+
+  tipoDoc: { type: String, required: true },
+  nroDoc: { type: String, required: true },
   clienteId: {
     type: Schema.Types.ObjectId,
     ref: "pacienteCollection",
     required: true,
   },
-  tipoDoc: { type: String, required: true },
-  nroDoc: { type: String, required: true },
   nombreCliente: {
     type: String,
     required: true,
@@ -62,12 +64,12 @@ const HistorialSchema = new Schema({
   },
   apeMatCliente: { type: String, set: (value) => value.toUpperCase() },
   estadoRegistroSolicitante: { type: Boolean, required: true },
+  codSolicitante: { type: String },
   solicitanteId: {
     type: Schema.Types.ObjectId,
     ref: "referenciaMedicoCollection",
     required: false,
   },
-  codSolicitante: { type: String },
   nombreRefMedico: { type: String },
   apePatRefMedico: { type: String },
   apeMatRefMedico: { type: String },
@@ -111,4 +113,12 @@ const CotizacionSchema = Schema(
 );
 
 //aquí se define o elige la colección/tabla en la que queremos que se guarde
-module.exports = mongoose.model("cotizacionCollection", CotizacionSchema);
+// module.exports = mongoose.model("cotizacionCollection", CotizacionSchema);
+// module.exports = mongoose.model("profAsociadasSchema", profAsociadasSchema);
+// module.exports = mongoose.model("serviciosSchema", ServiciosSchema);
+
+module.exports = {
+  CotizacionModel: mongoose.model("cotizacionCollection", CotizacionSchema),
+  profAsociadasSchema,
+  ServiciosSchema,
+};

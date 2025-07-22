@@ -3,7 +3,7 @@ const {
   generarCodigoSolicitud,
 } = require("../Gestion/solicitudAtencionController");
 const Pago = require("../../models/PagoPaciente");
-const Cotizacion = require("../../models/CotizacionPaciente");
+const Cotizacion = require("../../models/CotizacionPaciente").CotizacionModel;
 const SolicitudAtencion = require("../../models/SolicitudAtencion");
 const mongoose = require("mongoose");
 const { validarEntradaPago } = require("../../utils/pagos/validacionesPago");
@@ -68,9 +68,13 @@ const crearPago = async (datos, session, cotizacionOriginal) => {
     codCotizacion,
     detallePagos,
     serviciosCotizacion,
+    fechaCotizacion,
     tipoDoc,
     nroDoc,
-    nombreCompleto,
+    clienteId,
+    nombreCliente,
+    apePatCliente,
+    apeMatCliente,
   } = datos;
 
   console.log("Datos recibidos para crear pago:", cotizacionOriginal);
@@ -111,10 +115,11 @@ const crearPago = async (datos, session, cotizacionOriginal) => {
     esAntiguo: true,
   }));
 
-  // 7. Crear documento
+  // 7. Crear pago
   const nuevoPago = new Pago({
     ...datos,
     codPago: nuevoCodPago,
+    fechaCotizacion: fechaCotizacion,
     detallePagos: detalleConAntiguedad,
     faltaPagar: diferencia,
     estadoPago: estadoBack,
@@ -131,6 +136,7 @@ const crearPago = async (datos, session, cotizacionOriginal) => {
   );
 
   // 9. Generar órdenes de atención si corresponde
+  // Solo si la cotización está en un estado que permite generar órdenes
   const estadosPermitidos = ["GENERADA", "MODIFICADA", "PAGO ANULADO"];
 
   if (estadosPermitidos.includes(cotizacionOriginal.estadoCotizacion)) {
@@ -138,7 +144,7 @@ const crearPago = async (datos, session, cotizacionOriginal) => {
 
     const tipoMap = {
       LAB: "LABORATORIO",
-      CON: "CONSULTA MEDICA",
+      CON: "CONSULTA",
       ECO: "ECOGRAFIA",
       RX: "RADIOGRAFIA",
     };
@@ -148,19 +154,24 @@ const crearPago = async (datos, session, cotizacionOriginal) => {
       const servicios = agrupados[tipo];
 
       const solicitud = new SolicitudAtencion({
-        codigoSolicitud: await generarCodigoSolicitud(session),
-        codigoPago: nuevoCodPago,
-        cotizacionId: codCotizacion,
+        codSolicitud: await generarCodigoSolicitud(session),
+        codPago: nuevoCodPago,
+        codCotizacion: codCotizacion,
+        fechaCotizacion: fechaCotizacion,
         tipo: tipoValido,
         servicios: servicios.map((serv) => ({
           codigoServicio: serv.codServicio,
           nombreServicio: serv.nombreServicio,
           estado: "PENDIENTE",
+          medicoAtiende: serv.medicoAtiende,
         })),
         hc: ultimoHistorial.hc,
-        tipoDocumento: tipoDoc,
-        nroDocumento: nroDoc,
-        nombreCompleto: nombreCompleto.toUpperCase(),
+        clienteId: clienteId,
+        tipoDoc: tipoDoc,
+        nroDoc: nroDoc,
+        nombreCliente: nombreCliente,
+        apePatCliente: apePatCliente,
+        apeMatCliente: apeMatCliente,
         fechaEmision: new Date(),
         codUsuarioEmisor: "codigoUsuarioEmisor",
         usuarioEmisor: "usuarioEmisor",
@@ -286,7 +297,7 @@ const mostrarUltimosPagos = async (req, res = response) => {
     const pagos = await Pago.find({
       estadoCotizacion: { $in: ["PAGO TOTAL", "PAGO PARCIAL"] },
     })
-      .sort({ createdAt: -1 })
+      .sort({ codPago: -1 })
       .limit(limite)
       .lean();
 
