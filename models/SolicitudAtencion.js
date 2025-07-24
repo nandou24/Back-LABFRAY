@@ -3,7 +3,11 @@ const { Schema } = require("mongoose");
 
 // Define the ServicioSolicitud subdocument schema
 const ServicioSolicitudSchema = new mongoose.Schema({
-  codigoServicio: { type: String, required: true, trim: true },
+  servicioId: {
+    type: Schema.Types.ObjectId,
+    ref: "servicioCollection",
+  },
+  codServicio: { type: String, required: true, trim: true },
   nombreServicio: { type: String, required: true, trim: true },
   estado: {
     type: String,
@@ -30,7 +34,17 @@ const ServicioSolicitudSchema = new mongoose.Schema({
 const SolicitudAtencionSchema = new Schema(
   {
     codSolicitud: { type: String, required: true, unique: true, trim: true },
+    pagoId: {
+      type: Schema.Types.ObjectId,
+      ref: "pagoCollection",
+      required: true,
+    },
     codPago: { type: String, default: null, trim: true },
+    cotizacionId: {
+      type: Schema.Types.ObjectId,
+      ref: "cotizacionCollection",
+      required: true,
+    },
     codCotizacion: { type: String, required: true, index: true },
     fechaCotizacion: { type: Date },
     tipo: {

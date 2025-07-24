@@ -128,15 +128,9 @@ const encontrarTermino = async (req, res = response) => {
 const actualizarItem = async (req, res = response) => {
   const codigo = req.params.codigo; //recupera la hc
   const datosActualizados = req.body; //recupera los datos a grabar
-  delete datosActualizados._id; //quita los _id generados por el mongo y que no se pueden modificar
-  delete datosActualizados.paramValidacion._id;
 
   try {
     // console.log('Datos recibidos:', req.body);
-
-    //Hashear la contraseña mediante un hash
-    //const numAletorio = bcrypt.genSaltSync();
-    //dbPaciente.password = bcrypt.hashSync(password, numAletorio);
 
     //Generar el JWT
     //const token = await generarJWT(dbPaciente.id, dbPaciente.name, dbPaciente.rol);
@@ -144,7 +138,8 @@ const actualizarItem = async (req, res = response) => {
 
     const itemLab = await ItemLab.findOneAndUpdate(
       { codItemLab: codigo },
-      datosActualizados
+      { $set: datosActualizados },
+      { new: true } // Devuelve el documento actualizado
     );
 
     if (!itemLab) {
@@ -157,8 +152,6 @@ const actualizarItem = async (req, res = response) => {
     //Generar respuesta exitosa
     return res.status(201).json({
       ok: true,
-      //uid: dbPaciente.id,
-      //token: token,
     });
   } catch (error) {
     console.error("Error al actualizar el item: ", error);

@@ -42,6 +42,11 @@ const DetallePagoSchema = new Schema({
 const PagoSchema = new Schema(
   {
     codPago: { type: String, unique: true },
+    cotizacionId: {
+      type: Schema.Types.ObjectId,
+      ref: "cotizacionCollection",
+      required: true,
+    },
     codCotizacion: { type: String },
     fechaCotizacion: { type: Date },
     version: { type: String },

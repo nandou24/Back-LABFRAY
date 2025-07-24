@@ -77,7 +77,8 @@ const crearPago = async (datos, session, cotizacionOriginal) => {
     apeMatCliente,
   } = datos;
 
-  console.log("Datos recibidos para crear pago:", cotizacionOriginal);
+  //console.log("Datos recibidos para crear pago:", cotizacionOriginal);
+  //console.log("serviciosCotizacion:", serviciosCotizacion);
 
   // 1. Total real desde la BD
   //debemos obtener el total del último historial de la cotización
@@ -155,12 +156,15 @@ const crearPago = async (datos, session, cotizacionOriginal) => {
 
       const solicitud = new SolicitudAtencion({
         codSolicitud: await generarCodigoSolicitud(session),
+        pagoId: nuevoPago._id,
         codPago: nuevoCodPago,
+        cotizacionId: cotizacionOriginal._id,
         codCotizacion: codCotizacion,
         fechaCotizacion: fechaCotizacion,
         tipo: tipoValido,
         servicios: servicios.map((serv) => ({
-          codigoServicio: serv.codServicio,
+          servicioId: serv.servicioId, // Referencia al servicio
+          codServicio: serv.codServicio,
           nombreServicio: serv.nombreServicio,
           estado: "PENDIENTE",
           medicoAtiende: serv.medicoAtiende,

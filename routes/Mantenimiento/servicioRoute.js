@@ -7,6 +7,7 @@ const {
   encontrarTipoExamen,
   actualizarServicio,
   mostrarServiciosFavoritos,
+  obtenerItemsLaboratorioPorServicio,
 } = require("../../controllers/Mantenimiento/servicioController");
 const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
@@ -86,7 +87,7 @@ router.get(
   encontrarTipoExamen
 );
 
-//POST
+//PUT
 //! Actualizar Servicio
 router.put(
   "/:codServicio/updateServicio",
@@ -96,5 +97,15 @@ router.put(
   ],
   actualizarServicio
 );
+
+router.get(
+  "/pruebaLab-items",
+  [
+    //check('token')
+    //.notEmpty().withMessage('Es token es obligatorio'),
+  ],
+  obtenerItemsLaboratorioPorServicio
+);
+
 //para exportar rutas
 module.exports = router;

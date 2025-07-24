@@ -165,6 +165,92 @@ const encontrarTermino = async (req, res = response) => {
   }
 };
 
+const obtenerItemsLaboratorioPorServicio = async (req, res = response) => {
+  let servicios = req.query.servicioIds;
+
+  console.log("Servicios recibidos:", servicios);
+
+  // Convertir a array si viene un solo elemento (string)
+  if (typeof servicios === "string") {
+    servicios = [servicios];
+  }
+
+  console.log("Servicios procesados:", servicios);
+
+  try {
+    // Validar que se envíen servicios
+    if (!servicios || !Array.isArray(servicios) || servicios.length === 0) {
+      return res.status(400).json({
+        ok: false,
+        msg: "Debe proporcionar un array de servicios válido",
+      });
+    }
+
+    // Buscar los servicios completos por sus IDs
+    const serviciosCompletos = await Servicio.find({
+      _id: { $in: servicios },
+    });
+
+    console.log("Servicios encontrados:", serviciosCompletos);
+
+    if (serviciosCompletos.length === 0) {
+      return res.status(404).json({
+        ok: false,
+        msg: "No se encontraron servicios con los IDs proporcionados",
+      });
+    }
+
+    // Extraer todos los códigos de pruebas de laboratorio de todos los servicios
+    let todosCodigos = [];
+
+    serviciosCompletos.forEach((servicio) => {
+      if (
+        servicio.examenesServicio &&
+        Array.isArray(servicio.examenesServicio)
+      ) {
+        const codigosDelServicio = servicio.examenesServicio.map(
+          (examen) => examen.codExamen
+        );
+        todosCodigos.push(...codigosDelServicio);
+      }
+    });
+
+    // Remover duplicados
+    const codigosUnicos = [...new Set(todosCodigos)];
+
+    console.log("Códigos únicos de pruebas:", codigosUnicos);
+
+    if (codigosUnicos.length === 0) {
+      return res.json({
+        ok: true,
+        msg: "Los servicios no tienen exámenes de laboratorio asociados",
+        pruebasLab: [],
+      });
+    }
+
+    // Buscar todas las pruebas de laboratorio y hacer populate de items
+    const pruebasLab = await PruebaLab.find({
+      codPruebaLab: { $in: codigosUnicos },
+    }).populate("itemsComponentes.itemLabId");
+
+    console.log("Pruebas de laboratorio encontradas:", pruebasLab);
+
+    return res.json({
+      ok: true,
+      pruebasLab: pruebasLab,
+    });
+  } catch (error) {
+    console.error(
+      "Error al obtener items de laboratorio por servicios:",
+      error
+    );
+    return res.status(500).json({
+      ok: false,
+      msg: "Error interno al obtener items de laboratorio",
+    });
+  }
+};
+
 const encontrarTipoExamen = async (req, res = response) => {
   const tipo = req.query.search;
 
@@ -246,4 +332,5 @@ module.exports = {
   encontrarTipoExamen,
   actualizarServicio,
   mostrarServiciosFavoritos,
+  obtenerItemsLaboratorioPorServicio,
 };

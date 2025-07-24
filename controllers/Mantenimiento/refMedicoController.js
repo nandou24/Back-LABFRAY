@@ -133,7 +133,7 @@ const mostrarUltimosRefMedicosParaCotizacion = async (req, res = response) => {
 const encontrarTerminoRefMedico = async (req, res = response) => {
   const termino = req.query.search;
   try {
-    const refMedicos = await RefMedico.find({
+    let refMedicos = await RefMedico.find({
       $or: [
         { nombreRefMedico: { $regex: termino, $options: "i" } },
         { apePatRefMedico: { $regex: termino, $options: "i" } },
@@ -141,6 +141,22 @@ const encontrarTerminoRefMedico = async (req, res = response) => {
         { nroDoc: { $regex: termino, $options: "i" } },
       ],
     });
+
+    // Extraer especialidades como string
+    refMedicos = refMedicos.map((medico) => {
+      let especialidades = "";
+      if (Array.isArray(medico.especialidadesRefMedico)) {
+        especialidades = medico.especialidadesRefMedico
+          .map((esp) => esp.especialidad)
+          .filter(Boolean)
+          .join(", ");
+      }
+      return {
+        ...medico._doc,
+        especialidades: especialidades,
+      };
+    });
+
     return res.json({
       ok: true,
       refMedicos,
@@ -155,20 +171,29 @@ const encontrarTerminoRefMedico = async (req, res = response) => {
 };
 
 const actualizarRefMedico = async (req, res = response) => {
+  const referenciId = req.params._id;
   const codigo = req.params.codRefMedico;
   const datosActualizados = req.body;
-  delete datosActualizados._id;
-  if (datosActualizados.phones) delete datosActualizados.phones._id;
-  if (datosActualizados.profesionesRefMedico)
-    delete datosActualizados.profesionesRefMedico._id;
-  if (datosActualizados.especialidadesRefMedico)
-    delete datosActualizados.especialidadesRefMedico._id;
-  if (datosActualizados.profesionSolicitante)
-    delete datosActualizados.profesionSolicitante._id;
+
+  const tipoDoc = datosActualizados.tipoDoc;
+  const nroDoc = datosActualizados.nroDoc;
+
+  const existeRefMedico = await RefMedico.findOne({
+    tipoDoc,
+    nroDoc,
+    codRefMedico: { $ne: codigo },
+  });
+  if (existeRefMedico) {
+    return res.status(400).json({
+      ok: false,
+      msg: "Ya existe un médico referente con ese documento",
+    });
+  }
+
   try {
     const refMedico = await RefMedico.findOneAndUpdate(
       { codRefMedico: codigo },
-      datosActualizados
+      { $set: datosActualizados }
     );
     if (!refMedico) {
       return res.status(404).json({

@@ -2,6 +2,10 @@ const mongoose = require("mongoose");
 const { Schema } = require("mongoose");
 
 const examenesSchema = new mongoose.Schema({
+  pruebaLabId: {
+    type: Schema.Types.ObjectId,
+    ref: "pruebasLabCollection",
+  },
   codExamen: { type: String, required: true },
   nombreExamen: { type: String, required: true },
   tipoExamen: { type: String, required: false },
