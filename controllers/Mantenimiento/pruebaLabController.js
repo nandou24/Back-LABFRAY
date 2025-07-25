@@ -69,6 +69,7 @@ const crearPruebaLab = async (req, res = response) => {
 const mostrarUltimasPruebas = async (req, res = response) => {
   try {
     const pruebasLab = await PruebaLab.find()
+      .populate("itemsComponentes.itemLabId")
       //.sort({createdAt: -1})
       .limit(30);
 

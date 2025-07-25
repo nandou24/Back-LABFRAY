@@ -6,9 +6,9 @@ const itemsSchema = new mongoose.Schema({
     type: Schema.Types.ObjectId,
     ref: "itemsLabCollection",
   },
-  codItemLab: { type: String, required: true },
-  nombreItemLab: { type: String, required: true },
-  perteneceA: { type: String },
+  //   codItemLab: { type: String, required: true },
+  //   nombreItemLab: { type: String, required: true },
+  //   perteneceA: { type: String },
 });
 
 const PruebaLabSchema = Schema(
@@ -24,9 +24,10 @@ const PruebaLabSchema = Schema(
     condPreAnalitRefer: { type: String, required: true },
     tipoMuestra: { type: [String], required: true },
     tipoTuboEnvase: { type: [String], required: true },
-    tiempoEntrega: { type: String, required: true },
+    tiempoRespuesta: { type: String, required: true },
     observPruebas: { type: String },
     estadoPrueba: { type: String, required: true },
+    ordenImpresion: { type: Number, default: 0 },
     itemsComponentes: [itemsSchema],
   },
   {
