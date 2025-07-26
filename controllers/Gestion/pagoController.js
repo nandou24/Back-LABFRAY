@@ -160,6 +160,7 @@ const crearPago = async (datos, session, cotizacionOriginal) => {
         codPago: nuevoCodPago,
         cotizacionId: cotizacionOriginal._id,
         codCotizacion: codCotizacion,
+        solicitanteId: ultimoHistorial.solicitanteId,
         fechaCotizacion: fechaCotizacion,
         tipo: tipoValido,
         servicios: servicios.map((serv) => ({

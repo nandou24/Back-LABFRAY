@@ -74,6 +74,11 @@ const SolicitudAtencionSchema = new Schema(
       set: (value) => value.toUpperCase(),
     },
     apeMatCliente: { type: String, set: (value) => value.toUpperCase() },
+    solicitanteId: {
+      type: Schema.Types.ObjectId,
+      ref: "referenciaMedicoCollection",
+      required: false,
+    },
     fechaEmision: { type: Date, required: true },
     //codUsuarioEmisor: { type: String, required: true },
     usuarioEmisor: { type: String, required: true },

@@ -212,6 +212,44 @@ const encontrarTermino = async (req, res = response) => {
   }
 };
 
+const encontrarTerminoporId = async (req, res = response) => {
+  const id = req.query.search;
+
+  //console.log("ID de paciente buscado:", id);
+
+  if (!id) {
+    return res.status(400).json({
+      ok: false,
+      msg: "Debe proporcionar un ID de paciente válido",
+    });
+  }
+
+  try {
+    const paciente = await Paciente.findById(id, {
+      fechaNacimiento: 1,
+      sexoCliente: 1,
+    });
+    // const paciente = await Paciente.findById(id);
+    if (!paciente) {
+      return res.status(404).json({
+        ok: false,
+        msg: "Paciente no encontrado",
+      });
+    }
+    console.log("Paciente encontrado:", paciente);
+    return res.json({
+      ok: true,
+      paciente,
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      ok: false,
+      msg: "Error en la consulta",
+    });
+  }
+};
+
 const encontrarTerminoCotizaicon = async (req, res = response) => {
   const termino = req.query.search;
 
@@ -447,4 +485,5 @@ module.exports = {
   encontrarTerminoCotizaicon,
   mostrarUltimosPacientesCotizacion,
   registrarPacienteSinnHC,
+  encontrarTerminoporId,
 };

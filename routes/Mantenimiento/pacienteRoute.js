@@ -8,6 +8,7 @@ const {
   encontrarTerminoCotizaicon,
   mostrarUltimosPacientesCotizacion,
   registrarPacienteSinnHC,
+  encontrarTerminoporId,
 } = require("../../controllers/Mantenimiento/pacienteController");
 const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
@@ -79,7 +80,7 @@ router.get(
   mostrarUltimosPacientesCotizacion
 );
 
-//POST
+//GET
 //! Buscar paciente
 router.get(
   "/findTerm",
@@ -88,6 +89,17 @@ router.get(
     //.notEmpty().withMessage('Es token es obligatorio'),
   ],
   encontrarTermino
+);
+
+//GET
+//! Buscar paciente
+router.get(
+  "/findTermById",
+  [
+    //check('token')
+    //.notEmpty().withMessage('Es token es obligatorio'),
+  ],
+  encontrarTerminoporId
 );
 
 router.get(

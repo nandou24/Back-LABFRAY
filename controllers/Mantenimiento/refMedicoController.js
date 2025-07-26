@@ -170,6 +170,43 @@ const encontrarTerminoRefMedico = async (req, res = response) => {
   }
 };
 
+const encontrarTerminoporId = async (req, res = response) => {
+  const id = req.query.search;
+
+  if (!id) {
+    return res.status(400).json({
+      ok: false,
+      msg: "Debe proporcionar un ID del solicitante válido",
+    });
+  }
+
+  try {
+    const solicitante = await RefMedico.findById(id, {
+      apePatRefMedico: 1,
+      apeMatRefMedico: 1,
+      nombreRefMedico: 1,
+    });
+    // const paciente = await Paciente.findById(id);
+    if (!solicitante) {
+      return res.status(404).json({
+        ok: false,
+        msg: "Solicitante no encontrado",
+      });
+    }
+    console.log("Solicitante encontrado:", solicitante);
+    return res.json({
+      ok: true,
+      solicitante,
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      ok: false,
+      msg: "Error en la consulta",
+    });
+  }
+};
+
 const actualizarRefMedico = async (req, res = response) => {
   const referenciId = req.params._id;
   const codigo = req.params.codRefMedico;
@@ -219,4 +256,5 @@ module.exports = {
   encontrarTerminoRefMedico,
   actualizarRefMedico,
   mostrarUltimosRefMedicosParaCotizacion,
+  encontrarTerminoporId,
 };

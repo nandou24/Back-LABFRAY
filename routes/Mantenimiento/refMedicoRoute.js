@@ -6,6 +6,7 @@ const {
   encontrarTerminoRefMedico,
   actualizarRefMedico,
   mostrarUltimosRefMedicosParaCotizacion,
+  encontrarTerminoporId,
 } = require("../../controllers/Mantenimiento/refMedicoController");
 const { validarCampos } = require("../../middlewares/validar-campo");
 // const { validarJWT } = require('../middlewares/validar-token');
@@ -48,5 +49,16 @@ router.get(
 );
 router.get("/findTerm", encontrarTerminoRefMedico);
 router.put("/:codRefMedico/updateRefMedico", actualizarRefMedico);
+
+//GET
+//! Buscar paciente
+router.get(
+  "/findTermById",
+  [
+    //check('token')
+    //.notEmpty().withMessage('Es token es obligatorio'),
+  ],
+  encontrarTerminoporId
+);
 
 module.exports = router;
