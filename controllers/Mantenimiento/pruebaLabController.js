@@ -1,5 +1,5 @@
 const { response } = require("express");
-const PruebaLab = require("../../models/PruebaLab");
+const PruebaLab = require("../../models/Mantenimiento/PruebaLab");
 const bcrypt = require("bcryptjs");
 const { generarJWT } = require("../../helpers/jwt");
 const jwt = require("jsonwebtoken");
@@ -70,8 +70,7 @@ const mostrarUltimasPruebas = async (req, res = response) => {
   try {
     const pruebasLab = await PruebaLab.find()
       .populate("itemsComponentes.itemLabId")
-      //.sort({createdAt: -1})
-      .limit(30);
+      .sort({ createdAt: -1 });
 
     return res.json({
       ok: true,

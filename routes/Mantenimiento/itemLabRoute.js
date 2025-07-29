@@ -22,15 +22,17 @@ router.post(
   [
     //validarJWT,
 
-    check("nombreItemLab")
+    check("nombreInforme")
       .notEmpty()
-      .withMessage("Nombre de item es obligatorio"),
+      .withMessage("Nombre de informe es obligatorio"),
+
+    check("nombreHojaTrabajo")
+      .notEmpty()
+      .withMessage("Nombre de hoja de trabajo es obligatorio"),
 
     check("metodoItemLab").notEmpty().withMessage("Falta método"),
 
-    check("plantillaValores")
-      .notEmpty()
-      .withMessage("Falta plantilla de valores de referencia"),
+    check("valoresInforme").notEmpty().withMessage("Falta valores de informe"),
 
     check("unidadesRef").notEmpty().withMessage("Unidades es obligatorio"),
 
@@ -46,7 +48,7 @@ router.post(
 //POST
 //! Listar últimos 30 pacientes
 router.get(
-  "/last30",
+  "/lastItems",
   [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),

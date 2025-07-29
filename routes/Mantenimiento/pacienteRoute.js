@@ -36,11 +36,11 @@ router.post(
       .notEmpty()
       .withMessage("Apellido Paterno es obligatorio"),
 
-    check("fechaNacimiento")
-      .notEmpty()
-      .withMessage("Fecha de nacimiento es obligatorio"),
+    // check("fechaNacimiento")
+    //   .notEmpty()
+    //   .withMessage("Fecha de nacimiento es obligatorio"),
 
-    check("sexoCliente").notEmpty().withMessage("Sexo es obligatorio"),
+    // check("sexoCliente").notEmpty().withMessage("Sexo es obligatorio"),
 
     check("departamentoCliente")
       .notEmpty()
@@ -114,7 +114,7 @@ router.get(
 //PUT
 //! Actualizar Paciente
 router.put(
-  "/:nroHC/updatePatient",
+  "/updatePatient",
   [
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),

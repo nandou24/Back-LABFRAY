@@ -1,6 +1,6 @@
 const { response } = require("express");
 const bcrypt = require("bcryptjs");
-const PruebaLab = require("../../models/PruebaLab");
+const PruebaLab = require("../../models/Mantenimiento/PruebaLab");
 const { generarJWT } = require("../../helpers/jwt");
 const jwt = require("jsonwebtoken");
 const Servicio = require("../../models/Servicio");

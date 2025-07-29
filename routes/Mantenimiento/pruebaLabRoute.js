@@ -48,7 +48,7 @@ router.post(
       .notEmpty()
       .withMessage("Tipo de tubo / envase es obligatorio"),
 
-    check("tiempoEntrega")
+    check("tiempoRespuesta")
       .notEmpty()
       .withMessage("Tiempo de respuesta es obligatorio"),
 

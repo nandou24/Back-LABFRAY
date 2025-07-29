@@ -1,5 +1,5 @@
 const { response } = require("express");
-const ItemLab = require("../../models/ItemLab");
+const ItemLab = require("../../models/Mantenimiento/ItemLab");
 const bcrypt = require("bcryptjs");
 const { generarJWT } = require("../../helpers/jwt");
 const jwt = require("jsonwebtoken");
@@ -12,7 +12,7 @@ const crearItemLab = async (req, res = response) => {
     plantillaValores,
     unidadesRef,
     poseeValidacion,
-    perteneceA,
+    perteneceAPrueba,
     paramValidacion,
   } = req.body;
 
@@ -20,7 +20,7 @@ const crearItemLab = async (req, res = response) => {
     // verificar si el nombre existe
     const itemExistente = await ItemLab.findOne({
       nombreItemLab: { $regex: new RegExp(`^${nombreItemLab}$`, "i") },
-      perteneceA: { $regex: new RegExp(`^${perteneceA}$`, "i") },
+      perteneceAPrueba: { $regex: new RegExp(`^${perteneceAPrueba}$`, "i") },
     });
 
     if (itemExistente) {
@@ -29,10 +29,6 @@ const crearItemLab = async (req, res = response) => {
         msg: "Ya existe un item con ese nombre y prueba a la que pertenece",
       });
     }
-
-    //Generar el JWT
-    //const token = await generarJWT(dbPaciente.id, dbPaciente.name, dbPaciente.rol);
-    //Crear usuario de base de datos
 
     //creando codigo prueba
     // Buscar el último item
@@ -78,12 +74,7 @@ const crearItemLab = async (req, res = response) => {
 
 const mostrarUltimosItems = async (req, res = response) => {
   try {
-    const cantidad = req.query.cant;
-    const limite = parseInt(cantidad);
-
-    const itemsLab = await ItemLab.find()
-      //.sort({createdAt: -1})
-      .limit(limite);
+    const itemsLab = await ItemLab.find().sort({ createdAt: -1 });
 
     return res.json({
       ok: true,
@@ -107,7 +98,8 @@ const encontrarTermino = async (req, res = response) => {
       //nroDoc: { $regex: termino, $options: 'i'}
 
       $or: [
-        { nombreItemLab: { $regex: termino, $options: "i" } }, // Búsqueda en el campo "nombre"
+        { nombreInforme: { $regex: termino, $options: "i" } }, // Búsqueda en el campo "nombre"
+        { nombreHojaTrabajo: { $regex: termino, $options: "i" } }, // Búsqueda en el campo "método"
         { perteneceA: { $regex: termino, $options: "i" } }, // Búsqueda en el campo "observación"
         // Agrega más campos si es necesario
       ],
@@ -131,10 +123,6 @@ const actualizarItem = async (req, res = response) => {
 
   try {
     // console.log('Datos recibidos:', req.body);
-
-    //Generar el JWT
-    //const token = await generarJWT(dbPaciente.id, dbPaciente.name, dbPaciente.rol);
-    //Crear usuario de base de datos
 
     const itemLab = await ItemLab.findOneAndUpdate(
       { codItemLab: codigo },

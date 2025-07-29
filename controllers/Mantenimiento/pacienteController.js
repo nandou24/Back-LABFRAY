@@ -1,5 +1,5 @@
 const { response } = require("express");
-const Paciente = require("../../models/Paciente");
+const Paciente = require("../../models/Mantenimiento/Paciente");
 const bcrypt = require("bcryptjs");
 const { generarJWT } = require("../../helpers/jwt");
 const jwt = require("jsonwebtoken");
@@ -71,6 +71,8 @@ const crearPaciente = async (req, res = response) => {
       ...req.body,
       hc: historiaClinica, // Agregar el número de historia clínica generado
     });
+
+    console.log(nuevoPaciente, "nuevo paciente");
 
     await nuevoPaciente.save();
     // console.log(dbUser, "pasoo registro");
@@ -330,28 +332,13 @@ const encontrarTerminoCotizaicon = async (req, res = response) => {
 };
 
 const actualizarPaciente = async (req, res = response) => {
-  const idNroHC = req.params.nroHC; //recupera la hc
-  const datosActualizados = req.body; //recupera los datos a grabar
-
-  const tipoDoc = datosActualizados.tipoDoc;
-  const nroDoc = datosActualizados.nroDoc;
-
-  const existePaciente = await Paciente.findOne({
-    tipoDoc,
-    nroDoc,
-    hc: { $ne: idNroHC },
-  });
-  if (existePaciente) {
-    return res.status(400).json({
-      ok: false,
-      msg: "Ya existe un paciente con ese documento",
-    });
-  }
+  const { tipoDoc, nroDoc, ...datosActualizables } = req.body;
+  console.log("Datos a actualizar:", datosActualizables);
 
   try {
     const paciente = await Paciente.findOneAndUpdate(
-      { hc: idNroHC },
-      { $set: datosActualizados }
+      { _id: datosActualizables._id },
+      { $set: datosActualizables }
     );
 
     if (!paciente) {
