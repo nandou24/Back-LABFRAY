@@ -5,9 +5,11 @@ const { generarJWT } = require("../../helpers/jwt");
 const jwt = require("jsonwebtoken");
 
 const crearItemLab = async (req, res = response) => {
+  console.log("Datos recibidos:", req.body);
+
   const {
     codItemLab,
-    nombreItemLab,
+    nombreInforme,
     metodoItemLab,
     plantillaValores,
     unidadesRef,
@@ -19,9 +21,11 @@ const crearItemLab = async (req, res = response) => {
   try {
     // verificar si el nombre existe
     const itemExistente = await ItemLab.findOne({
-      nombreItemLab: { $regex: new RegExp(`^${nombreItemLab}$`, "i") },
+      nombreInforme: { $regex: new RegExp(`^${nombreInforme}$`, "i") },
       perteneceAPrueba: { $regex: new RegExp(`^${perteneceAPrueba}$`, "i") },
     });
+
+    console.log("Item existente:", itemExistente);
 
     if (itemExistente) {
       return res.status(400).json({
@@ -47,6 +51,7 @@ const crearItemLab = async (req, res = response) => {
 
     // Formateamos: IL + número con 4 cifras
     const codItemLabFormateado = `IL${String(nuevoCodigo).padStart(4, "0")}`;
+    console.log("Nuevo código generado:", codItemLabFormateado);
 
     // Crear la prueba con el código
     const nuevoItemLab = new ItemLab({

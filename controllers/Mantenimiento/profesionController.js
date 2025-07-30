@@ -1,5 +1,5 @@
 const { response } = require("express");
-const Profesion = require("../../models/Profesiones");
+const Profesion = require("../../models/Mantenimiento/Profesiones");
 
 const crearProfesion = async (req, res = response) => {
   const profesion = req.body;

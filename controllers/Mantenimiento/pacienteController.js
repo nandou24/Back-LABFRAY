@@ -1,8 +1,5 @@
 const { response } = require("express");
 const Paciente = require("../../models/Mantenimiento/Paciente");
-const bcrypt = require("bcryptjs");
-const { generarJWT } = require("../../helpers/jwt");
-const jwt = require("jsonwebtoken");
 const Cotizacion = require("../../models/CotizacionPaciente");
 const mongoose = require("mongoose");
 
@@ -23,6 +20,8 @@ const crearPaciente = async (req, res = response) => {
     mailCliente,
     phones,
   } = req.body;
+
+  const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
 
   //Para crear HC
   const fecha = new Date();
@@ -70,9 +69,12 @@ const crearPaciente = async (req, res = response) => {
     const nuevoPaciente = new Paciente({
       ...req.body,
       hc: historiaClinica, // Agregar el número de historia clínica generado
+      createdBy: uid, // uid del usuario que creó el paciente
+      usuarioRegistro: nombreUsuario, // Nombre de usuario que creó el paciente
+      fechaRegistro: new Date(), // Fecha de registro
     });
 
-    console.log(nuevoPaciente, "nuevo paciente");
+    //console.log(nuevoPaciente, "nuevo paciente");
 
     await nuevoPaciente.save();
     // console.log(dbUser, "pasoo registro");
@@ -333,12 +335,18 @@ const encontrarTerminoCotizaicon = async (req, res = response) => {
 
 const actualizarPaciente = async (req, res = response) => {
   const { tipoDoc, nroDoc, ...datosActualizables } = req.body;
+  const uid = req.user.uid; // Viene del middleware validarJWT
   console.log("Datos a actualizar:", datosActualizables);
 
   try {
     const paciente = await Paciente.findOneAndUpdate(
       { _id: datosActualizables._id },
-      { $set: datosActualizables }
+      {
+        $set: datosActualizables,
+        updatedBy: uid, // uid del usuario que actualiza el paciente
+        usuarioActualizacion: req.user.nombreUsuario, // Nombre de usuario que actualiza el paciente
+        fechaActualizacion: new Date(), // Fecha de actualización
+      }
     );
 
     if (!paciente) {

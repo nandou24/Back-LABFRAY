@@ -24,7 +24,7 @@ const router = Router();
 router.post(
   "/newPaciente",
   [
-    //validarJWT,
+    validarJWT,
 
     check("tipoDoc").notEmpty().withMessage("Tipo documento es obligatorio"),
 
@@ -116,6 +116,7 @@ router.get(
 router.put(
   "/updatePatient",
   [
+    validarJWT,
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
   ],

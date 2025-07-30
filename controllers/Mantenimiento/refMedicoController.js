@@ -1,5 +1,5 @@
 const { response } = require("express");
-const RefMedico = require("../../models/RefMedico");
+const RefMedico = require("../../models/Mantenimiento/RefMedico");
 
 const crearRefMedico = async (req, res = response) => {
   try {
@@ -68,31 +68,21 @@ const mostrarUltimosRefMedicos = async (req, res = response) => {
 
 const mostrarUltimosRefMedicosParaCotizacion = async (req, res = response) => {
   try {
-    const cantidad = req.query.cant;
-    const limite = parseInt(cantidad);
     let refMedicos;
     const campos =
-      "apePatRefMedico apeMatRefMedico nombreRefMedico especialidadesRefMedico profesionSolicitante _id";
-    if (cantidad == 0) {
-      refMedicos = await RefMedico.find({}, campos);
-    } else {
-      refMedicos = await RefMedico.find({}, campos).limit(limite);
-    }
+      "apePatRefMedico apeMatRefMedico nombreRefMedico profesionesRefMedico _id";
 
-    // Extraer especialidades como string
-    refMedicos = refMedicos.map((medico) => {
-      let especialidades = "";
-      if (Array.isArray(medico.especialidadesRefMedico)) {
-        especialidades = medico.especialidadesRefMedico
-          .map((esp) => esp.especialidad)
-          .filter(Boolean)
-          .join(", ");
-      }
-      return {
-        ...medico._doc,
-        especialidades: especialidades,
-      };
-    });
+    refMedicos = await RefMedico.find({}, campos)
+      .populate({
+        path: "profesionesRefMedico.profesionRef",
+        select: "nombreProfesion", // Ajusta según tu modelo real
+      })
+      .populate({
+        path: "profesionesRefMedico.especialidades.especialidadRef",
+        select: "nombreEspecialidad", // Ajusta según tu modelo real
+      });
+
+    console.log("RefMedicos encontrados:", refMedicos);
 
     return res.json({
       ok: true,
@@ -106,29 +96,6 @@ const mostrarUltimosRefMedicosParaCotizacion = async (req, res = response) => {
     });
   }
 };
-// const mostrarUltimosRefMedicosParaCotizacion = async (req, res = response) => {
-
-//   try {
-//     const cantidad = req.query.cant;
-//     const limite = parseInt(cantidad);
-//     let refMedicos;
-//     if (cantidad == 0) {
-//       refMedicos = await RefMedico.find();
-//     } else {
-//       refMedicos = await RefMedico.find().limit(limite);
-//     }
-//     return res.json({
-//       ok: true,
-//       refMedicos,
-//     });
-//   } catch (error) {
-//     console.log(error);
-//     return res.status(500).json({
-//       ok: false,
-//       msg: "Error en la consulta",
-//     });
-//   }
-// };
 
 const encontrarTerminoRefMedico = async (req, res = response) => {
   const termino = req.query.search;

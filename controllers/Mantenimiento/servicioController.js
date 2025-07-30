@@ -3,7 +3,7 @@ const bcrypt = require("bcryptjs");
 const PruebaLab = require("../../models/Mantenimiento/PruebaLab");
 const { generarJWT } = require("../../helpers/jwt");
 const jwt = require("jsonwebtoken");
-const Servicio = require("../../models/Servicio");
+const Servicio = require("../../models/Mantenimiento/Servicio");
 
 const crearServicio = async (req, res = response) => {
   const { tipoServicio, nombreServicio } = req.body;

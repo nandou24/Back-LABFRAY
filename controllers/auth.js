@@ -2,7 +2,7 @@ const { response } = require("express");
 const Usuario = require("../models/Usuario");
 const bcrypt = require("bcryptjs");
 const { generarJWT } = require("../helpers/jwt");
-const RecurHumano = require("../models/RecHumano");
+const RecurHumano = require("../models/Mantenimiento/RecHumano");
 
 const crearUsuario = async (req, res = response) => {
   // console.log(req.body)
@@ -98,6 +98,10 @@ const loginUsuario = async (req, res) => {
     return res.json({
       ok: true,
       token, //! token : token
+      user: {
+        nombreUsuario: usuario.datosLogueo.nombreUsuario,
+        // puedes incluir más campos si deseas
+      },
     });
   } catch (error) {
     console.log(error);

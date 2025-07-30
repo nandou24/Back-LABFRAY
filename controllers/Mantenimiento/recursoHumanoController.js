@@ -1,5 +1,5 @@
 const { response } = require("express");
-const RecurHumano = require("../../models/RecHumano");
+const RecurHumano = require("../../models/Mantenimiento/RecHumano");
 const bcrypt = require("bcryptjs");
 const { generarJWT } = require("../../helpers/jwt");
 const jwt = require("jsonwebtoken");
