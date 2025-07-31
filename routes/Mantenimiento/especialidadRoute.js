@@ -17,7 +17,7 @@ const router = Router();
 router.post(
   "/newEspecialidad",
   [
-    //validarJWT,
+    validarJWT,
 
     check("nombreEspecialidad")
       .notEmpty()
@@ -31,10 +31,10 @@ router.post(
 );
 
 // Actualizar especialidades
-router.put("/:codEspecialidad", actualizarEspecialidad);
+router.put("/:codEspecialidad", [validarJWT], actualizarEspecialidad);
 
 // Eliminar especialidades
-router.delete("/:codEspecialidad", eliminarEspecialidad);
+router.delete("/:codEspecialidad", [validarJWT], eliminarEspecialidad);
 
 // Listar especialidades
 router.get("/latest", listarEspecialidades);

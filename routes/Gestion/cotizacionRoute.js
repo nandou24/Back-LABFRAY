@@ -20,72 +20,29 @@ const router = Router();
 //!Estructura: URL --> VALIDACIONES --> CONTROLADOR --> RESPUESTA
 
 //! crear un nueva cotizacion
-router.post(
-  "/newCotizacionPersona",
-  [
-    //validarJWT,
-  ],
-  crearCotizacion
-);
+router.post("/newCotizacionPersona", [validarJWT], crearCotizacion);
 
 //! crear un nuevo version
 router.post(
   "/newVersionCotizacionPersona",
-  [
-    //validarJWT,
-  ],
+  [validarJWT],
   crearNuevaVersionCotiPersona
 );
 
 //POST
 //! Listar últimas cotizaciones
-router.get(
-  "/latest",
-  [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-  ],
-  mostrarUltimasCotizaciones
-);
+router.get("/latest", [validarJWT], mostrarUltimasCotizaciones);
 
 //! Listar últimas cotizaciones por pagar
-router.get(
-  "/latestPorPagar",
-  [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-  ],
-  mostrarUltimasCotizacionesPorPagar
-);
+router.get("/latestPorPagar", [validarJWT], mostrarUltimasCotizacionesPorPagar);
 
 //! Listar últimas cotizaciones pagadas
-router.get(
-  "/latestPagadas",
-  [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-  ],
-  mostrarUltimasCotizacionesPagadas
-);
+router.get("/latestPagadas", [validarJWT], mostrarUltimasCotizacionesPagadas);
 
 //! Buscar servicio
-router.get(
-  "/findTerm",
-  [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-  ],
-  encontrarTermino
-);
+router.get("/findTerm", [validarJWT], encontrarTermino);
 
 //GET
-router.get(
-  "/findHC",
-  [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-  ],
-  verificarHcRegistrada
-);
+router.get("/findHC", [validarJWT], verificarHcRegistrada);
 
 module.exports = router;

@@ -12,15 +12,11 @@ const { validarJWT } = require("../../middlewares/validar-token");
 //Rutas
 const router = Router();
 
-//POST
-//controlador de esa ruta
-//!Estructura: URL --> VALIDACIONES --> CONTROLADOR --> RESPUESTA
-
 //! crear un nuevo favorito
 router.post(
   "/newItemLab",
   [
-    //validarJWT,
+    validarJWT,
 
     check("nombreInforme")
       .notEmpty()
@@ -69,13 +65,6 @@ router.get(
 
 //POST
 //! Actualizar Paciente
-router.put(
-  "/:codigo/updateItem",
-  [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-  ],
-  actualizarItem
-);
+router.put("/:codigo/updateItem", [validarJWT], actualizarItem);
 //para exportar rutas
 module.exports = router;

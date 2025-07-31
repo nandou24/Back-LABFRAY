@@ -3,6 +3,7 @@ const Profesion = require("../../models/Mantenimiento/Profesiones");
 
 const crearProfesion = async (req, res = response) => {
   const profesion = req.body;
+  const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
   const nombreProfesion = profesion.nombreProfesion.toUpperCase();
 
   try {
@@ -35,6 +36,9 @@ const crearProfesion = async (req, res = response) => {
     const nuevaProfesion = new Profesion({
       ...profesion,
       codProfesion: codigo, // Agregar el código generado
+      createdBy: uid, // uid del usuario que creó la profesión
+      usuarioRegistro: nombreUsuario, // Nombre de usuario que creó la profesión
+      fechaRegistro: new Date(), // Fecha de registro
     });
 
     await nuevaProfesion.save();
@@ -54,6 +58,7 @@ const crearProfesion = async (req, res = response) => {
 const actualizarProfesion = async (req, res) => {
   try {
     const { codProfesion, nombreProfesion } = req.params;
+    const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
 
     const datosActualizados = req.body;
 
@@ -70,7 +75,13 @@ const actualizarProfesion = async (req, res) => {
 
     const actualizada = await Profesion.findOneAndUpdate(
       { codProfesion },
-      { $set: datosActualizados }
+      { 
+        $set: datosActualizados,
+        updatedBy: uid, // uid del usuario que actualiza
+        usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza
+        fechaActualizacion: new Date(), // Fecha de actualización
+      },
+      { new: true }
     );
 
     if (!actualizada) {

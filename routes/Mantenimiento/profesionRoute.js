@@ -16,7 +16,7 @@ const router = Router();
 router.post(
   "/newProfesion",
   [
-    //validarJWT,
+    validarJWT,
 
     check("nombreProfesion")
       .notEmpty()
@@ -28,10 +28,10 @@ router.post(
 );
 
 // Actualizar ruta
-router.put("/:codProfesion", actualizarProfesion);
+router.put("/:codProfesion", [validarJWT], actualizarProfesion);
 
 // Eliminar ruta
-router.delete("/:codProfesion", eliminarProfesion);
+router.delete("/:codProfesion", [validarJWT], eliminarProfesion);
 
 // Listar rutas
 router.get("/latest", listarProfesion);

@@ -23,7 +23,7 @@ const router = Router();
 router.post(
   "/newServicio",
   [
-    //validarJWT,
+    validarJWT,
 
     check("tipoServicio")
       .notEmpty()
@@ -48,23 +48,9 @@ router.post(
 
 //POST
 //! Listar últimos servicios
-router.get(
-  "/latest",
-  [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-  ],
-  mostrarUltimosServicios
-);
+router.get("/latest", [validarJWT], mostrarUltimosServicios);
 
-router.get(
-  "/latestFavorites",
-  [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-  ],
-  mostrarServiciosFavoritos
-);
+router.get("/latestFavorites", [validarJWT], mostrarServiciosFavoritos);
 
 //POST
 //! Buscar servicio
@@ -89,14 +75,7 @@ router.get(
 
 //PUT
 //! Actualizar Servicio
-router.put(
-  "/:codServicio/updateServicio",
-  [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-  ],
-  actualizarServicio
-);
+router.put("/:codServicio/updateServicio", [validarJWT], actualizarServicio);
 
 router.get(
   "/pruebaLab-items",

@@ -7,6 +7,7 @@ const Servicio = require("../../models/Mantenimiento/Servicio");
 
 const crearServicio = async (req, res = response) => {
   const { tipoServicio, nombreServicio } = req.body;
+  const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
 
   try {
     console.log("req.body crear servicio", req.body);
@@ -80,6 +81,9 @@ const crearServicio = async (req, res = response) => {
     const nuevoServicio = new Servicio({
       ...req.body,
       codServicio: codigoServicio, // Agregar el código de la prueba generado
+      createdBy: uid, // uid del usuario que creó el servicio
+      usuarioRegistro: nombreUsuario, // Nombre de usuario que creó el servicio
+      fechaRegistro: new Date(), // Fecha de registro
     });
 
     await nuevoServicio.save();
@@ -294,6 +298,7 @@ const actualizarServicio = async (req, res = response) => {
   const codigoServicio = req.params.codServicio; //recupera el codPrueba
   console.log(codigoServicio);
   const datosActualizados = req.body; //recupera los datos a grabar
+  const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
   const nombreServicio = req.body.nombreServicio;
   console.log(codigoServicio);
   delete datosActualizados._id; //quita los _id generados por el mongo y que no se pueden modificar
@@ -302,7 +307,13 @@ const actualizarServicio = async (req, res = response) => {
   try {
     const servicio = await Servicio.findOneAndUpdate(
       { codServicio: codigoServicio },
-      datosActualizados
+      {
+        $set: datosActualizados,
+        updatedBy: uid, // uid del usuario que actualiza
+        usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza
+        fechaActualizacion: new Date(), // Fecha de actualización
+      },
+      { new: true }
     );
 
     if (!servicio) {

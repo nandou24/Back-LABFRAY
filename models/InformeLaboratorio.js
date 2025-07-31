@@ -75,6 +75,14 @@ const InformeLaboratorioSchema = Schema(
 
     // Observaciones generales
     observacionesGenerales: { type: String },
+
+    // 🔍 Campos de auditoría:
+    createdBy: { type: String, required: true }, // uid
+    usuarioRegistro: { type: String }, // nombre de usuario
+    fechaRegistro: { type: Date, default: Date.now },
+    updatedBy: { type: String }, // uid del usuario que actualiza
+    usuarioActualizacion: { type: String },
+    fechaActualizacion: { type: Date },
   },
   {
     timestamps: true,

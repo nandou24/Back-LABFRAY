@@ -335,7 +335,7 @@ const encontrarTerminoCotizaicon = async (req, res = response) => {
 
 const actualizarPaciente = async (req, res = response) => {
   const { tipoDoc, nroDoc, ...datosActualizables } = req.body;
-  const uid = req.user.uid; // Viene del middleware validarJWT
+  const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
   console.log("Datos a actualizar:", datosActualizables);
 
   try {
@@ -344,7 +344,7 @@ const actualizarPaciente = async (req, res = response) => {
       {
         $set: datosActualizables,
         updatedBy: uid, // uid del usuario que actualiza el paciente
-        usuarioActualizacion: req.user.nombreUsuario, // Nombre de usuario que actualiza el paciente
+        usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza el paciente
         fechaActualizacion: new Date(), // Fecha de actualización
       }
     );

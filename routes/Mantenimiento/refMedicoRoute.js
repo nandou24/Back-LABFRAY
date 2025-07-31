@@ -9,14 +9,14 @@ const {
   encontrarTerminoporId,
 } = require("../../controllers/Mantenimiento/refMedicoController");
 const { validarCampos } = require("../../middlewares/validar-campo");
-// const { validarJWT } = require('../middlewares/validar-token');
+const { validarJWT } = require("../../middlewares/validar-token");
 
 const router = Router();
 
 router.post(
   "/newRefMedico",
   [
-    //validarJWT,
+    validarJWT,
     check("tipoDoc").notEmpty().withMessage("Tipo documento es obligatorio"),
     check("nroDoc").notEmpty().withMessage("Número de doc es obligatorio"),
     check("nombreRefMedico").notEmpty().withMessage("Nombre es obligatorio"),
@@ -48,7 +48,7 @@ router.get(
   mostrarUltimosRefMedicosParaCotizacion
 );
 router.get("/findTerm", encontrarTerminoRefMedico);
-router.put("/:codRefMedico/updateRefMedico", actualizarRefMedico);
+router.put("/:codRefMedico/updateRefMedico", [validarJWT], actualizarRefMedico);
 
 //GET
 //! Buscar paciente

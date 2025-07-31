@@ -6,6 +6,7 @@ const jwt = require("jsonwebtoken");
 
 const crearPruebaLab = async (req, res = response) => {
   const { nombrePruebaLab } = req.body;
+  const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
 
   const prefijoCodigo = "LC";
 
@@ -48,6 +49,9 @@ const crearPruebaLab = async (req, res = response) => {
     const nuevaPruebaLab = new PruebaLab({
       ...req.body,
       codPruebaLab: codigoLab, // Agregar el código de la prueba generado
+      createdBy: uid, // uid del usuario que creó la prueba
+      usuarioRegistro: nombreUsuario, // Nombre de usuario que creó la prueba
+      fechaRegistro: new Date(), // Fecha de registro
     });
 
     await nuevaPruebaLab.save();
@@ -114,13 +118,20 @@ const encontrarTermino = async (req, res = response) => {
 const actualizarPrueba = async (req, res = response) => {
   const codPrueba = req.params.codPruebaLab; //recupera el codPrueba
   const datosActualizados = req.body; //recupera los datos a grabar
+  const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
   delete datosActualizados._id; //quita los _id generados por el mongo y que no se pueden modificar
   delete datosActualizados.itemsComponentes._id;
 
   try {
     const pruebaLab = await PruebaLab.findOneAndUpdate(
       { codPruebaLab: codPrueba },
-      datosActualizados
+      {
+        $set: datosActualizados,
+        updatedBy: uid, // uid del usuario que actualiza
+        usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza
+        fechaActualizacion: new Date(), // Fecha de actualización
+      },
+      { new: true }
     );
 
     if (!pruebaLab) {

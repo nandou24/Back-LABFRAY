@@ -5,6 +5,7 @@ const Profesion = require("../../models/Mantenimiento/Profesiones");
 const crearEspecialidad = async (req, res = response) => {
   const especialidad = req.body;
   const nombreEspecialidad = especialidad.nombreEspecialidad.toUpperCase();
+  const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
 
   try {
     // verificar si ya existe una especialidad con ese nombre
@@ -57,6 +58,9 @@ const crearEspecialidad = async (req, res = response) => {
       ...especialidad,
       codEspecialidad: codigo, // Agregar el código generado
       profesionRef: profesion._id,
+      createdBy: uid, // uid del usuario que creó la especialidad
+      usuarioRegistro: nombreUsuario, // Nombre de usuario que creó la especialidad
+      fechaRegistro: new Date(), // Fecha de registro
     });
 
     await nuevaEspecialidad.save();
@@ -78,6 +82,7 @@ const actualizarEspecialidad = async (req, res) => {
   try {
     const { codEspecialidad } = req.params;
     const datosActualizados = req.body;
+    const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
 
     // Verificar si otra especialidad ya tiene ese nombre
     datosActualizados.nombreEspecialidad =
@@ -97,7 +102,12 @@ const actualizarEspecialidad = async (req, res) => {
 
     const actualizada = await Especialidad.findOneAndUpdate(
       { codEspecialidad },
-      { $set: datosActualizados },
+      {
+        $set: datosActualizados,
+        updatedBy: uid, // uid del usuario que actualiza
+        usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza
+        fechaActualizacion: new Date(), // Fecha de actualización
+      },
       { new: true }
     );
 

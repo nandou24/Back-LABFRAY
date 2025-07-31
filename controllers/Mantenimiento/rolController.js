@@ -4,6 +4,7 @@ const Rol = require("../../models/permisos/roles");
 const crearRol = async (req, res) => {
   try {
     const { nombreRol, descripcionRol, rutasPermitidas, estado } = req.body;
+    const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
     // Buscar el último código generado
 
     const ultimoRol = await Rol.findOne({}, { codRol: 1 })
@@ -21,6 +22,9 @@ const crearRol = async (req, res) => {
       descripcionRol,
       rutasPermitidas,
       estado,
+      createdBy: uid, // uid del usuario que creó el rol
+      usuarioRegistro: nombreUsuario, // Nombre de usuario que creó el rol
+      fechaRegistro: new Date(), // Fecha de registro
     });
     await nuevoRol.save();
     res.status(201).json({ ok: true, rol: nuevoRol });
@@ -34,9 +38,17 @@ const crearRol = async (req, res) => {
 const actualizarRol = async (req, res) => {
   try {
     const { codRol } = req.params;
-    const actualizado = await Rol.findOneAndUpdate({ codRol }, req.body, {
-      new: true,
-    });
+    const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
+    const actualizado = await Rol.findOneAndUpdate(
+      { codRol }, 
+      {
+        $set: req.body,
+        updatedBy: uid, // uid del usuario que actualiza
+        usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza
+        fechaActualizacion: new Date(), // Fecha de actualización
+      },
+      { new: true }
+    );
     if (!actualizado) {
       return res.status(404).json({ ok: false, msg: "Rol no encontrado" });
     }

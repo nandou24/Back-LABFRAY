@@ -18,6 +18,8 @@ const crearItemLab = async (req, res = response) => {
     paramValidacion,
   } = req.body;
 
+  const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
+
   try {
     // verificar si el nombre existe
     const itemExistente = await ItemLab.findOne({
@@ -57,6 +59,9 @@ const crearItemLab = async (req, res = response) => {
     const nuevoItemLab = new ItemLab({
       ...req.body,
       codItemLab: codItemLabFormateado, // Agregar el código de la prueba generado
+      createdBy: uid, // uid del usuario que creó el item
+      usuarioRegistro: nombreUsuario, // Nombre de usuario que creó el item
+      fechaRegistro: new Date(), // Fecha de registro
     });
 
     // console.log("Datos a grabar"+nuevoItemLab)
@@ -125,13 +130,19 @@ const encontrarTermino = async (req, res = response) => {
 const actualizarItem = async (req, res = response) => {
   const codigo = req.params.codigo; //recupera la hc
   const datosActualizados = req.body; //recupera los datos a grabar
+  const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
 
   try {
     // console.log('Datos recibidos:', req.body);
 
     const itemLab = await ItemLab.findOneAndUpdate(
       { codItemLab: codigo },
-      { $set: datosActualizados },
+      {
+        $set: datosActualizados,
+        updatedBy: uid, // uid del usuario que actualiza el item
+        usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza el item
+        fechaActualizacion: new Date(), // Fecha de actualización
+      },
       { new: true } // Devuelve el documento actualizado
     );
 

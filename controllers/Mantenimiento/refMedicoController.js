@@ -4,6 +4,7 @@ const RefMedico = require("../../models/Mantenimiento/RefMedico");
 const crearRefMedico = async (req, res = response) => {
   try {
     const { tipoDoc, nroDoc } = req.body;
+    const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
     // Verificar si ya existe
     const refMedico = await RefMedico.findOne({ tipoDoc, nroDoc });
     if (refMedico) {
@@ -28,6 +29,9 @@ const crearRefMedico = async (req, res = response) => {
     const nuevoRefMedico = new RefMedico({
       ...req.body,
       codRefMedico: codigo,
+      createdBy: uid, // uid del usuario que creó el médico referente
+      usuarioRegistro: nombreUsuario, // Nombre de usuario que creó el médico referente
+      fechaRegistro: new Date(), // Fecha de registro
     });
     await nuevoRefMedico.save();
     return res.status(201).json({
@@ -178,6 +182,7 @@ const actualizarRefMedico = async (req, res = response) => {
   const referenciId = req.params._id;
   const codigo = req.params.codRefMedico;
   const datosActualizados = req.body;
+  const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
 
   const tipoDoc = datosActualizados.tipoDoc;
   const nroDoc = datosActualizados.nroDoc;
@@ -197,7 +202,13 @@ const actualizarRefMedico = async (req, res = response) => {
   try {
     const refMedico = await RefMedico.findOneAndUpdate(
       { codRefMedico: codigo },
-      { $set: datosActualizados }
+      { 
+        $set: datosActualizados,
+        updatedBy: uid, // uid del usuario que actualiza
+        usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza
+        fechaActualizacion: new Date(), // Fecha de actualización
+      },
+      { new: true }
     );
     if (!refMedico) {
       return res.status(404).json({

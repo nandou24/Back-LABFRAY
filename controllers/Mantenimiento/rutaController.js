@@ -12,6 +12,8 @@ const crearRuta = async (req, res) => {
       estado,
     } = req.body;
 
+    const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
+
     console.log("Datos recibidos:", req.body);
 
     const existe = await Ruta.findOne({ urlRuta });
@@ -36,6 +38,9 @@ const crearRuta = async (req, res) => {
       urlRuta,
       iconoRuta,
       estado,
+      createdBy: uid, // uid del usuario que creó la ruta
+      usuarioRegistro: nombreUsuario, // Nombre de usuario que creó la ruta
+      fechaRegistro: new Date(), // Fecha de registro
     });
 
     // Generar código de ruta autoincremental, el formato será "RUTA000"
@@ -65,6 +70,7 @@ const crearRuta = async (req, res) => {
 const actualizarRuta = async (req, res) => {
   try {
     const { codRuta, urlRuta, nombreMostrar } = req.params;
+    const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
     // Verificar si otra ruta ya tiene esa url
     const existeUrl = await Ruta.findOne({
       urlRuta,
@@ -88,9 +94,16 @@ const actualizarRuta = async (req, res) => {
       });
     }
 
-    const actualizada = await Ruta.findOneAndUpdate({ codRuta }, req.body, {
-      new: true,
-    });
+    const actualizada = await Ruta.findOneAndUpdate(
+      { codRuta }, 
+      {
+        $set: req.body,
+        updatedBy: uid, // uid del usuario que actualiza
+        usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza
+        fechaActualizacion: new Date(), // Fecha de actualización
+      },
+      { new: true }
+    );
     if (!actualizada) {
       return res
         .status(404)

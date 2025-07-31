@@ -5,6 +5,7 @@ const mongoose = require("mongoose");
 const crearCotizacion = async (req, res = response) => {
   try {
     const { historial, codCotizacion } = req.body;
+    const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
 
     console.log("Datos recibidos:", req.body);
 
@@ -103,6 +104,9 @@ const crearCotizacion = async (req, res = response) => {
           fechaModificacion: new Date(), // Fecha de creación
         },
       ],
+      createdBy: uid, // uid del usuario que creó la cotización
+      usuarioRegistro: nombreUsuario, // Nombre de usuario que creó la cotización
+      fechaRegistro: new Date(), // Fecha de registro
     });
 
     // console.log("Datos a grabar"+nuevaCotizacion)
@@ -255,6 +259,7 @@ const encontrarTermino = async (req, res = response) => {
 const crearNuevaVersionCotiPersona = async (req, res = response) => {
   try {
     const { codCotizacion, historial, estadoCotizacion } = req.body;
+    const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
 
     const cotizacionExistente = await Cotizacion.findOne({ codCotizacion });
 
@@ -328,8 +333,12 @@ const crearNuevaVersionCotiPersona = async (req, res = response) => {
         $set: {
           estadoCotizacion: estadoCotizacion || "MODIFICADA",
           fechaModificacion: nuevaVersion.fechaModificacion,
+          updatedBy: uid, // uid del usuario que actualiza
+          usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza
+          fechaActualizacion: new Date(), // Fecha de actualización
         }, // 📌 Actualizar estado
-      }
+      },
+      { new: true }
     );
 
     if (cotizacionActualizada) {

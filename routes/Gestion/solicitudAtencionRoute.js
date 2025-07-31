@@ -5,6 +5,7 @@ const {
   obtenerPorRangoFechas,
 } = require("../../controllers/Gestion/solicitudAtencionController");
 const { validarCampos } = require("../../middlewares/validar-campo");
+const { validarJWT } = require("../../middlewares/validar-token");
 
 const router = Router();
 
@@ -12,6 +13,7 @@ const router = Router();
 router.post(
   "/newSolicitud",
   [
+    validarJWT,
     check("cotizacionId")
       .notEmpty()
       .withMessage("El id de cotización obligatorio"),

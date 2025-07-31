@@ -18,13 +18,15 @@ const crearSolicitud = async (req, res) => {
       usuarioEmisor,
     } = req.body;
 
+    const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
+
     // Validación básica
     if (
       !codCotizacion ||
       !tipo ||
       servicios.length === 0 ||
       !hc ||
-      !pacienteNombre
+      !nombreCompleto
     ) {
       return res.status(400).json({ message: "Faltan campos obligatorios." });
     }
@@ -48,6 +50,9 @@ const crearSolicitud = async (req, res) => {
       codUsuarioEmisor: codUsuarioEmisor,
       usuarioEmisor: usuarioEmisor,
       estado: "GENERADO",
+      createdBy: uid, // uid del usuario que creó la solicitud
+      usuarioRegistro: nombreUsuario, // Nombre de usuario que creó la solicitud
+      fechaRegistro: new Date(), // Fecha de registro
     });
 
     await nuevaSolicitud.save();
@@ -93,9 +98,16 @@ exports.actualizarEstado = async (req, res) => {
   try {
     const { id } = req.params;
     const { estado } = req.body;
+    const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
+    
     const solicitud = await SolicitudAtencion.findByIdAndUpdate(
       id,
-      { estado },
+      { 
+        estado,
+        updatedBy: uid, // uid del usuario que actualiza
+        usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza
+        fechaActualizacion: new Date(), // Fecha de actualización
+      },
       { new: true }
     );
     if (!solicitud) {

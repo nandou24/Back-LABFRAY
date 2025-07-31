@@ -16,6 +16,13 @@ const EspecialidadSchema = Schema(
       required: true,
       ref: "profesionesCollection", // Referencia a la colección de profesiones
     },
+    // 🔍 Campos de auditoría:
+    createdBy: { type: String, required: true }, // uid
+    usuarioRegistro: { type: String }, // nombre de usuario
+    fechaRegistro: { type: Date, default: Date.now },
+    updatedBy: { type: String }, // uid del usuario que actualiza
+    usuarioActualizacion: { type: String },
+    fechaActualizacion: { type: Date },
   },
   {
     timestamps: true,

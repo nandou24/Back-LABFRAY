@@ -86,6 +86,10 @@ const HistorialSchema = new Schema({
   igv: { type: Number },
   total: { type: Number },
   serviciosCotizacion: [ServiciosSchema],
+  // 🔍 Campos de auditoría:
+  createdBy: { type: String, required: true }, // uid
+  usuarioRegistro: { type: String }, // nombre de usuario
+  fechaRegistro: { type: Date, default: Date.now },
 });
 
 const CotizacionSchema = Schema(

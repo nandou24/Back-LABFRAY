@@ -25,6 +25,13 @@ const ItemLabSchema = Schema(
     perteneceAPrueba: { type: String },
     grupoItemLab: { type: String },
     paramValidacion: [valoresSchema],
+    // 🔍 Campos de auditoría:
+    createdBy: { type: String, required: true }, // uid
+    usuarioRegistro: { type: String }, // nombre de usuario
+    fechaRegistro: { type: Date, default: Date.now },
+    updatedBy: { type: String }, // uid del usuario que actualiza
+    usuarioActualizacion: { type: String },
+    fechaActualizacion: { type: Date },
   },
   {
     timestamps: true,

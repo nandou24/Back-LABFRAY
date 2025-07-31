@@ -8,6 +8,7 @@ const {
   buscarRol,
 } = require("../../controllers/Mantenimiento/rolController");
 const { validarCampos } = require("../../middlewares/validar-campo");
+const { validarJWT } = require("../../middlewares/validar-token");
 
 const router = Router();
 
@@ -15,6 +16,7 @@ const router = Router();
 router.post(
   "/newRol",
   [
+    validarJWT,
     check("nombreRol")
       .notEmpty()
       .withMessage("El nombre del rol es obligatorio"),
@@ -25,10 +27,10 @@ router.post(
 );
 
 // Actualizar rol
-router.put("/:codRol", actualizarRol);
+router.put("/:codRol", [validarJWT], actualizarRol);
 
 // Eliminar rol
-router.delete("/:codRol", eliminarRol);
+router.delete("/:codRol", [validarJWT], eliminarRol);
 
 // Listar roles
 router.get("/latest", listarRoles);

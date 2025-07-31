@@ -23,7 +23,7 @@ const router = Router();
 router.post(
   "/newRecHumano",
   [
-    //validarJWT,
+    validarJWT,
 
     check("tipoDoc").notEmpty().withMessage("Tipo documento es obligatorio"),
 
@@ -107,10 +107,7 @@ router.get(
 // ! Buscar profesionales que atienden consultas por término
 router.get(
   "/traerProfesionalesQueAtiendenConsultas",
-  [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-  ],
+  [validarJWT],
   obtenerProfesionalesQueAtiendenConsultas
 );
 
@@ -118,10 +115,7 @@ router.get(
 //! Actualizar recurso humano
 router.put(
   "/:codRecHumano/updateRecHumano",
-  [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-  ],
+  [validarJWT],
   actualizarRecursoHumano
 );
 //para exportar rutas

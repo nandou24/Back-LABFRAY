@@ -8,6 +8,7 @@ const {
   buscarRuta,
 } = require("../../controllers/Mantenimiento/rutaController");
 const { validarCampos } = require("../../middlewares/validar-campo");
+const { validarJWT } = require("../../middlewares/validar-token");
 
 const router = Router();
 
@@ -15,6 +16,7 @@ const router = Router();
 router.post(
   "/newRuta",
   [
+    validarJWT,
     check("nombreRuta")
       .notEmpty()
       .withMessage("El nombre de la ruta es obligatorio"),
@@ -26,10 +28,10 @@ router.post(
 );
 
 // Actualizar ruta
-router.put("/:codRuta", actualizarRuta);
+router.put("/:codRuta", [validarJWT], actualizarRuta);
 
 // Eliminar ruta
-router.delete("/:codRuta", eliminarRuta);
+router.delete("/:codRuta", [validarJWT], eliminarRuta);
 
 // Listar rutas
 router.get("/latest", listarRutas);

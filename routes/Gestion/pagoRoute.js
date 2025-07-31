@@ -13,15 +13,11 @@ const { validarJWT } = require("../../middlewares/validar-token");
 //Rutas
 const router = Router();
 
-//POST
-//controlador de esa ruta
-//!Estructura: URL --> VALIDACIONES --> CONTROLADOR --> RESPUESTA
-
 //! crear un nuevo pago
 router.post(
   "/newPagoPersona",
   [
-    //validarJWT,
+    validarJWT,
     /*
     check('tipoServicio')
     .notEmpty().withMessage('Tipo de servicio es obligatorio'),
@@ -42,14 +38,7 @@ router.post(
 
 //POST
 //! Listar últimos pagos
-router.get(
-  "/latest",
-  [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-  ],
-  mostrarUltimosPagos
-);
+router.get("/latest", [validarJWT], mostrarUltimosPagos);
 
 //POST
 //! Buscar pago por término
@@ -63,22 +52,8 @@ router.get(
 );
 
 //! Buscar pago detalle
-router.get(
-  "/findPayDetail",
-  [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-  ],
-  encontrarDetallePago
-);
+router.get("/findPayDetail", [validarJWT], encontrarDetallePago);
 
-router.put(
-  "/anularPago/:codPago",
-  [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-  ],
-  anularPago
-);
+router.put("/anularPago/:codPago", [validarJWT], anularPago);
 
 module.exports = router;

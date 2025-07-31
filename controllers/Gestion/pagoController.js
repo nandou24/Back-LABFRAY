@@ -14,6 +14,7 @@ const generarPagoPersona = async (req, res = response) => {
 
   try {
     const { codPago, codCotizacion } = req.body;
+    const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
 
     const datos = req.body;
 
@@ -32,10 +33,17 @@ const generarPagoPersona = async (req, res = response) => {
     // Aquí definiremos qué flujo seguir:
     if (!pagoExistente) {
       // 🔁 Flujo de creación de pago
-      await crearPago(datos, session, cotizacionOriginal);
+      await crearPago(datos, session, cotizacionOriginal, uid, nombreUsuario);
     } else {
       // 🔁 Flujo de actualización de pago
-      await actualizarPago(datos, pagoExistente, cotizacionOriginal, session);
+      await actualizarPago(
+        datos,
+        pagoExistente,
+        cotizacionOriginal,
+        session,
+        uid,
+        nombreUsuario
+      );
     }
 
     await session.commitTransaction();
@@ -63,7 +71,13 @@ const generarPagoPersona = async (req, res = response) => {
   }
 };
 
-const crearPago = async (datos, session, cotizacionOriginal) => {
+const crearPago = async (
+  datos,
+  session,
+  cotizacionOriginal,
+  uid,
+  nombreUsuario
+) => {
   const {
     codCotizacion,
     detallePagos,
@@ -125,6 +139,9 @@ const crearPago = async (datos, session, cotizacionOriginal) => {
     faltaPagar: diferencia,
     estadoPago: estadoBack,
     estadoCotizacion: estadoBack,
+    createdBy: uid, // uid del usuario que creó el pago
+    usuarioRegistro: nombreUsuario, // Nombre de usuario que creó el pago
+    fechaRegistro: new Date(), // Fecha de registro
   });
 
   await nuevoPago.save({ session });
@@ -194,7 +211,9 @@ const actualizarPago = async (
   datos,
   pagoExistente,
   cotizacionOriginal,
-  session
+  session,
+  uid,
+  nombreUsuario
 ) => {
   const { codPago, codCotizacion, detallePagos } = datos;
 
@@ -242,6 +261,9 @@ const actualizarPago = async (
         faltaPagar: faltaPagarCalculado,
         estadoPago: nuevoEstado,
         estadoCotizacion: nuevoEstado,
+        updatedBy: uid, // uid del usuario que actualiza
+        usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza
+        fechaActualizacion: new Date(), // Fecha de actualización
       },
     },
     { session }

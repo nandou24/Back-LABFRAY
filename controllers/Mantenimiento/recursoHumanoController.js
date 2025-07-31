@@ -28,6 +28,8 @@ const crearRecursoHumano = async (req, res = response) => {
     datosLogueo, // Aquí se espera que contenga el passwordHash
   } = req.body;
 
+  const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
+
   console.log("Datos del recurso humano:", req.body);
 
   //Para crear HC
@@ -83,6 +85,9 @@ const crearRecursoHumano = async (req, res = response) => {
       ...req.body,
       datosLogueo: datosLogueo,
       codRecHumano: codigo, // Agregar el código generado
+      createdBy: uid, // uid del usuario que creó el recurso humano
+      usuarioRegistro: nombreUsuario, // Nombre de usuario que creó el recurso humano
+      fechaRegistro: new Date(), // Fecha de registro
     });
 
     await nuevoRecursoHumano.save();
@@ -316,6 +321,7 @@ const encontrarTermino = async (req, res = response) => {
 const actualizarRecursoHumano = async (req, res = response) => {
   const codigo = req.params.codRecHumano; //recupera la hc
   const datosActualizados = req.body; //recupera los datos a grabar
+  const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
 
   try {
     // Solo encripta si el campo passwordHash viene con datos nuevos
@@ -332,7 +338,13 @@ const actualizarRecursoHumano = async (req, res = response) => {
 
     const recHumano = await RecurHumano.findOneAndUpdate(
       { codRecHumano: codigo },
-      { $set: datosActualizados }
+      { 
+        $set: datosActualizados,
+        updatedBy: uid, // uid del usuario que actualiza
+        usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza
+        fechaActualizacion: new Date(), // Fecha de actualización
+      },
+      { new: true }
     );
     console.log(recHumano);
 
