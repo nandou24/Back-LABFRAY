@@ -31,18 +31,18 @@ router.post(
 
 //POST
 //! Listar últimas cotizaciones
-router.get("/latest", [validarJWT], mostrarUltimasCotizaciones);
+router.get("/latest", mostrarUltimasCotizaciones);
 
 //! Listar últimas cotizaciones por pagar
-router.get("/latestPorPagar", [validarJWT], mostrarUltimasCotizacionesPorPagar);
+router.get("/latestPorPagar", mostrarUltimasCotizacionesPorPagar);
 
 //! Listar últimas cotizaciones pagadas
-router.get("/latestPagadas", [validarJWT], mostrarUltimasCotizacionesPagadas);
+router.get("/latestPagadas", mostrarUltimasCotizacionesPagadas);
 
 //! Buscar servicio
-router.get("/findTerm", [validarJWT], encontrarTermino);
+router.get("/findTerm", encontrarTermino);
 
 //GET
-router.get("/findHC", [validarJWT], verificarHcRegistrada);
+router.get("/findHC", verificarHcRegistrada);
 
 module.exports = router;

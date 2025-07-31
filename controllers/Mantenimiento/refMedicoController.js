@@ -53,9 +53,9 @@ const mostrarUltimosRefMedicos = async (req, res = response) => {
     const limite = parseInt(cantidad);
     let refMedicos;
     if (cantidad == 0) {
-      refMedicos = await RefMedico.find();
+      refMedicos = await RefMedico.find().sort({ createdAt: -1 });
     } else {
-      refMedicos = await RefMedico.find().limit(limite);
+      refMedicos = await RefMedico.find().limit(limite).sort({ createdAt: -1 });
     }
     return res.json({
       ok: true,
@@ -84,7 +84,8 @@ const mostrarUltimosRefMedicosParaCotizacion = async (req, res = response) => {
       .populate({
         path: "profesionesRefMedico.especialidades.especialidadRef",
         select: "nombreEspecialidad", // Ajusta según tu modelo real
-      });
+      })
+      .sort({ createdAt: -1 });
 
     console.log("RefMedicos encontrados:", refMedicos);
 
@@ -111,7 +112,7 @@ const encontrarTerminoRefMedico = async (req, res = response) => {
         { apeMatRefMedico: { $regex: termino, $options: "i" } },
         { nroDoc: { $regex: termino, $options: "i" } },
       ],
-    });
+    }).sort({ createdAt: -1 });
 
     // Extraer especialidades como string
     refMedicos = refMedicos.map((medico) => {
@@ -202,7 +203,7 @@ const actualizarRefMedico = async (req, res = response) => {
   try {
     const refMedico = await RefMedico.findOneAndUpdate(
       { codRefMedico: codigo },
-      { 
+      {
         $set: datosActualizados,
         updatedBy: uid, // uid del usuario que actualiza
         usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza

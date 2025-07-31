@@ -107,7 +107,6 @@ router.get(
 // ! Buscar profesionales que atienden consultas por término
 router.get(
   "/traerProfesionalesQueAtiendenConsultas",
-  [validarJWT],
   obtenerProfesionalesQueAtiendenConsultas
 );
 

@@ -48,9 +48,9 @@ router.post(
 
 //POST
 //! Listar últimos servicios
-router.get("/latest", [validarJWT], mostrarUltimosServicios);
+router.get("/latest", mostrarUltimosServicios);
 
-router.get("/latestFavorites", [validarJWT], mostrarServiciosFavoritos);
+router.get("/latestFavorites", mostrarServiciosFavoritos);
 
 //POST
 //! Buscar servicio

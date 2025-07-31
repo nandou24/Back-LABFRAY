@@ -113,15 +113,7 @@ router.get(
 
 //PUT
 //! Actualizar Paciente
-router.put(
-  "/updatePatient",
-  [
-    validarJWT,
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-  ],
-  actualizarPaciente
-);
+router.put("/updatePatient", [validarJWT], actualizarPaciente);
 
 router.post(
   "/newPatientWhitoutHC",

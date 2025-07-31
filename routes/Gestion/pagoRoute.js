@@ -38,7 +38,7 @@ router.post(
 
 //POST
 //! Listar últimos pagos
-router.get("/latest", [validarJWT], mostrarUltimosPagos);
+router.get("/latest", mostrarUltimosPagos);
 
 //POST
 //! Buscar pago por término
@@ -52,7 +52,7 @@ router.get(
 );
 
 //! Buscar pago detalle
-router.get("/findPayDetail", [validarJWT], encontrarDetallePago);
+router.get("/findPayDetail", encontrarDetallePago);
 
 router.put("/anularPago/:codPago", [validarJWT], anularPago);
 

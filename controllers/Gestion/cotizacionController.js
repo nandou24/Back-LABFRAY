@@ -102,11 +102,11 @@ const crearCotizacion = async (req, res = response) => {
           ...historial[0], // Tomamos los datos de la primera versión del historial
           version: 1, // Primera versión
           fechaModificacion: new Date(), // Fecha de creación
+          createdBy: uid, // uid del usuario que creó la cotización
+          usuarioRegistro: nombreUsuario, // Nombre de usuario que creó la cotización
+          fechaRegistro: new Date(), // Fecha de registro
         },
       ],
-      createdBy: uid, // uid del usuario que creó la cotización
-      usuarioRegistro: nombreUsuario, // Nombre de usuario que creó la cotización
-      fechaRegistro: new Date(), // Fecha de registro
     });
 
     // console.log("Datos a grabar"+nuevaCotizacion)
