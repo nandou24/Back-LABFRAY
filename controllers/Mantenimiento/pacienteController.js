@@ -240,6 +240,7 @@ const encontrarTerminoporId = async (req, res = response) => {
     const paciente = await Paciente.findById(id, {
       fechaNacimiento: 1,
       sexoCliente: 1,
+      phones: 1,
     });
     // const paciente = await Paciente.findById(id);
     if (!paciente) {
