@@ -33,6 +33,24 @@ app.use(
 //Lectura del Body
 app.use(express.json()); //! Puedo leer archivos JSON
 
+// Ruta de healthcheck para Railway
+app.get("/", (req, res) => {
+  res.status(200).json({
+    message: "API de LabFray funcionando correctamente",
+    status: "OK",
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "healthy",
+    service: "back-labfray",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+  });
+});
+
 //USE ES UN MIDDLEWARE: Un middleware no es más que una función
 //que se ejecuta cuando el intérprete pase evaluando cada una de las líneas de código.
 
@@ -94,6 +112,7 @@ app.use(
 // });
 
 //!Levantar el servidor
-app.listen(process.env.PORT || 5000, () => {
-  console.log(`Servidor levantando en el puerto ${process.env.PORT || 5000}`);
+const PORT = process.env.PORT || 4000;
+app.listen(PORT, () => {
+  console.log(`Servidor levantando en el puerto ${PORT}`);
 });
