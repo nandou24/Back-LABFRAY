@@ -1,7 +1,13 @@
 {
   "build": {
     "env": {
-      "NODE_VERSION": "22.9.0"
+      "NODE_VERSION": "22.18.0"
     }
+  },
+  "deploy": {
+    "startCommand": "npm start",
+    "healthcheckPath": "/",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
   }
 }
