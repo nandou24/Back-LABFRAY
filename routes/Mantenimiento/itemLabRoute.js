@@ -5,6 +5,7 @@ const {
   mostrarUltimosItems,
   encontrarTermino,
   actualizarItem,
+  eliminarItem,
 } = require("../../controllers/Mantenimiento/itemLabController");
 const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
@@ -66,5 +67,10 @@ router.get(
 //POST
 //! Actualizar Paciente
 router.put("/:codigo/updateItem", [validarJWT], actualizarItem);
+
+//DELETE
+//! Eliminar Paciente
+router.delete("/:itemLabId/deleteItem", [validarJWT], eliminarItem);
+
 //para exportar rutas
 module.exports = router;

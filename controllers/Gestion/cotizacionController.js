@@ -259,6 +259,7 @@ const encontrarTermino = async (req, res = response) => {
 const crearNuevaVersionCotiPersona = async (req, res = response) => {
   try {
     const { codCotizacion, historial, estadoCotizacion } = req.body;
+    console.log("Datos recibidos:", req.body);
     const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
 
     const cotizacionExistente = await Cotizacion.findOne({ codCotizacion });
@@ -280,10 +281,6 @@ const crearNuevaVersionCotiPersona = async (req, res = response) => {
       version: ultimaVersion ? ultimaVersion.version + 1 : 1, // Incrementamos la versión
       fechaModificacion: new Date(), // Generamos la nueva fecha
     };
-
-    //Generar el JWT
-    //const token = await generarJWT(dbPaciente.id, dbPaciente.name, dbPaciente.rol);
-    //Crear usuario de base de datos
 
     const objetosSonIguales = (obj1, obj2) => {
       // Clonamos los objetos profundamente para evitar mutaciones

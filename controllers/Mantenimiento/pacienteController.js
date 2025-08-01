@@ -42,19 +42,27 @@ const crearPaciente = async (req, res = response) => {
     }
 
     //creando codigo HC
-    // Buscar el último paciente creado en el año actual
+    // Buscar el último paciente creado en el año y mes actual
     const ultimoPaciente = await Paciente.findOne({
-      hc: new RegExp(`^${anio}${mes}`),
+      hc: new RegExp(`^${anio}${mes}-`),
     }).sort({ hc: -1 });
 
-    // Obtener el correlativo
+    // Obtener el correlativo (se reinicia cada mes)
     let correlativo = 1;
     if (ultimoPaciente) {
-      const ultimoCorrelativo = parseInt(ultimoPaciente.hc.slice(7, 11));
-      correlativo = ultimoCorrelativo + 1;
+      // Extraer solo el correlativo del formato YYYYMM-CCCCII
+      const partes = ultimoPaciente.hc.split("-");
+      if (partes.length > 1) {
+        const correlativoConIniciales = partes[1];
+        // Extraer solo los primeros 4 dígitos (correlativo)
+        const ultimoCorrelativo = parseInt(
+          correlativoConIniciales.substring(0, 4)
+        );
+        correlativo = ultimoCorrelativo + 1;
+      }
     }
 
-    // Correlativo con seis dígitos, maximo 999 999
+    // Correlativo con cuatro dígitos, se reinicia cada mes
     const correlativoStr = correlativo.toString().padStart(4, "0");
 
     // Generar las iniciales de los apellidos
@@ -62,7 +70,7 @@ const crearPaciente = async (req, res = response) => {
     const inicialApeMat = apeMatCliente.charAt(0).toUpperCase();
 
     // Crear el número de historia clínica sin guiones
-    const historiaClinica = `${anio}${mes}-${correlativoStr}${inicialApePat}${inicialApeMat}`;
+    const historiaClinica = `${anio}${mes}-${correlativoStr}${inicialApePat}`;
 
     // Crear el paciente con el número de historia clínica
     // Crear usuario con el modelo
@@ -396,19 +404,27 @@ const registrarPacienteSinnHC = async (req, res) => {
     const mes = (fecha.getMonth() + 1).toString().padStart(2, "0");
 
     //creando codigo HC
-    // Buscar el último paciente creado en el año actual
+    // Buscar el último paciente creado en el año y mes actual
     const ultimoPaciente = await Paciente.findOne({
-      hc: new RegExp(`^${anio}${mes}`),
+      hc: new RegExp(`^${anio}${mes}-`),
     }).sort({ hc: -1 });
 
-    // Obtener el correlativo
+    // Obtener el correlativo (se reinicia cada mes)
     let correlativo = 1;
     if (ultimoPaciente) {
-      const ultimoCorrelativo = parseInt(ultimoPaciente.hc.slice(7, 11));
-      correlativo = ultimoCorrelativo + 1;
+      // Extraer solo el correlativo del formato YYYYMM-CCCCII
+      const partes = ultimoPaciente.hc.split("-");
+      if (partes.length > 1) {
+        const correlativoConIniciales = partes[1];
+        // Extraer solo los primeros 4 dígitos (correlativo)
+        const ultimoCorrelativo = parseInt(
+          correlativoConIniciales.substring(0, 4)
+        );
+        correlativo = ultimoCorrelativo + 1;
+      }
     }
 
-    // Correlativo con seis dígitos, maximo 999 999
+    // Correlativo con cuatro dígitos, se reinicia cada mes
     const correlativoStr = correlativo.toString().padStart(4, "0");
 
     // Generar las iniciales de los apellidos
@@ -416,7 +432,7 @@ const registrarPacienteSinnHC = async (req, res) => {
     const inicialApeMat = apeMatCliente.charAt(0).toUpperCase();
 
     // Crear el número de historia clínica sin guiones
-    const historiaClinica = `${anio}${mes}-${correlativoStr}${inicialApePat}${inicialApeMat}`;
+    const historiaClinica = `${anio}${mes}-${correlativoStr}${inicialApePat}`;
 
     const nuevoPaciente = new Paciente({
       ...req.body,

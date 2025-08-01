@@ -21,8 +21,13 @@ const ItemLabSchema = Schema(
     valoresHojaTrabajo: { type: String, required: true },
     valoresInforme: { type: String, required: true },
     unidadesRef: { type: String, required: true },
+    ordenImpresion: { type: Number, default: 0 },
     poseeValidacion: { type: Boolean, required: true },
-    perteneceAPrueba: { type: String },
+    perteneceAPrueba: {
+      type: Schema.Types.ObjectId,
+      ref: "pruebasLabCollection",
+      required: true,
+    },
     grupoItemLab: { type: String },
     paramValidacion: [valoresSchema],
     // 🔍 Campos de auditoría:

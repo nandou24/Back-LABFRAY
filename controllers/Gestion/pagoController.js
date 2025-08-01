@@ -195,9 +195,10 @@ const crearPago = async (
         apePatCliente: apePatCliente,
         apeMatCliente: apeMatCliente,
         fechaEmision: new Date(),
-        codUsuarioEmisor: "codigoUsuarioEmisor",
-        usuarioEmisor: "usuarioEmisor",
         estado: "GENERADO",
+        createdBy: uid, // uid del usuario que creó el pago
+        usuarioRegistro: nombreUsuario, // Nombre de usuario que creó el pago
+        fechaRegistro: new Date(), // Fecha de registro
       });
 
       await solicitud.save({ session });
@@ -468,7 +469,7 @@ const anularPago = async (req, res = response) => {
 
     // Actualizar el estado de las solicitudes asociadas
     await SolicitudAtencion.updateMany(
-      { cotizacionId: pago.codCotizacion },
+      { codCotizacion: pago.codCotizacion },
       { $set: { estado: "ANULADO", "servicios.$[].estado": "ANULADO" } },
       { session }
     );

@@ -6,7 +6,7 @@ const validarJWT = (req, res = response, next) => {
 
   // const { token } = req.body; //! Destructuracion ---_> const token = req.body.token
 
-  console.log("El token esta " + token);
+  //console.log("El token esta " + token);
 
   if (!token) {
     return res.status(401).json({

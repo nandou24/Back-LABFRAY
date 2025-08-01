@@ -16,6 +16,8 @@ const crearItemLab = async (req, res = response) => {
     poseeValidacion,
     perteneceAPrueba,
     paramValidacion,
+    ordenImpresion,
+    grupoItemLab,
   } = req.body;
 
   const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
@@ -24,7 +26,7 @@ const crearItemLab = async (req, res = response) => {
     // verificar si el nombre existe
     const itemExistente = await ItemLab.findOne({
       nombreInforme: { $regex: new RegExp(`^${nombreInforme}$`, "i") },
-      perteneceAPrueba: { $regex: new RegExp(`^${perteneceAPrueba}$`, "i") },
+      perteneceAPrueba: { $eq: perteneceAPrueba },
     });
 
     console.log("Item existente:", itemExistente);
@@ -34,6 +36,34 @@ const crearItemLab = async (req, res = response) => {
         ok: false,
         msg: "Ya existe un item con ese nombre y prueba a la que pertenece",
       });
+    }
+
+    // Validar que no exista el mismo número de orden de impresión
+    if (ordenImpresion && perteneceAPrueba) {
+      let consultaValidacion = {
+        ordenImpresion: ordenImpresion,
+        perteneceAPrueba: perteneceAPrueba,
+      };
+
+      // Si se proporciona grupoItemLab, incluirlo en la validación
+      if (grupoItemLab) {
+        consultaValidacion.grupoItemLab = grupoItemLab;
+      }
+
+      const itemConMismoOrden = await ItemLab.findOne(consultaValidacion);
+
+      console.log("Item con mismo orden:", itemConMismoOrden);
+
+      if (itemConMismoOrden) {
+        const mensajeError = grupoItemLab
+          ? `Ya existe el item "${itemConMismoOrden.nombreInforme}" con el orden de impresión ${ordenImpresion} para el mismo grupo y prueba`
+          : `Ya existe el item "${itemConMismoOrden.nombreInforme}" con el orden de impresión ${ordenImpresion} para la misma prueba`;
+
+        return res.status(400).json({
+          ok: false,
+          msg: mensajeError,
+        });
+      }
     }
 
     //creando codigo prueba
@@ -84,7 +114,9 @@ const crearItemLab = async (req, res = response) => {
 
 const mostrarUltimosItems = async (req, res = response) => {
   try {
-    const itemsLab = await ItemLab.find().sort({ createdAt: -1 });
+    const itemsLab = await ItemLab.find()
+      .populate("perteneceAPrueba", "codPruebaLab nombrePruebaLab")
+      .sort({ createdAt: -1 });
 
     return res.json({
       ok: true,
@@ -113,7 +145,7 @@ const encontrarTermino = async (req, res = response) => {
         { perteneceA: { $regex: termino, $options: "i" } }, // Búsqueda en el campo "observación"
         // Agrega más campos si es necesario
       ],
-    });
+    }).populate("perteneceAPrueba", "codPruebaLab nombrePruebaLab");
     return res.json({
       ok: true,
       itemsLab, //! favoritos: favoritos
@@ -135,6 +167,48 @@ const actualizarItem = async (req, res = response) => {
   try {
     // console.log('Datos recibidos:', req.body);
 
+    // Obtener el item actual para validaciones
+    const itemActual = await ItemLab.findOne({ codItemLab: codigo });
+
+    if (!itemActual) {
+      return res.status(404).json({
+        ok: false,
+        msg: "Item no encontrado con ese código",
+      });
+    }
+
+    // Validar que no exista el mismo número de orden de impresión (excluyendo el item actual)
+    if (
+      datosActualizados.ordenImpresion &&
+      datosActualizados.perteneceAPrueba
+    ) {
+      let consultaValidacion = {
+        ordenImpresion: datosActualizados.ordenImpresion,
+        perteneceAPrueba: datosActualizados.perteneceAPrueba,
+        _id: { $ne: itemActual._id }, // Excluir el item actual
+      };
+
+      // Si se proporciona grupoItemLab, incluirlo en la validación
+      if (datosActualizados.grupoItemLab) {
+        consultaValidacion.grupoItemLab = datosActualizados.grupoItemLab;
+      }
+
+      const itemConMismoOrden = await ItemLab.findOne(consultaValidacion);
+
+      console.log("Item con mismo orden en actualización:", itemConMismoOrden);
+
+      if (itemConMismoOrden) {
+        const mensajeError = datosActualizados.grupoItemLab
+          ? `Ya existe el item "${itemConMismoOrden.nombreInforme}" con el orden de impresión ${datosActualizados.ordenImpresion} para el mismo grupo y prueba`
+          : `Ya existe el item "${itemConMismoOrden.nombreInforme}" con el orden de impresión ${datosActualizados.ordenImpresion} para la misma prueba`;
+
+        return res.status(400).json({
+          ok: false,
+          msg: mensajeError,
+        });
+      }
+    }
+
     const itemLab = await ItemLab.findOneAndUpdate(
       { codItemLab: codigo },
       {
@@ -145,13 +219,6 @@ const actualizarItem = async (req, res = response) => {
       },
       { new: true } // Devuelve el documento actualizado
     );
-
-    if (!itemLab) {
-      return res.status(404).json({
-        ok: false,
-        msg: "Item no encontrado con ese código",
-      });
-    }
 
     //Generar respuesta exitosa
     return res.status(201).json({
@@ -166,9 +233,39 @@ const actualizarItem = async (req, res = response) => {
   }
 };
 
+const eliminarItem = async (req, res = response) => {
+  const itemLabId = req.params.itemLabId; // Recupera el ID del item
+  const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
+  console.log("ID del item a eliminar:", itemLabId);
+
+  try {
+    const itemLab = await ItemLab.findByIdAndDelete(itemLabId);
+
+    if (!itemLab) {
+      return res.status(404).json({
+        ok: false,
+        msg: "Item no encontrado",
+      });
+    }
+
+    //Generar respuesta exitosa
+    return res.status(200).json({
+      ok: true,
+      msg: "Item eliminado",
+    });
+  } catch (error) {
+    console.error("Error al eliminar el item: ", error);
+    return res.status(500).json({
+      ok: false,
+      msg: "Error al momento de eliminar back end",
+    });
+  }
+};
+
 module.exports = {
   crearItemLab,
   mostrarUltimosItems,
   encontrarTermino,
   actualizarItem,
+  eliminarItem,
 };

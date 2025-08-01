@@ -80,8 +80,7 @@ const SolicitudAtencionSchema = new Schema(
       required: false,
     },
     fechaEmision: { type: Date, required: true },
-    //codUsuarioEmisor: { type: String, required: true },
-    usuarioEmisor: { type: String, required: true },
+
     estado: {
       type: String,
       required: true,
