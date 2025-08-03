@@ -319,14 +319,17 @@ const generarCodigoPago = async () => {
 
 const mostrarUltimosPagos = async (req, res = response) => {
   try {
-    const cantidad = req.query.cant;
-    const limite = parseInt(cantidad);
+    const fechaHaceUnaSemana = new Date();
+    fechaHaceUnaSemana.setDate(fechaHaceUnaSemana.getDate() - 7);
+
+    // const cantidad = req.query.cant;
+    // const limite = parseInt(cantidad);
 
     const pagos = await Pago.find({
       estadoCotizacion: { $in: ["PAGO TOTAL", "PAGO PARCIAL"] },
+      createdAt: { $gte: fechaHaceUnaSemana },
     })
       .sort({ codPago: -1 })
-      .limit(limite)
       .lean();
 
     return res.json({
@@ -450,6 +453,7 @@ const anularPago = async (req, res = response) => {
         $set: {
           tienePagosAnteriores: false, // No se permiten pagos posteriores a la anulación
           estadoPago: "ANULADO",
+          estadoCotizacion: "PAGO ANULADO",
           anulacion: {
             motivo: motivo,
             observacion: observacion,

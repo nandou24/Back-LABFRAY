@@ -157,14 +157,17 @@ const mostrarUltimasCotizacionesPorPagar = async (req, res = response) => {
   //console.log("entro a controlador mostrar cotizaciones por pagar")
 
   try {
-    const cantidad = req.query.cant;
-    const limite = parseInt(cantidad);
+    const fechaHaceUnaSemana = new Date();
+    fechaHaceUnaSemana.setDate(fechaHaceUnaSemana.getDate() - 7);
+
+    // const cantidad = req.query.cant;
+    // const limite = parseInt(cantidad);
 
     const cotizaciones = await Cotizacion.find({
       estadoCotizacion: { $in: ["GENERADA", "MODIFICADA", "PAGO ANULADO"] },
+      createdAt: { $gte: fechaHaceUnaSemana },
     })
       .sort({ createdAt: -1 })
-      .limit(limite)
       .lean();
 
     // 📌 Obtener solo la última versión del historial en cada cotización
