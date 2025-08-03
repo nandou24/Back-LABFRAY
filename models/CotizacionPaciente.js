@@ -21,6 +21,7 @@ const ServiciosSchema = new mongoose.Schema({
   diferencia: { type: Number },
   precioVenta: { type: Number, required: true },
   descuentoPorcentaje: { type: Number, required: true },
+  nuevoPrecioVenta: { type: Number, required: true },
   totalUnitario: { type: Number, required: true },
   profesionesAsociadas: [profAsociadasSchema],
   medicoAtiende: {
