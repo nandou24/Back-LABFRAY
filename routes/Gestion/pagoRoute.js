@@ -6,6 +6,7 @@ const {
   encontrarTermino,
   encontrarDetallePago,
   anularPago,
+  obtenerPorRangoFechas,
 } = require("../../controllers/Gestion/pagoController");
 const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
@@ -50,6 +51,8 @@ router.get(
   ],
   encontrarTermino
 );
+
+router.get("/findReport", obtenerPorRangoFechas);
 
 //! Buscar pago detalle
 router.get("/findPayDetail", encontrarDetallePago);
