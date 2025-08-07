@@ -504,30 +504,76 @@ const obtenerPorRangoFechas = async (req, res) => {
     console.log("Fechas recibidas:", fechaInicio, fechaFin);
     console.log("Término de búsqueda:", terminoBusqueda);
 
+    // Filtro para buscar por fechaRegistro O fechaActualizacion dentro del rango
     const filtro = {
-      fechaRegistro: {
-        $gte: new Date(fechaInicio),
-        $lte: new Date(fechaFin),
-      },
+      $or: [
+        {
+          fechaRegistro: {
+            $gte: new Date(fechaInicio),
+            $lte: new Date(fechaFin),
+          },
+        },
+        {
+          fechaActualizacion: {
+            $gte: new Date(fechaInicio),
+            $lte: new Date(fechaFin),
+          },
+        },
+      ],
     };
 
-    if (terminoBusqueda.trim() !== "") {
+    // Si hay término de búsqueda, agregarlo al filtro
+    if (terminoBusqueda && terminoBusqueda.trim() !== "") {
       const regex = new RegExp(terminoBusqueda.trim(), "i"); // 'i' = case-insensitive
-      filtro.$or = [
-        { pacienteNombre: regex },
-        { codCotizacion: regex },
-        { nroDocumento: regex },
+      filtro.$and = [
+        { $or: filtro.$or }, // Mantener el filtro de fechas
+        {
+          $or: [
+            { nombreCliente: regex },
+            { codCotizacion: regex },
+            { nroDoc: regex },
+            { codPago: regex },
+          ],
+        },
       ];
+      delete filtro.$or; // Eliminamos el $or original para usar $and
     }
 
-    const pagos = await Pago.find(filtro).sort({
-      fechaEmision: -1,
-    });
+    // Agregamos aggregation pipeline para eliminar duplicados por codPago
+    const pagos = await Pago.aggregate([
+      { $match: filtro },
+      {
+        $group: {
+          _id: "$codPago", // Agrupamos por codPago para eliminar duplicados
+          doc: { $first: "$$ROOT" }, // Tomamos el primer documento de cada grupo
+          ultimaFecha: {
+            $max: {
+              $cond: [
+                { $ne: ["$fechaActualizacion", null] },
+                "$fechaActualizacion",
+                "$fechaRegistro",
+              ],
+            },
+          },
+        },
+      },
+      {
+        $replaceRoot: {
+          newRoot: "$doc", // Reemplazamos la raíz con el documento original
+        },
+      },
+      {
+        $sort: {
+          fechaRegistro: -1, // Ordenamos por fecha de registro descendente
+        },
+      },
+    ]);
 
-    console.log("Pagos encontrados:", pagos.length);
+    console.log("Pagos encontrados (sin duplicados):", pagos.length);
 
     res.json(pagos);
   } catch (error) {
+    console.error("Error al obtener pagos por rango de fechas:", error);
     res.status(400).json({ error: error.message });
   }
 };
