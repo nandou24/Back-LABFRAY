@@ -50,6 +50,6 @@ router.post(
 // router.delete("/:codRol", eliminarRol);
 
 // Buscar roles
-router.get("/findTerm", obtenerPorRangoFechas);
+router.get("/findByRangoFechas", obtenerPorRangoFechas);
 
 module.exports = router;

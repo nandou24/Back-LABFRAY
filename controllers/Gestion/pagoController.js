@@ -497,10 +497,46 @@ const anularPago = async (req, res = response) => {
   }
 };
 
+// Traer pagos por rango de fechas
+const obtenerPorRangoFechas = async (req, res) => {
+  try {
+    const { fechaInicio, fechaFin, terminoBusqueda } = req.query;
+    console.log("Fechas recibidas:", fechaInicio, fechaFin);
+    console.log("Término de búsqueda:", terminoBusqueda);
+
+    const filtro = {
+      fechaRegistro: {
+        $gte: new Date(fechaInicio),
+        $lte: new Date(fechaFin),
+      },
+    };
+
+    if (terminoBusqueda.trim() !== "") {
+      const regex = new RegExp(terminoBusqueda.trim(), "i"); // 'i' = case-insensitive
+      filtro.$or = [
+        { pacienteNombre: regex },
+        { codCotizacion: regex },
+        { nroDocumento: regex },
+      ];
+    }
+
+    const pagos = await Pago.find(filtro).sort({
+      fechaEmision: -1,
+    });
+
+    console.log("Pagos encontrados:", pagos.length);
+
+    res.json(pagos);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
 module.exports = {
   generarPagoPersona,
   mostrarUltimosPagos,
   encontrarTermino,
   encontrarDetallePago,
   anularPago,
+  obtenerPorRangoFechas,
 };
