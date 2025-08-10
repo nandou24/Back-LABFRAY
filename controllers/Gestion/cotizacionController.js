@@ -1,5 +1,6 @@
 const { response } = require("express");
-const Cotizacion = require("../../models/CotizacionPaciente").CotizacionModel;
+const Cotizacion =
+  require("../../models/Gestion/CotizacionPaciente").CotizacionModel;
 const mongoose = require("mongoose");
 
 const crearCotizacion = async (req, res = response) => {

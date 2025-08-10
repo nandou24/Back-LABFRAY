@@ -1,4 +1,4 @@
-const SolicitudAtencion = require("../../models/SolicitudAtencion");
+const SolicitudAtencion = require("../../models/Gestion/SolicitudAtencion");
 const { response } = require("express");
 //const moment = require("moment");
 
@@ -99,10 +99,10 @@ exports.actualizarEstado = async (req, res) => {
     const { id } = req.params;
     const { estado } = req.body;
     const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
-    
+
     const solicitud = await SolicitudAtencion.findByIdAndUpdate(
       id,
-      { 
+      {
         estado,
         updatedBy: uid, // uid del usuario que actualiza
         usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza

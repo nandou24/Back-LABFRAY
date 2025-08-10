@@ -1,6 +1,6 @@
 const { response } = require("express");
 const Paciente = require("../../models/Mantenimiento/Paciente");
-const Cotizacion = require("../../models/CotizacionPaciente");
+const Cotizacion = require("../../models/Gestion/CotizacionPaciente");
 const mongoose = require("mongoose");
 
 const crearPaciente = async (req, res = response) => {
