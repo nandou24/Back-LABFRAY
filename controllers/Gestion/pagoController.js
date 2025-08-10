@@ -2,9 +2,10 @@ const { response } = require("express");
 const {
   generarCodigoSolicitud,
 } = require("../Gestion/solicitudAtencionController");
-const Pago = require("../../models/PagoPaciente");
-const Cotizacion = require("../../models/CotizacionPaciente").CotizacionModel;
-const SolicitudAtencion = require("../../models/SolicitudAtencion");
+const Pago = require("../../models/Gestion/PagoPaciente");
+const Cotizacion =
+  require("../../models/Gestion/CotizacionPaciente").CotizacionModel;
+const SolicitudAtencion = require("../../models/Gestion/SolicitudAtencion");
 const mongoose = require("mongoose");
 const { validarEntradaPago } = require("../../utils/pagos/validacionesPago");
 
