@@ -107,6 +107,9 @@ app.use(
   require("./routes/Mantenimiento/especialidadRoute")
 );
 
+//! Empresas
+app.use("/api/empresa", require("./routes/Mantenimiento/empresaRoute"));
+
 // app.get("*", (req, res) => {
 //   res.sendFile(path.resolve(__dirname, "public/index.html"));
 // });
