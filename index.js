@@ -80,7 +80,7 @@ app.use(
   require("./routes/Mantenimiento/refMedicoRoute")
 );
 
-//! Cotizacion
+//! Cotizacion Paciente
 app.use("/api/cotizacion", require("./routes/Gestion/cotizacionRoute"));
 
 //! Pago
@@ -109,6 +109,12 @@ app.use(
 
 //! Empresas
 app.use("/api/empresa", require("./routes/Mantenimiento/empresaRoute"));
+
+//! Cotizacion Empresas
+app.use(
+  "/api/cotizacionEmpresa",
+  require("./routes/Gestion/cotizacionEmpresaRoute")
+);
 
 // app.get("*", (req, res) => {
 //   res.sendFile(path.resolve(__dirname, "public/index.html"));
