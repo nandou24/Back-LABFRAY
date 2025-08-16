@@ -8,6 +8,7 @@ const {
   actualizarServicio,
   mostrarServiciosFavoritos,
   obtenerItemsLaboratorioPorServicio,
+  mostrarServiciosFavoritosEmpresa,
 } = require("../../controllers/Mantenimiento/servicioController");
 const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
@@ -51,6 +52,8 @@ router.post(
 router.get("/latest", mostrarUltimosServicios);
 
 router.get("/latestFavorites", mostrarServiciosFavoritos);
+
+router.get("/latestFavoritesEmpresa", mostrarServiciosFavoritosEmpresa);
 
 //POST
 //! Buscar servicio

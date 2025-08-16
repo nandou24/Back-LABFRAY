@@ -34,6 +34,7 @@ const ServicioSchema = Schema(
     precioServicio: { type: String, required: true },
     estadoServicio: { type: String, required: true },
     favoritoServicio: { type: Boolean, default: false },
+    favoritoServicioEmpresa: { type: Boolean, default: false },
     examenesServicio: [examenesSchema],
     profesionesAsociadas: [profAsociadasSchema],
     // 🔍 Campos de auditoría:

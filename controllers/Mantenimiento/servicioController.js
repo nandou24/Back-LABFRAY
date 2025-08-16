@@ -145,6 +145,29 @@ const mostrarServiciosFavoritos = async (req, res = response) => {
   }
 };
 
+const mostrarServiciosFavoritosEmpresa = async (req, res = response) => {
+  try {
+    const servicios = await Servicio.find({
+      favoritoServicioEmpresa: true,
+    }).sort({
+      nombreServicio: 1,
+    });
+
+    //.limit(limite);
+
+    return res.json({
+      ok: true,
+      servicios,
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      ok: false,
+      msg: "Error en la consulta",
+    });
+  }
+};
+
 const encontrarTermino = async (req, res = response) => {
   const termino = req.query.search;
 
@@ -343,5 +366,6 @@ module.exports = {
   encontrarTipoExamen,
   actualizarServicio,
   mostrarServiciosFavoritos,
+  mostrarServiciosFavoritosEmpresa,
   obtenerItemsLaboratorioPorServicio,
 };
