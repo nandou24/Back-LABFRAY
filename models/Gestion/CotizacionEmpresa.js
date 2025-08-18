@@ -20,14 +20,19 @@ const HistorialSchema = new Schema({
   fechaModificacion: { type: Date, default: Date.now }, // 📌 Fecha de la modificación
   empresaId: {
     type: Schema.Types.ObjectId,
-    ref: "empresaCollection",
+    ref: "empresasCollection",
     required: true,
   },
   ruc: { type: String, required: true },
   razonSocial: { type: String, required: true },
+  dirigidoA_Id: {
+    type: Schema.Types.ObjectId,
+    required: true,
+  },
   formaPago: { type: String, required: true },
   diasCredito: { type: Number },
   entregaResultados: { type: Number },
+  validez: { type: Number },
   aplicarPrecioGlobal: { type: Boolean, required: true },
   aplicarDescuentoPorcentGlobal: { type: Boolean, required: true },
   sumaTotalesPrecioLista: { type: Number },

@@ -141,12 +141,44 @@ const mostrarUltimasCotizacionesEmpresa = async (req, res = response) => {
     const cotizaciones = await CotizacionEmpresa.find({
       createdAt: { $gte: fechaHaceUnaSemana },
     })
+      .populate("historial.empresaId", "razonSocial ruc personasContacto")
       .sort({ createdAt: -1 })
       .lean();
 
+    // 📌 Procesar las cotizaciones para extraer los datos del contacto
+    const cotizacionesConContacto = cotizaciones.map((cotizacion) => {
+      // Procesamos cada entrada del historial
+      const historialConContacto = cotizacion.historial.map((entrada) => {
+        let contactoInfo = null;
+
+        // Si tenemos la empresa poblada y el dirigidoA_Id
+        if (
+          entrada.empresaId &&
+          entrada.empresaId.personasContacto &&
+          entrada.dirigidoA_Id
+        ) {
+          // Buscamos la persona de contacto en el array
+          contactoInfo = entrada.empresaId.personasContacto.find(
+            (persona) =>
+              persona._id.toString() === entrada.dirigidoA_Id.toString()
+          );
+        }
+
+        return {
+          ...entrada,
+          dirigidoA: contactoInfo || null, // Agregamos la info del contacto
+        };
+      });
+
+      return {
+        ...cotizacion,
+        historial: historialConContacto,
+      };
+    });
+
     return res.json({
       ok: true,
-      cotizaciones: cotizaciones,
+      cotizaciones: cotizacionesConContacto,
     });
   } catch (error) {
     console.error("❌ Error al consultar cotizaciones empresariales:", error);
@@ -169,17 +201,42 @@ const mostrarUltimasCotizacionesEmpresaPorPagar = async (
       estadoCotizacion: { $in: ["GENERADA", "MODIFICADA", "PAGO ANULADO"] },
       createdAt: { $gte: fechaHaceUnaSemana },
     })
+      .populate("historial.empresaId", "razonSocial ruc personasContacto")
       .sort({ createdAt: -1 })
       .lean();
 
-    // 📌 Obtener solo la última versión del historial en cada cotización
-    const cotizacionesConUltimaVersion = cotizaciones.map((cot) => ({
-      ...cot,
-      historial:
+    // 📌 Obtener solo la última versión del historial en cada cotización y agregar contacto
+    const cotizacionesConUltimaVersion = cotizaciones.map((cot) => {
+      const ultimaEntrada =
         cot.historial.length > 0
-          ? [cot.historial[cot.historial.length - 1]]
+          ? cot.historial[cot.historial.length - 1]
+          : null;
+
+      let contactoInfo = null;
+      if (
+        ultimaEntrada &&
+        ultimaEntrada.empresaId &&
+        ultimaEntrada.empresaId.personasContacto &&
+        ultimaEntrada.dirigidoA_Id
+      ) {
+        contactoInfo = ultimaEntrada.empresaId.personasContacto.find(
+          (persona) =>
+            persona._id.toString() === ultimaEntrada.dirigidoA_Id.toString()
+        );
+      }
+
+      return {
+        ...cot,
+        historial: ultimaEntrada
+          ? [
+              {
+                ...ultimaEntrada,
+                dirigidoA: contactoInfo || null,
+              },
+            ]
           : [],
-    }));
+      };
+    });
 
     return res.json({
       ok: true,
@@ -207,18 +264,43 @@ const mostrarUltimasCotizacionesEmpresaPagadas = async (
     const cotizaciones = await CotizacionEmpresa.find({
       estadoCotizacion: { $in: ["PAGO TOTAL", "PAGO PARCIAL"] },
     })
+      .populate("historial.empresaId", "razonSocial ruc personasContacto")
       .sort({ createdAt: -1 })
       .limit(limite)
       .lean();
 
-    // 📌 Obtener solo la última versión del historial en cada cotización
-    const cotizacionesConUltimaVersion = cotizaciones.map((cot) => ({
-      ...cot,
-      historial:
+    // 📌 Obtener solo la última versión del historial en cada cotización y agregar contacto
+    const cotizacionesConUltimaVersion = cotizaciones.map((cot) => {
+      const ultimaEntrada =
         cot.historial.length > 0
-          ? [cot.historial[cot.historial.length - 1]]
+          ? cot.historial[cot.historial.length - 1]
+          : null;
+
+      let contactoInfo = null;
+      if (
+        ultimaEntrada &&
+        ultimaEntrada.empresaId &&
+        ultimaEntrada.empresaId.personasContacto &&
+        ultimaEntrada.dirigidoA_Id
+      ) {
+        contactoInfo = ultimaEntrada.empresaId.personasContacto.find(
+          (persona) =>
+            persona._id.toString() === ultimaEntrada.dirigidoA_Id.toString()
+        );
+      }
+
+      return {
+        ...cot,
+        historial: ultimaEntrada
+          ? [
+              {
+                ...ultimaEntrada,
+                dirigidoA: contactoInfo || null,
+              },
+            ]
           : [],
-    }));
+      };
+    });
 
     return res.json({
       ok: true,
@@ -245,12 +327,42 @@ const encontrarTerminoEmpresa = async (req, res = response) => {
         { "historial.razonSocial": { $regex: termino, $options: "i" } },
       ],
     })
+      .populate("historial.empresaId", "razonSocial ruc personasContacto")
       .sort({ updatedAt: -1 })
-      .limit(50); // 📌 Limita a 50 resultados
+      .limit(50) // 📌 Limita a 50 resultados
+      .lean();
+
+    // 📌 Procesar las cotizaciones para extraer los datos del contacto
+    const cotizacionesConContacto = cotizaciones.map((cotizacion) => {
+      const historialConContacto = cotizacion.historial.map((entrada) => {
+        let contactoInfo = null;
+
+        if (
+          entrada.empresaId &&
+          entrada.empresaId.personasContacto &&
+          entrada.dirigidoA_Id
+        ) {
+          contactoInfo = entrada.empresaId.personasContacto.find(
+            (persona) =>
+              persona._id.toString() === entrada.dirigidoA_Id.toString()
+          );
+        }
+
+        return {
+          ...entrada,
+          dirigidoA: contactoInfo || null,
+        };
+      });
+
+      return {
+        ...cotizacion,
+        historial: historialConContacto,
+      };
+    });
 
     return res.json({
       ok: true,
-      cotizaciones,
+      cotizaciones: cotizacionesConContacto,
     });
   } catch (error) {
     console.log(error);
@@ -377,7 +489,7 @@ const obtenerCotizacionEmpresaPorCodigo = async (req, res = response) => {
     const { codCotizacion } = req.params;
 
     const cotizacion = await CotizacionEmpresa.findOne({ codCotizacion })
-      .populate("historial.empresaId", "razonSocial ruc")
+      .populate("historial.empresaId", "razonSocial ruc personasContacto")
       .lean();
 
     if (!cotizacion) {
@@ -387,9 +499,37 @@ const obtenerCotizacionEmpresaPorCodigo = async (req, res = response) => {
       });
     }
 
+    // 📌 Procesar el historial para extraer los datos del contacto
+    const historialConContacto = cotizacion.historial.map((entrada) => {
+      let contactoInfo = null;
+
+      // Si tenemos la empresa poblada y el dirigidoA_Id
+      if (
+        entrada.empresaId &&
+        entrada.empresaId.personasContacto &&
+        entrada.dirigidoA_Id
+      ) {
+        // Buscamos la persona de contacto en el array
+        contactoInfo = entrada.empresaId.personasContacto.find(
+          (persona) =>
+            persona._id.toString() === entrada.dirigidoA_Id.toString()
+        );
+      }
+
+      return {
+        ...entrada,
+        dirigidoA: contactoInfo || null, // Agregamos la info del contacto
+      };
+    });
+
+    const cotizacionConContacto = {
+      ...cotizacion,
+      historial: historialConContacto,
+    };
+
     return res.json({
       ok: true,
-      cotizacion,
+      cotizacion: cotizacionConContacto,
     });
   } catch (error) {
     console.error("Error al obtener cotización empresarial:", error);
