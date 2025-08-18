@@ -141,7 +141,10 @@ const mostrarUltimasCotizacionesEmpresa = async (req, res = response) => {
     const cotizaciones = await CotizacionEmpresa.find({
       createdAt: { $gte: fechaHaceUnaSemana },
     })
-      .populate("historial.empresaId", "razonSocial ruc personasContacto")
+      .populate(
+        "historial.empresaId",
+        "razonSocial ruc personasContacto direccionFiscal distrito provincia departamento"
+      )
       .sort({ createdAt: -1 })
       .lean();
 
@@ -201,7 +204,10 @@ const mostrarUltimasCotizacionesEmpresaPorPagar = async (
       estadoCotizacion: { $in: ["GENERADA", "MODIFICADA", "PAGO ANULADO"] },
       createdAt: { $gte: fechaHaceUnaSemana },
     })
-      .populate("historial.empresaId", "razonSocial ruc personasContacto")
+      .populate(
+        "historial.empresaId",
+        "razonSocial ruc personasContacto direccionFiscal distrito provincia departamento"
+      )
       .sort({ createdAt: -1 })
       .lean();
 
@@ -264,7 +270,10 @@ const mostrarUltimasCotizacionesEmpresaPagadas = async (
     const cotizaciones = await CotizacionEmpresa.find({
       estadoCotizacion: { $in: ["PAGO TOTAL", "PAGO PARCIAL"] },
     })
-      .populate("historial.empresaId", "razonSocial ruc personasContacto")
+      .populate(
+        "historial.empresaId",
+        "razonSocial ruc personasContacto direccionFiscal distrito provincia departamento"
+      )
       .sort({ createdAt: -1 })
       .limit(limite)
       .lean();
@@ -327,7 +336,10 @@ const encontrarTerminoEmpresa = async (req, res = response) => {
         { "historial.razonSocial": { $regex: termino, $options: "i" } },
       ],
     })
-      .populate("historial.empresaId", "razonSocial ruc personasContacto")
+      .populate(
+        "historial.empresaId",
+        "razonSocial ruc personasContacto direccionFiscal distrito provincia departamento"
+      )
       .sort({ updatedAt: -1 })
       .limit(50) // 📌 Limita a 50 resultados
       .lean();
@@ -489,7 +501,10 @@ const obtenerCotizacionEmpresaPorCodigo = async (req, res = response) => {
     const { codCotizacion } = req.params;
 
     const cotizacion = await CotizacionEmpresa.findOne({ codCotizacion })
-      .populate("historial.empresaId", "razonSocial ruc personasContacto")
+      .populate(
+        "historial.empresaId",
+        "razonSocial ruc personasContacto direccionFiscal distrito provincia departamento"
+      )
       .lean();
 
     if (!cotizacion) {
