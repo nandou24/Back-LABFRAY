@@ -10,8 +10,6 @@ const ServiciosSchema = new mongoose.Schema({
   precioLista: { type: Number, required: true },
   diferencia: { type: Number },
   precioVenta: { type: Number, required: true },
-  descuentoPorcentaje: { type: Number, required: true },
-  nuevoPrecioVenta: { type: Number, required: true },
   totalUnitario: { type: Number, required: true },
 });
 
@@ -34,11 +32,10 @@ const HistorialSchema = new Schema({
   entregaResultados: { type: Number },
   validez: { type: Number },
   aplicarPrecioGlobal: { type: Boolean, required: true },
-  aplicarDescuentoPorcentGlobal: { type: Boolean, required: true },
-  sumaTotalesPrecioLista: { type: Number },
-  descuentoTotal: { type: Number },
   precioConDescGlobal: { type: Number },
-  descuentoPorcentaje: { type: Number },
+  cantidadGlobal: { type: Number },
+  sumaTotalesPrecioLista: { type: Number },
+  sumaTotalesPrecioVenta: { type: Number },
   subTotal: { type: Number },
   igv: { type: Number },
   total: { type: Number },
