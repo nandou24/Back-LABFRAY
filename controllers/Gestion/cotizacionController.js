@@ -84,10 +84,10 @@ const crearCotizacion = async (req, res = response) => {
       // console.log(correlativo+' correlativo')
     }
 
-    if (correlativo > 999999) {
+    if (correlativo > 99999) {
       return res.status(400).json({
         ok: false,
-        msg: "El número máximo de cotizacione ha sido alcanzado para este año.",
+        msg: "El número máximo de cotizaciones ha sido alcanzado para este año.",
       });
     }
 

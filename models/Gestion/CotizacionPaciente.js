@@ -117,11 +117,6 @@ const CotizacionSchema = Schema(
   }
 );
 
-//aquí se define o elige la colección/tabla en la que queremos que se guarde
-// module.exports = mongoose.model("cotizacionCollection", CotizacionSchema);
-// module.exports = mongoose.model("profAsociadasSchema", profAsociadasSchema);
-// module.exports = mongoose.model("serviciosSchema", ServiciosSchema);
-
 module.exports = {
   CotizacionModel: mongoose.model("cotizacionCollection", CotizacionSchema),
   profAsociadasSchema,
