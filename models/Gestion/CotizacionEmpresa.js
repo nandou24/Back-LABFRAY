@@ -31,6 +31,7 @@ const HistorialSchema = new Schema({
   diasCredito: { type: Number },
   entregaResultados: { type: Number },
   validez: { type: Number },
+  servicioInHouse: { type: Number },
   aplicarPrecioGlobal: { type: Boolean, required: true },
   precioConDescGlobal: { type: Number },
   cantidadGlobal: { type: Number },
