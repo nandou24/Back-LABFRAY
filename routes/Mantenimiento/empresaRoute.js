@@ -3,13 +3,11 @@ const { check } = require("express-validator");
 const {
   crearEmpresa,
   obtenerEmpresas,
-  obtenerEmpresaPorRuc,
   actualizarEmpresa,
-  eliminarEmpresa,
   buscarEmpresasPorTermino,
-  obtenerEmpresasPorTipo,
-  obtenerEmpresasPorSector,
-  obtenerEmpresasActivas,
+  eliminarContactoEmpresa,
+  eliminarSedeEmpresa,
+  verificarCotizacionesVinculadasContacto,
 } = require("../../controllers/Mantenimiento/empresaController");
 const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
@@ -145,7 +143,24 @@ router.get("/", [validarJWT], obtenerEmpresas);
 //! Buscar empresas por término
 router.get("/findTerm/:termino", [validarJWT], buscarEmpresasPorTermino);
 
-// //DELETE
+//! Verificar cotizaciones vinculadas a un contacto
+router.get(
+  "/contacto/:ruc/:contactoId/cotizaciones",
+  [validarJWT],
+  verificarCotizacionesVinculadasContacto
+);
+
+//DELETE
+
+//! Eliminar contacto específico de empresa
+router.delete(
+  "/contacto/:ruc/:contactoId",
+  [validarJWT],
+  eliminarContactoEmpresa
+);
+
+//! Eliminar sede específica de empresa
+router.delete("/sede/:ruc/:sedeId", [validarJWT], eliminarSedeEmpresa);
 
 // //! Eliminar empresa (soft delete)
 // router.delete("/deleteEmpresa/:ruc", [validarJWT], eliminarEmpresa);

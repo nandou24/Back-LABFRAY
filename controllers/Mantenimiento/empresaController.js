@@ -1,5 +1,7 @@
 const { response } = require("express");
 const Empresa = require("../../models/Mantenimiento/Empresa");
+const CotizacionEmpresa =
+  require("../../models/Gestion/CotizacionEmpresa").CotizacionModel;
 
 const crearEmpresa = async (req, res = response) => {
   const { ruc, personasContacto } = req.body;
@@ -73,12 +75,18 @@ const actualizarEmpresa = async (req, res = response) => {
   console.log("datosActualizables", datosActualizables);
   const ruc = req.body.ruc;
 
+  // Extraer arrays que necesitan tratamiento especial
+  const personasContacto = datosActualizables.personasContacto;
+  const ubicacionesSedes = datosActualizables.ubicacionesSedes;
+
   // Remover campos que no se deben actualizar directamente
   delete datosActualizables.ruc; // El RUC no se puede cambiar
   delete datosActualizables._id;
   delete datosActualizables.createdBy;
   delete datosActualizables.usuarioRegistro;
   delete datosActualizables.fechaRegistro;
+  delete datosActualizables.personasContacto; // Lo manejamos por separado
+  delete datosActualizables.ubicacionesSedes; // Lo manejamos por separado
 
   console.log("ruc", ruc);
 
@@ -93,18 +101,80 @@ const actualizarEmpresa = async (req, res = response) => {
       });
     }
 
-    // Validar contacto principal si se están actualizando personas de contacto
-    if (
-      datosActualizables.personasContacto &&
-      datosActualizables.personasContacto.length > 0
-    ) {
-      const contactoPrincipal = datosActualizables.personasContacto.find(
+    // 📌 MANEJO ESPECIAL DE PERSONAS DE CONTACTO
+    if (personasContacto && personasContacto.length > 0) {
+      // Validar contacto principal
+      const contactoPrincipal = personasContacto.find(
         (contacto) => contacto.principal === true
       );
       if (!contactoPrincipal) {
         // Si no hay ninguno marcado como principal, marcar el primero
-        datosActualizables.personasContacto[0].principal = true;
+        personasContacto[0].principal = true;
       }
+
+      // Preservar IDs existentes y manejar nuevos/actualizados
+      const personasActualizadas = personasContacto.map((persona) => {
+        if (persona._id) {
+          // Si tiene _id, es una persona existente - preservar el ID
+          return {
+            _id: persona._id,
+            nombre: persona.nombre,
+            cargo: persona.cargo,
+            telefono: persona.telefono,
+            email: persona.email,
+            principal: persona.principal,
+          };
+        } else {
+          // Si no tiene _id, es una persona nueva - MongoDB generará un nuevo ID
+          return {
+            nombre: persona.nombre,
+            cargo: persona.cargo,
+            telefono: persona.telefono,
+            email: persona.email,
+            principal: persona.principal,
+          };
+        }
+      });
+
+      datosActualizables.personasContacto = personasActualizadas;
+    }
+
+    // 📌 MANEJO ESPECIAL DE UBICACIONES/SEDES
+    if (ubicacionesSedes && ubicacionesSedes.length > 0) {
+      const ubicacionesActualizadas = ubicacionesSedes.map((sede) => {
+        if (sede._id) {
+          // Si tiene _id, es una sede existente - preservar el ID
+          return {
+            _id: sede._id,
+            nombreSede: sede.nombreSede,
+            direccionSede: sede.direccionSede,
+            departamentoSede: sede.departamentoSede,
+            provinciaSede: sede.provinciaSede,
+            distritoSede: sede.distritoSede,
+            referenciasSede: sede.referenciasSede,
+            coordenadasMaps: sede.coordenadasMaps,
+            telefonoSede: sede.telefonoSede,
+            emailSede: sede.emailSede,
+            observacionesSede: sede.observacionesSede,
+          };
+        } else {
+          // Si no tiene _id, es una sede nueva - MongoDB generará un nuevo ID
+          return {
+            nombreSede: sede.nombreSede,
+            direccionSede: sede.direccionSede,
+            departamentoSede: sede.departamentoSede,
+            provinciaSede: sede.provinciaSede,
+            distritoSede: sede.distritoSede,
+            referenciasSede: sede.referenciasSede,
+            coordenadasMaps: sede.coordenadasMaps,
+            telefonoSede: sede.telefonoSede,
+            emailSede: sede.emailSede,
+            observacionesSede: sede.observacionesSede,
+          };
+        }
+      });
+
+      datosActualizables.ubicacionesSedes = ubicacionesActualizadas;
     }
 
     // Actualizar la empresa
@@ -247,9 +317,199 @@ const buscarEmpresasPorTermino = async (req, res = response) => {
   }
 };
 
+// 📌 Método para eliminar contacto específico
+const eliminarContactoEmpresa = async (req, res = response) => {
+  const { ruc, contactoId } = req.params;
+  const { uid, nombreUsuario } = req.user;
+
+  try {
+    const empresa = await Empresa.findOne({ ruc });
+
+    if (!empresa) {
+      return res.status(404).json({
+        ok: false,
+        msg: "Empresa no encontrada",
+      });
+    }
+
+    // Verificar que el contacto existe
+    const contactoExiste = empresa.personasContacto.id(contactoId);
+    if (!contactoExiste) {
+      return res.status(404).json({
+        ok: false,
+        msg: "Contacto no encontrado",
+      });
+    }
+
+    // 🔍 VALIDACIÓN: Verificar si existen cotizaciones vinculadas al contacto
+    const cotizacionesVinculadas = await CotizacionEmpresa.find({
+      "historial.dirigidoA_Id": contactoId,
+    }).lean();
+
+    if (cotizacionesVinculadas && cotizacionesVinculadas.length > 0) {
+      return res.status(400).json({
+        ok: false,
+        msg: `No se puede eliminar este contacto porque tiene ${cotizacionesVinculadas.length} cotización(es) vinculada(s). Primero debe actualizar o eliminar las cotizaciones relacionadas.`,
+        cotizacionesVinculadas: cotizacionesVinculadas.map((cot) => ({
+          codCotizacion: cot.codCotizacion,
+          estadoCotizacion: cot.estadoCotizacion,
+          fechaCreacion: cot.createdAt,
+        })),
+      });
+    }
+
+    // Eliminar el contacto usando pull
+    const empresaActualizada = await Empresa.findOneAndUpdate(
+      { ruc },
+      {
+        $pull: { personasContacto: { _id: contactoId } },
+        $set: {
+          updatedBy: uid,
+          usuarioActualizacion: nombreUsuario,
+          fechaActualizacion: new Date(),
+        },
+      },
+      { new: true }
+    );
+
+    // Si el contacto eliminado era principal, marcar otro como principal
+    const contactoPrincipal = empresaActualizada.personasContacto.find(
+      (contacto) => contacto.principal === true
+    );
+
+    if (!contactoPrincipal && empresaActualizada.personasContacto.length > 0) {
+      empresaActualizada.personasContacto[0].principal = true;
+      await empresaActualizada.save();
+    }
+
+    res.status(200).json({
+      ok: true,
+      msg: "Contacto eliminado exitosamente",
+      empresa: empresaActualizada,
+    });
+  } catch (error) {
+    console.error("Error al eliminar contacto:", error);
+    res.status(500).json({
+      ok: false,
+      msg: "Error interno del servidor al eliminar contacto",
+      error: error.message,
+    });
+  }
+};
+
+// 📌 Método para eliminar sede específica
+const eliminarSedeEmpresa = async (req, res = response) => {
+  const { ruc, sedeId } = req.params;
+  const { uid, nombreUsuario } = req.user;
+
+  try {
+    const empresa = await Empresa.findOne({ ruc });
+
+    if (!empresa) {
+      return res.status(404).json({
+        ok: false,
+        msg: "Empresa no encontrada",
+      });
+    }
+
+    // Verificar que la sede existe
+    const sedeExiste = empresa.ubicacionesSedes.id(sedeId);
+    if (!sedeExiste) {
+      return res.status(404).json({
+        ok: false,
+        msg: "Sede no encontrada",
+      });
+    }
+
+    // Eliminar la sede usando pull
+    const empresaActualizada = await Empresa.findOneAndUpdate(
+      { ruc },
+      {
+        $pull: { ubicacionesSedes: { _id: sedeId } },
+        $set: {
+          updatedBy: uid,
+          usuarioActualizacion: nombreUsuario,
+          fechaActualizacion: new Date(),
+        },
+      },
+      { new: true }
+    );
+
+    res.status(200).json({
+      ok: true,
+      msg: "Sede eliminada exitosamente",
+      empresa: empresaActualizada,
+    });
+  } catch (error) {
+    console.error("Error al eliminar sede:", error);
+    res.status(500).json({
+      ok: false,
+      msg: "Error interno del servidor al eliminar sede",
+      error: error.message,
+    });
+  }
+};
+
+// 📌 Método para verificar cotizaciones vinculadas a un contacto
+const verificarCotizacionesVinculadasContacto = async (req, res = response) => {
+  const { ruc, contactoId } = req.params;
+
+  try {
+    const empresa = await Empresa.findOne({ ruc });
+
+    if (!empresa) {
+      return res.status(404).json({
+        ok: false,
+        msg: "Empresa no encontrada",
+      });
+    }
+
+    // Verificar que el contacto existe
+    const contactoExiste = empresa.personasContacto.id(contactoId);
+    if (!contactoExiste) {
+      return res.status(404).json({
+        ok: false,
+        msg: "Contacto no encontrado",
+      });
+    }
+
+    // Buscar cotizaciones vinculadas
+    const cotizacionesVinculadas = await CotizacionEmpresa.find({
+      "historial.dirigidoA_Id": contactoId,
+    })
+      .select("codCotizacion estadoCotizacion createdAt updatedAt")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.status(200).json({
+      ok: true,
+      contacto: {
+        _id: contactoExiste._id,
+        nombre: contactoExiste.nombre,
+        cargo: contactoExiste.cargo,
+        email: contactoExiste.email,
+        telefono: contactoExiste.telefono,
+      },
+      totalCotizaciones: cotizacionesVinculadas.length,
+      puedeEliminar: cotizacionesVinculadas.length === 0,
+      cotizacionesVinculadas: cotizacionesVinculadas,
+    });
+  } catch (error) {
+    console.error("Error al verificar cotizaciones vinculadas:", error);
+    res.status(500).json({
+      ok: false,
+      msg: "Error interno del servidor al verificar cotizaciones",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   crearEmpresa,
   actualizarEmpresa,
   obtenerEmpresas,
   buscarEmpresasPorTermino,
+  eliminarContactoEmpresa,
+  eliminarSedeEmpresa,
+  verificarCotizacionesVinculadasContacto,
 };
