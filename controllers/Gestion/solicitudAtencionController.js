@@ -143,7 +143,11 @@ const obtenerPorRangoFechas = async (req, res) => {
     }
 
     const solicitudes = await SolicitudAtencion.find(filtro)
-      .populate('solicitanteId', 'nombreRefMedico apePatRefMedico apeMatRefMedico')
+      .populate(
+        "solicitanteId",
+        "nombreRefMedico apePatRefMedico apeMatRefMedico"
+      )
+      .populate("pagoId", "subTotalFacturar")
       .sort({ fechaEmision: -1 });
 
     console.log("Solicitudes encontradas:", solicitudes.length);
