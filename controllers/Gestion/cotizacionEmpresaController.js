@@ -555,10 +555,66 @@ const obtenerCotizacionEmpresaPorCodigo = async (req, res = response) => {
   }
 };
 
+const obtenerCotizacionesPorEmpresaParaAtencionEmpresas = async (
+  req,
+  res = response
+) => {
+  try {
+    const { ruc } = req.params;
+
+    // Buscar cotizaciones por RUC en el historial
+    const cotizaciones = await CotizacionEmpresa.find({
+      "historial.ruc": ruc,
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (!cotizaciones || cotizaciones.length === 0) {
+      return res.status(404).json({
+        ok: false,
+        msg: "No se encontraron cotizaciones para esta empresa.",
+      });
+    }
+
+    // 📌 Procesar cotizaciones para devolver solo datos específicos
+    const cotizacionesResumidas = cotizaciones.map((cotizacion) => {
+      // Obtener la última versión del historial
+      const ultimaVersion =
+        cotizacion.historial.length > 0
+          ? cotizacion.historial[cotizacion.historial.length - 1]
+          : null;
+
+      return {
+        codCotizacion: cotizacion.codCotizacion,
+        historial: ultimaVersion
+          ? [
+              {
+                fechaModificacion: ultimaVersion.fechaModificacion,
+                serviciosCotizacion: ultimaVersion.serviciosCotizacion,
+              },
+            ]
+          : [],
+      };
+    });
+
+    return res.json({
+      ok: true,
+      cotizaciones: cotizacionesResumidas,
+    });
+  } catch (error) {
+    console.error("Error al obtener cotizaciones por empresa:", error);
+    return res.status(500).json({
+      ok: false,
+      msg: "Error al obtener cotizaciones por empresa.",
+    });
+  }
+};
+
 module.exports = {
   crearCotizacionEmpresa,
   mostrarUltimasCotizacionesEmpresa,
   encontrarTerminoEmpresa,
+  obtenerCotizacionesPorEmpresaParaAtencionEmpresas,
   crearNuevaVersionCotiEmpresa,
   mostrarUltimasCotizacionesEmpresaPorPagar,
   mostrarUltimasCotizacionesEmpresaPagadas,
