@@ -590,6 +590,8 @@ const obtenerCotizacionesPorEmpresaParaAtencionEmpresas = async (
           ? [
               {
                 fechaModificacion: ultimaVersion.fechaModificacion,
+                aplicarPrecioGlobal: ultimaVersion.aplicarPrecioGlobal,
+                cantidadGlobal: ultimaVersion.cantidadGlobal,
                 serviciosCotizacion: ultimaVersion.serviciosCotizacion,
               },
             ]
