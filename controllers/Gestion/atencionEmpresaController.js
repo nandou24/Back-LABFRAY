@@ -1,14 +1,14 @@
 const { response } = require("express");
-const { AtencionEmpresa } = require("../../models/Gestion/atencionEmpresa").AtencionEmpresaModel;
-
+const AtencionEmpresa =
+  require("../../models/Gestion/atencionEmpresa").AtencionEmpresaModel;
 
 // Registrar una nueva atención de empresa
 const crearAtencionEmpresa = async (req, res = response) => {
-	try {
-		const datos = req.body;
-		// Aquí podrías agregar validaciones según tus necesidades
+  try {
+    const datos = req.body;
+    // Aquí podrías agregar validaciones según tus necesidades
 
-        // Generación de código correlativo para empresa
+    // Generación de código correlativo para empresa
     const anioActual = new Date().getFullYear();
     const ultimaAtencion = await AtencionEmpresa.findOne({
       codAtencion: new RegExp(`^AE-${anioActual}-`),
@@ -41,20 +41,20 @@ const crearAtencionEmpresa = async (req, res = response) => {
     const nuevaAtencion = new AtencionEmpresa({
       ...datos,
       codAtencion: nuevoCodigo, // Agregar el código de la atención generado
-      estado: 'BORRADOR', // Estado inicial
+      estado: "BORRADOR", // Estado inicial
     });
 
-		await nuevaAtencion.save();
-		res.status(201).json({
-			message: "Atención de empresa registrada correctamente",
-			atencion: nuevaAtencion,
-		});
-	} catch (error) {
-		console.error("Error al registrar atención de empresa:", error);
-		res.status(500).json({ message: "Error interno del servidor" });
-	}
+    await nuevaAtencion.save();
+    res.status(201).json({
+      message: "Atención de empresa registrada correctamente",
+      atencion: nuevaAtencion,
+    });
+  } catch (error) {
+    console.error("Error al registrar atención de empresa:", error);
+    res.status(500).json({ message: "Error interno del servidor" });
+  }
 };
 
 module.exports = {
-	crearAtencionEmpresa,
+  crearAtencionEmpresa,
 };
