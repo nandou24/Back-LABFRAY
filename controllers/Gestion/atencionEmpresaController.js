@@ -55,6 +55,20 @@ const crearAtencionEmpresa = async (req, res = response) => {
   }
 };
 
+const listarAtencionesVigentes = async (req, res = response) => {
+  try {
+    const estadosPermitidos = ["BORRADOR", "PROGRAMADA", "EN ATENCION"];
+    const atenciones = await AtencionEmpresa.find({
+      estado: { $in: estadosPermitidos },
+    }).lean();
+    res.status(200).json({ atenciones });
+  } catch (error) {
+    console.error("Error al traer atenciones vigentes de empresas:", error);
+    res.status(500).json({ message: "Error interno del servidor" });
+  }
+};
+
 module.exports = {
   crearAtencionEmpresa,
+  listarAtencionesVigentes,
 };
