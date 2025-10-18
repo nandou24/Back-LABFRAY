@@ -141,7 +141,7 @@ router.put(
 router.get("/", [validarJWT], obtenerEmpresas);
 
 //! Buscar empresas por término
-router.get("/findTerm/:termino", [validarJWT], buscarEmpresasPorTermino);
+router.get("/findTerm", buscarEmpresasPorTermino);
 
 //! Verificar cotizaciones vinculadas a un contacto
 router.get(
