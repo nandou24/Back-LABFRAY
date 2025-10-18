@@ -116,6 +116,12 @@ app.use(
   require("./routes/Gestion/cotizacionEmpresaRoute")
 );
 
+//! Atención Empresas
+app.use(
+  "/api/atencionEmpresa",
+  require("./routes/Gestion/atencionEmpresaRoute")
+);
+
 // app.get("*", (req, res) => {
 //   res.sendFile(path.resolve(__dirname, "public/index.html"));
 // });

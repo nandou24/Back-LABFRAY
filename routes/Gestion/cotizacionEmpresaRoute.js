@@ -9,6 +9,7 @@ const {
   mostrarUltimasCotizacionesEmpresaPorPagar,
   mostrarUltimasCotizacionesEmpresaPagadas,
   obtenerCotizacionEmpresaPorCodigo,
+  obtenerCotizacionesPorEmpresaParaAtencionEmpresas,
 } = require("../../controllers/Gestion/cotizacionEmpresaController");
 
 const { validarCampos } = require("../../middlewares/validar-campo");
@@ -52,6 +53,13 @@ router.get("/pagadas", validarJWT, mostrarUltimasCotizacionesEmpresaPagadas);
 
 // Buscar cotizaciones empresariales por término
 router.get("/buscar", validarJWT, encontrarTerminoEmpresa);
+
+// Obtener cotizaciones por RUC de empresa
+router.get(
+  "/empresa/:ruc",
+  validarJWT,
+  obtenerCotizacionesPorEmpresaParaAtencionEmpresas
+);
 
 // Obtener cotización empresarial por código
 router.get("/:codCotizacion", validarJWT, obtenerCotizacionEmpresaPorCodigo);

@@ -282,7 +282,7 @@ const obtenerEmpresas = async (req, res = response) => {
 };
 
 const buscarEmpresasPorTermino = async (req, res = response) => {
-  const termino = req.params.termino;
+  const termino = req.query.termino;
 
   if (!termino || termino.trim() === "") {
     return res.status(400).json({
