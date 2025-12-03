@@ -348,24 +348,24 @@ const mostrarUltimosPagos = async (req, res = response) => {
 
 const encontrarTermino = async (req, res = response) => {
   const termino = req.query.search;
-  console.log(termino);
+  console.log(termino, "en pagos");
 
   try {
-    const cotizaciones = await Pago.find({
-      historial: {
-        $elemMatch: {
-          $or: [
-            { pacienteNombreCompleto: { $regex: termino, $options: "i" } }, // Nombre del cliente
-            { nroDoc: { $regex: termino, $options: "i" } }, // Número de documento
-          ],
-        },
-      },
+    const pagos = await Pago.find({
+      $or: [
+        { apePatCliente: { $regex: termino, $options: "i" } }, // apellido paterno del cliente
+        { apeMatCliente: { $regex: termino, $options: "i" } }, // apellido materno del cliente
+        { nombreCliente: { $regex: termino, $options: "i" } }, // Nombre del cliente
+        { nroDoc: { $regex: termino, $options: "i" } }, // Número de documento
+      ],
     })
       .sort({ updatedAt: -1 }) // 📌 Ordena de más nuevas a más antiguas
       .limit(10); // 📌 Limita a 10 resultados;
+
+    console.log("Pagos encontrados:", pagos);
     return res.json({
       ok: true,
-      cotizaciones, //! favoritos: favoritos
+      pagos,
     });
   } catch (error) {
     console.log(error);
