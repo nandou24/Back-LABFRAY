@@ -136,7 +136,7 @@ const mostrarUltimasCotizacionesEmpresa = async (req, res = response) => {
   try {
     // Calcular la fecha de hace 7 días
     const fechaHaceUnaSemana = new Date();
-    fechaHaceUnaSemana.setDate(fechaHaceUnaSemana.getDate() - 7);
+    fechaHaceUnaSemana.setDate(fechaHaceUnaSemana.getDate() - 60);
 
     const cotizaciones = await CotizacionEmpresa.find({
       createdAt: { $gte: fechaHaceUnaSemana },

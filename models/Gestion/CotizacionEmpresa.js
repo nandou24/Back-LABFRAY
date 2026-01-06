@@ -62,6 +62,8 @@ const CotizacionEmpresaSchema = Schema(
         "ANULADO",
         "FACTURADO",
         "PAGADA",
+        "ACEPTADA",
+        "ENVIADA",
       ],
     },
     historial: [HistorialSchema],
