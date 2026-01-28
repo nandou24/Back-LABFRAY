@@ -31,6 +31,8 @@ const HistorialSchema = new Schema({
   diasCredito: { type: Number },
   entregaResultados: { type: Number },
   validez: { type: Number },
+  nombreProtocolo: { type: String },
+  ubicacion: { type: String, required: true },
   servicioInHouse: { type: Number },
   aplicarPrecioGlobal: { type: Boolean, required: true },
   precioConDescGlobal: { type: Number },
@@ -71,13 +73,13 @@ const CotizacionEmpresaSchema = Schema(
 
   {
     timestamps: true,
-  }
+  },
 );
 
 module.exports = {
   CotizacionModel: mongoose.model(
     "cotizacionEmpresaCollection",
-    CotizacionEmpresaSchema
+    CotizacionEmpresaSchema,
   ),
   ServiciosSchema,
 };
