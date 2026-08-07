@@ -589,6 +589,7 @@ const obtenerCotizacionesPorEmpresaParaAtencionEmpresas = async (
         historial: ultimaVersion
           ? [
               {
+                razonSocial: ultimaVersion.razonSocial,
                 fechaModificacion: ultimaVersion.fechaModificacion,
                 aplicarPrecioGlobal: ultimaVersion.aplicarPrecioGlobal,
                 cantidadGlobal: ultimaVersion.cantidadGlobal,
