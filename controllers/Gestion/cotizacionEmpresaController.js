@@ -97,7 +97,7 @@ const crearCotizacionEmpresa = async (req, res = response) => {
     //Crear el nuevo código (Ejemplo: EMP-2024-0001)
     const nuevoCodigo = `EMP-${anioActual}-${String(correlativo).padStart(
       4,
-      "0"
+      "0",
     )}`;
 
     // Crear el documento
@@ -143,7 +143,7 @@ const mostrarUltimasCotizacionesEmpresa = async (req, res = response) => {
     })
       .populate(
         "historial.empresaId",
-        "razonSocial ruc personasContacto direccionFiscal distrito provincia departamento"
+        "razonSocial ruc personasContacto direccionFiscal distrito provincia departamento",
       )
       .sort({ createdAt: -1 })
       .lean();
@@ -163,7 +163,7 @@ const mostrarUltimasCotizacionesEmpresa = async (req, res = response) => {
           // Buscamos la persona de contacto en el array
           contactoInfo = entrada.empresaId.personasContacto.find(
             (persona) =>
-              persona._id.toString() === entrada.dirigidoA_Id.toString()
+              persona._id.toString() === entrada.dirigidoA_Id.toString(),
           );
         }
 
@@ -194,7 +194,7 @@ const mostrarUltimasCotizacionesEmpresa = async (req, res = response) => {
 
 const mostrarUltimasCotizacionesEmpresaPorPagar = async (
   req,
-  res = response
+  res = response,
 ) => {
   try {
     const fechaHaceUnaSemana = new Date();
@@ -206,7 +206,7 @@ const mostrarUltimasCotizacionesEmpresaPorPagar = async (
     })
       .populate(
         "historial.empresaId",
-        "razonSocial ruc personasContacto direccionFiscal distrito provincia departamento"
+        "razonSocial ruc personasContacto direccionFiscal distrito provincia departamento",
       )
       .sort({ createdAt: -1 })
       .lean();
@@ -227,7 +227,7 @@ const mostrarUltimasCotizacionesEmpresaPorPagar = async (
       ) {
         contactoInfo = ultimaEntrada.empresaId.personasContacto.find(
           (persona) =>
-            persona._id.toString() === ultimaEntrada.dirigidoA_Id.toString()
+            persona._id.toString() === ultimaEntrada.dirigidoA_Id.toString(),
         );
       }
 
@@ -259,7 +259,7 @@ const mostrarUltimasCotizacionesEmpresaPorPagar = async (
 
 const mostrarUltimasCotizacionesEmpresaPagadas = async (
   req,
-  res = response
+  res = response,
 ) => {
   console.log("entro a controlador mostrar cotizaciones empresariales pagadas");
 
@@ -272,7 +272,7 @@ const mostrarUltimasCotizacionesEmpresaPagadas = async (
     })
       .populate(
         "historial.empresaId",
-        "razonSocial ruc personasContacto direccionFiscal distrito provincia departamento"
+        "razonSocial ruc personasContacto direccionFiscal distrito provincia departamento",
       )
       .sort({ createdAt: -1 })
       .limit(limite)
@@ -294,7 +294,7 @@ const mostrarUltimasCotizacionesEmpresaPagadas = async (
       ) {
         contactoInfo = ultimaEntrada.empresaId.personasContacto.find(
           (persona) =>
-            persona._id.toString() === ultimaEntrada.dirigidoA_Id.toString()
+            persona._id.toString() === ultimaEntrada.dirigidoA_Id.toString(),
         );
       }
 
@@ -338,7 +338,7 @@ const encontrarTerminoEmpresa = async (req, res = response) => {
     })
       .populate(
         "historial.empresaId",
-        "razonSocial ruc personasContacto direccionFiscal distrito provincia departamento"
+        "razonSocial ruc personasContacto direccionFiscal distrito provincia departamento",
       )
       .sort({ updatedAt: -1 })
       .limit(50) // 📌 Limita a 50 resultados
@@ -356,7 +356,7 @@ const encontrarTerminoEmpresa = async (req, res = response) => {
         ) {
           contactoInfo = entrada.empresaId.personasContacto.find(
             (persona) =>
-              persona._id.toString() === entrada.dirigidoA_Id.toString()
+              persona._id.toString() === entrada.dirigidoA_Id.toString(),
           );
         }
 
@@ -436,18 +436,18 @@ const crearNuevaVersionCotiEmpresa = async (req, res = response) => {
       // 📌 Si existe `serviciosCotizacion`, eliminamos `_id` en cada servicio
       if (obj1Clonado.serviciosCotizacion && obj2Clonado.serviciosCotizacion) {
         obj1Clonado.serviciosCotizacion.forEach(
-          (servicio) => delete servicio._id
+          (servicio) => delete servicio._id,
         );
         obj2Clonado.serviciosCotizacion.forEach(
-          (servicio) => delete servicio._id
+          (servicio) => delete servicio._id,
         );
 
         // 📌 Ordenamos los servicios para evitar diferencias por el orden
         obj1Clonado.serviciosCotizacion.sort((a, b) =>
-          a.codServicio.localeCompare(b.codServicio)
+          a.codServicio.localeCompare(b.codServicio),
         );
         obj2Clonado.serviciosCotizacion.sort((a, b) =>
-          a.codServicio.localeCompare(b.codServicio)
+          a.codServicio.localeCompare(b.codServicio),
         );
       }
 
@@ -474,7 +474,7 @@ const crearNuevaVersionCotiEmpresa = async (req, res = response) => {
           fechaActualizacion: new Date(), // Fecha de actualización
         }, // 📌 Actualizar estado
       },
-      { new: true }
+      { new: true },
     );
 
     if (cotizacionActualizada) {
@@ -487,7 +487,7 @@ const crearNuevaVersionCotiEmpresa = async (req, res = response) => {
   } catch (error) {
     console.error(
       "Error al generar nueva versión de la cotización empresarial:",
-      error
+      error,
     );
     return res.status(500).json({
       ok: false,
@@ -503,7 +503,7 @@ const obtenerCotizacionEmpresaPorCodigo = async (req, res = response) => {
     const cotizacion = await CotizacionEmpresa.findOne({ codCotizacion })
       .populate(
         "historial.empresaId",
-        "razonSocial ruc personasContacto direccionFiscal distrito provincia departamento"
+        "razonSocial ruc personasContacto direccionFiscal distrito provincia departamento",
       )
       .lean();
 
@@ -527,7 +527,7 @@ const obtenerCotizacionEmpresaPorCodigo = async (req, res = response) => {
         // Buscamos la persona de contacto en el array
         contactoInfo = entrada.empresaId.personasContacto.find(
           (persona) =>
-            persona._id.toString() === entrada.dirigidoA_Id.toString()
+            persona._id.toString() === entrada.dirigidoA_Id.toString(),
         );
       }
 
@@ -557,7 +557,7 @@ const obtenerCotizacionEmpresaPorCodigo = async (req, res = response) => {
 
 const obtenerCotizacionesPorEmpresaParaAtencionEmpresas = async (
   req,
-  res = response
+  res = response,
 ) => {
   try {
     const { ruc } = req.params;
@@ -589,6 +589,7 @@ const obtenerCotizacionesPorEmpresaParaAtencionEmpresas = async (
         historial: ultimaVersion
           ? [
               {
+                version: ultimaVersion.version,
                 razonSocial: ultimaVersion.razonSocial,
                 fechaModificacion: ultimaVersion.fechaModificacion,
                 aplicarPrecioGlobal: ultimaVersion.aplicarPrecioGlobal,
