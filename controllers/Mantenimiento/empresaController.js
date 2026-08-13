@@ -21,7 +21,7 @@ const crearEmpresa = async (req, res = response) => {
 
     // Validar que al menos una persona de contacto sea principal
     const contactoPrincipal = personasContacto.find(
-      (contacto) => contacto.principal === true
+      (contacto) => contacto.principal === true,
     );
     if (!contactoPrincipal) {
       // Si no hay ninguno marcado como principal, marcar el primero
@@ -52,7 +52,7 @@ const crearEmpresa = async (req, res = response) => {
 
     if (error.name === "ValidationError") {
       const validationErrors = Object.values(error.errors).map(
-        (err) => err.message
+        (err) => err.message,
       );
       return res.status(400).json({
         ok: false,
@@ -78,6 +78,7 @@ const actualizarEmpresa = async (req, res = response) => {
   // Extraer arrays que necesitan tratamiento especial
   const personasContacto = datosActualizables.personasContacto;
   const ubicacionesSedes = datosActualizables.ubicacionesSedes;
+  const protocolos = datosActualizables.protocolos;
 
   // Remover campos que no se deben actualizar directamente
   delete datosActualizables.ruc; // El RUC no se puede cambiar
@@ -87,6 +88,7 @@ const actualizarEmpresa = async (req, res = response) => {
   delete datosActualizables.fechaRegistro;
   delete datosActualizables.personasContacto; // Lo manejamos por separado
   delete datosActualizables.ubicacionesSedes; // Lo manejamos por separado
+  delete datosActualizables.protocolos; // Lo manejamos por separado
 
   console.log("ruc", ruc);
 
@@ -105,7 +107,7 @@ const actualizarEmpresa = async (req, res = response) => {
     if (personasContacto && personasContacto.length > 0) {
       // Validar contacto principal
       const contactoPrincipal = personasContacto.find(
-        (contacto) => contacto.principal === true
+        (contacto) => contacto.principal === true,
       );
       if (!contactoPrincipal) {
         // Si no hay ninguno marcado como principal, marcar el primero
@@ -177,6 +179,45 @@ const actualizarEmpresa = async (req, res = response) => {
       datosActualizables.ubicacionesSedes = ubicacionesActualizadas;
     }
 
+    // 📌 MANEJO ESPECIAL DE PROTOCOLOS
+    if (protocolos !== undefined) {
+      if (!Array.isArray(protocolos)) {
+        return res.status(400).json({
+          ok: false,
+          msg: "El campo protocolos debe ser un arreglo",
+        });
+      }
+
+      const protocolosActualizados = protocolos.map((protocolo) => {
+        const protocoloBase = {
+          codigoProtocolo: protocolo.codigoProtocolo,
+          nombreProtocolo: protocolo.nombreProtocolo,
+          tipo: protocolo.tipo,
+          estado:
+            protocolo.estado === undefined ? true : Boolean(protocolo.estado),
+          cotizacionReferencia: protocolo.cotizacionReferencia,
+          observaciones: protocolo.observaciones,
+          fechaInicioVigencia: protocolo.fechaInicioVigencia || null,
+          fechaFinVigencia: protocolo.fechaFinVigencia || null,
+          servicios: Array.isArray(protocolo.servicios)
+            ? protocolo.servicios
+            : [],
+        };
+
+        // Si viene _id desde frontend, lo preservamos para subdocumentos existentes
+        if (protocolo._id) {
+          return {
+            _id: protocolo._id,
+            ...protocoloBase,
+          };
+        }
+
+        return protocoloBase;
+      });
+
+      datosActualizables.protocolos = protocolosActualizados;
+    }
+
     // Actualizar la empresa
     const empresaActualizada = await Empresa.findOneAndUpdate(
       { ruc },
@@ -192,7 +233,7 @@ const actualizarEmpresa = async (req, res = response) => {
       {
         new: true, // Retorna el documento actualizado
         runValidators: true, // Ejecuta las validaciones del modelo
-      }
+      },
     );
 
     if (!empresaActualizada) {
@@ -212,7 +253,7 @@ const actualizarEmpresa = async (req, res = response) => {
 
     if (error.name === "ValidationError") {
       const validationErrors = Object.values(error.errors).map(
-        (err) => err.message
+        (err) => err.message,
       );
       return res.status(400).json({
         ok: false,
@@ -369,12 +410,12 @@ const eliminarContactoEmpresa = async (req, res = response) => {
           fechaActualizacion: new Date(),
         },
       },
-      { new: true }
+      { new: true },
     );
 
     // Si el contacto eliminado era principal, marcar otro como principal
     const contactoPrincipal = empresaActualizada.personasContacto.find(
-      (contacto) => contacto.principal === true
+      (contacto) => contacto.principal === true,
     );
 
     if (!contactoPrincipal && empresaActualizada.personasContacto.length > 0) {
@@ -432,7 +473,7 @@ const eliminarSedeEmpresa = async (req, res = response) => {
           fechaActualizacion: new Date(),
         },
       },
-      { new: true }
+      { new: true },
     );
 
     res.status(200).json({

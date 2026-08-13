@@ -24,6 +24,29 @@ const ubicacionSedeSchema = new mongoose.Schema({
   observacionesSede: { type: String },
 });
 
+const ServiciosSchema = new mongoose.Schema({
+  servicioId: { type: Schema.Types.ObjectId, ref: "servicioCollection" },
+  codServicio: { type: String, required: true },
+  nombreServicio: { type: String },
+});
+
+// Schema para protocolos empresariales
+const protocoloEmpresaSchema = new mongoose.Schema({
+  codigoProtocolo: { type: String, required: true },
+  nombreProtocolo: { type: String, required: true },
+  tipo: {
+    type: String,
+    required: true,
+    enum: ["manual", "conReferencia"],
+  },
+  estado: { type: Boolean, default: true },
+  cotizacionReferencia: { type: String },
+  observaciones: { type: String },
+  fechaInicioVigencia: { type: Date, default: null },
+  fechaFinVigencia: { type: Date, default: null },
+  servicios: [ServiciosSchema],
+});
+
 const EmpresaSchema = Schema(
   {
     ruc: { type: String, required: true, unique: true },
@@ -64,6 +87,7 @@ const EmpresaSchema = Schema(
     },
     estado: { type: Boolean, default: true },
     observaciones: { type: String },
+    protocolos: { type: [protocoloEmpresaSchema], default: [] },
 
     // 🔍 Campos de auditoría:
     createdBy: { type: String, required: true }, // uid
@@ -75,7 +99,7 @@ const EmpresaSchema = Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 //aquí se define o elige la colección/tabla en la que queremos que se guarde

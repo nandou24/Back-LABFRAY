@@ -99,7 +99,7 @@ router.post(
 
     validarCampos,
   ],
-  crearEmpresa
+  crearEmpresa,
 );
 
 //! Actualizar empresa
@@ -130,9 +130,19 @@ router.put(
       .isNumeric()
       .withMessage("Cantidad de trabajadores debe ser un número"),
 
+    check("protocolos")
+      .optional()
+      .isArray()
+      .withMessage("Protocolos debe ser un arreglo"),
+
+    check("protocolos.*.tipo")
+      .optional()
+      .isIn(["manual", "conReferencia"])
+      .withMessage("Tipo de protocolo debe ser: manual o conReferencia"),
+
     validarCampos,
   ],
-  actualizarEmpresa
+  actualizarEmpresa,
 );
 
 //GET
@@ -147,7 +157,7 @@ router.get("/findTerm", buscarEmpresasPorTermino);
 router.get(
   "/contacto/:ruc/:contactoId/cotizaciones",
   [validarJWT],
-  verificarCotizacionesVinculadasContacto
+  verificarCotizacionesVinculadasContacto,
 );
 
 //DELETE
@@ -156,7 +166,7 @@ router.get(
 router.delete(
   "/contacto/:ruc/:contactoId",
   [validarJWT],
-  eliminarContactoEmpresa
+  eliminarContactoEmpresa,
 );
 
 //! Eliminar sede específica de empresa
