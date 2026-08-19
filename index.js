@@ -122,6 +122,12 @@ app.use(
   require("./routes/Gestion/atencionEmpresaRoute")
 );
 
+//! Programación de pacientes por empresa
+app.use(
+  "/api/programacionPacienteEmpresa",
+  require("./routes/Gestion/programacionPacienteEmpresaRoute")
+);
+
 // app.get("*", (req, res) => {
 //   res.sendFile(path.resolve(__dirname, "public/index.html"));
 // });
