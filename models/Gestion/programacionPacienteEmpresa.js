@@ -54,6 +54,8 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
 			set: (value) => value.toUpperCase(),
 		},
 		apeMatCliente: { type: String, trim: true, set: (value) => value.toUpperCase() },
+		sexoCliente: { type: String, enum: ["Masculino", "Femenino"] },
+		fechaNacimiento: { type: Date },
 		puesto: { type: String, trim: true },
 		area: { type: String, trim: true },
 		pacienteId: { type: Schema.Types.ObjectId, ref: "pacientesCollection", default: null },
