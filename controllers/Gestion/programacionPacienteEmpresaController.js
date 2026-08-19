@@ -1,6 +1,16 @@
 const { response } = require("express");
 const ProgramacionPacienteEmpresa = require("../../models/Gestion/programacionPacienteEmpresa");
 
+const construirRangoDia = (fecha) => {
+  const base = new Date(fecha);
+  const inicioDia = new Date(base);
+  inicioDia.setHours(0, 0, 0, 0);
+  const finDia = new Date(base);
+  finDia.setHours(23, 59, 59, 999);
+
+  return { inicioDia, finDia };
+};
+
 const generarCodigoProgramacion = async () => {
   const anioActual = new Date().getFullYear();
   const ultimaProgramacion = await ProgramacionPacienteEmpresa.findOne({
@@ -18,6 +28,42 @@ const generarCodigoProgramacion = async () => {
 
 const crearProgramacion = async (req, res = response) => {
   try {
+    const {
+      empresaId,
+      protocoloId,
+      fechaProgramada,
+      pacienteId,
+      tipoDoc,
+      nroDoc,
+    } = req.body;
+
+    const { inicioDia, finDia } = construirRangoDia(fechaProgramada);
+
+    const filtroDuplicado = {
+      empresaId,
+      protocoloId,
+      fechaProgramada: { $gte: inicioDia, $lte: finDia },
+    };
+
+    // El paciente se identifica por pacienteId cuando existe,
+    // y adicionalmente por tipo y número de documento.
+    if (pacienteId) {
+      filtroDuplicado.$or = [{ pacienteId }, { tipoDoc, nroDoc }];
+    } else {
+      filtroDuplicado.tipoDoc = tipoDoc;
+      filtroDuplicado.nroDoc = nroDoc;
+    }
+
+    const programacionDuplicada =
+      await ProgramacionPacienteEmpresa.findOne(filtroDuplicado).lean();
+
+    if (programacionDuplicada) {
+      return res.status(409).json({
+        ok: false,
+        msg: "Ya existe una programación para este paciente, empresa y protocolo en la misma fecha",
+      });
+    }
+
     const codProgramacion = await generarCodigoProgramacion();
     const programacion = new ProgramacionPacienteEmpresa({
       ...req.body,
@@ -45,7 +91,9 @@ const crearProgramacion = async (req, res = response) => {
 
 const listarProgramaciones = async (req, res = response) => {
   try {
-    const { empresaId, estadoProgramacion, nroDoc, fechaInicio, fechaFin } = req.query;
+    console.log("Query parameters:", req.query);
+    const { empresaId, estadoProgramacion, nroDoc, fechaInicio, fechaFin } =
+      req.query;
     const filtro = {};
 
     if (empresaId) filtro.empresaId = empresaId;
@@ -68,22 +116,30 @@ const listarProgramaciones = async (req, res = response) => {
     return res.json({ ok: true, programaciones });
   } catch (error) {
     console.error("Error al listar programaciones empresariales:", error);
-    return res.status(500).json({ ok: false, msg: "Error al listar programaciones" });
+    return res
+      .status(500)
+      .json({ ok: false, msg: "Error al listar programaciones" });
   }
 };
 
 const obtenerProgramacion = async (req, res = response) => {
   try {
-    const programacion = await ProgramacionPacienteEmpresa.findById(req.params.id).lean();
+    const programacion = await ProgramacionPacienteEmpresa.findById(
+      req.params.id,
+    ).lean();
 
     if (!programacion) {
-      return res.status(404).json({ ok: false, msg: "Programación no encontrada" });
+      return res
+        .status(404)
+        .json({ ok: false, msg: "Programación no encontrada" });
     }
 
     return res.json({ ok: true, programacion });
   } catch (error) {
     console.error("Error al obtener programación empresarial:", error);
-    return res.status(500).json({ ok: false, msg: "Error al obtener la programación" });
+    return res
+      .status(500)
+      .json({ ok: false, msg: "Error al obtener la programación" });
   }
 };
 
@@ -107,13 +163,21 @@ const actualizarProgramacion = async (req, res = response) => {
     );
 
     if (!programacion) {
-      return res.status(404).json({ ok: false, msg: "Programación no encontrada" });
+      return res
+        .status(404)
+        .json({ ok: false, msg: "Programación no encontrada" });
     }
 
-    return res.json({ ok: true, msg: "Programación actualizada correctamente", programacion });
+    return res.json({
+      ok: true,
+      msg: "Programación actualizada correctamente",
+      programacion,
+    });
   } catch (error) {
     console.error("Error al actualizar programación empresarial:", error);
-    return res.status(400).json({ ok: false, msg: "Datos de programación inválidos" });
+    return res
+      .status(400)
+      .json({ ok: false, msg: "Datos de programación inválidos" });
   }
 };
 
@@ -148,13 +212,21 @@ const actualizarEstadoProgramacion = async (req, res = response) => {
     );
 
     if (!programacion) {
-      return res.status(404).json({ ok: false, msg: "Programación no encontrada" });
+      return res
+        .status(404)
+        .json({ ok: false, msg: "Programación no encontrada" });
     }
 
-    return res.json({ ok: true, msg: "Estado actualizado correctamente", programacion });
+    return res.json({
+      ok: true,
+      msg: "Estado actualizado correctamente",
+      programacion,
+    });
   } catch (error) {
     console.error("Error al actualizar estado de programación:", error);
-    return res.status(400).json({ ok: false, msg: "Estado o pendientes inválidos" });
+    return res
+      .status(400)
+      .json({ ok: false, msg: "Estado o pendientes inválidos" });
   }
 };
 
