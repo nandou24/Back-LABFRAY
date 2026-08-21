@@ -23,7 +23,6 @@ const validarProgramacion = [
     "CE",
     "PASAPORTE",
   ]),
-  check("nroDoc", "El número de documento es obligatorio").trim().notEmpty(),
   check("nombreCliente", "El nombre del paciente es obligatorio")
     .trim()
     .notEmpty(),
