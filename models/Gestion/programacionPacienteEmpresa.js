@@ -62,7 +62,11 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
       trim: true,
       set: (value) => value.toUpperCase(),
     },
-    sexoCliente: { type: String, enum: ["Masculino", "Femenino"] },
+    sexoCliente: {
+      type: String,
+      enum: ["Masculino", "Femenino", null],
+      default: null,
+    },
     fechaNacimiento: { type: Date },
     puesto: { type: String, trim: true },
     area: { type: String, trim: true },
@@ -79,6 +83,20 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
     fechaProgramada: { type: Date, required: true },
     turno: { type: String, enum: ["MAÑANA", "TARDE", "NOCHE"] },
     horaProgramada: { type: String, trim: true },
+    sede: { type: String, enum: ["Callao", "Comas", "NoIndica"] },
+    tipoEvaluacion: {
+      type: String,
+      enum: [
+        "ETAs",
+        "Ocupacional",
+        "PreOcupacional",
+        "Retiro",
+        "Toxicológico",
+        "Otro",
+      ],
+    },
+    tipoAtencion: { type: String, enum: ["Regular", "Preferencial", "VIP"] },
+    prioridad: { type: String, enum: ["Normal", "Alta"] },
     estadoProgramacion: {
       type: String,
       required: true,

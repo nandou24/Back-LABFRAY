@@ -40,6 +40,25 @@ const validarProgramacion = [
     min: 1,
   }),
   check("fechaProgramada", "La fecha programada no es válida").isISO8601(),
+  check("sede", "La sede no es válida")
+    .optional()
+    .isIn(["Callao", "Comas", "NoIndica"]),
+  check("tipoEvaluacion", "El tipo de evaluación no es válido")
+    .optional()
+    .isIn([
+      "ETAs",
+      "Ocupacional",
+      "PreOcupacional",
+      "Retiro",
+      "Toxicológico",
+      "Otro",
+    ]),
+  check("tipoAtencion", "El tipo de atención no es válido")
+    .optional()
+    .isIn(["Regular", "Preferencial", "VIP"]),
+  check("prioridad", "La prioridad no es válida")
+    .optional()
+    .isIn(["Normal", "Alta"]),
   validarCampos,
 ];
 
@@ -52,7 +71,30 @@ router.get(
 );
 router.put(
   "/:id",
-  [validarJWT, check("id", "ID inválido").isMongoId(), validarCampos],
+  [
+    validarJWT,
+    check("id", "ID inválido").isMongoId(),
+    check("sede", "La sede no es válida")
+      .optional()
+      .isIn(["Callao", "Comas", "NoIndica"]),
+    check("tipoEvaluacion", "El tipo de evaluación no es válido")
+      .optional()
+      .isIn([
+        "ETAs",
+        "Ocupacional",
+        "PreOcupacional",
+        "Retiro",
+        "Toxicológico",
+        "Otro",
+      ]),
+    check("tipoAtencion", "El tipo de atención no es válido")
+      .optional()
+      .isIn(["Regular", "Preferencial", "VIP"]),
+    check("prioridad", "La prioridad no es válida")
+      .optional()
+      .isIn(["Normal", "Alta"]),
+    validarCampos,
+  ],
   actualizarProgramacion,
 );
 router.put(
