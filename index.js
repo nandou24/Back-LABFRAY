@@ -128,9 +128,11 @@ app.use(
   require("./routes/Gestion/programacionPacienteEmpresaRoute")
 );
 
-// app.get("*", (req, res) => {
-//   res.sendFile(path.resolve(__dirname, "public/index.html"));
-// });
+//! Archivos de pacientes
+app.use(
+  "/api/archivoPaciente",
+  require("./routes/Mantenimiento/archivoPacienteRoute")
+);
 
 //!Levantar el servidor
 const PORT = process.env.PORT || 4000;
