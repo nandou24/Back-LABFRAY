@@ -10,6 +10,11 @@ const ServicioProgramadoSchema = new Schema(
     },
     codServicio: { type: String, required: true, trim: true },
     nombreServicio: { type: String, required: true, trim: true },
+    tipoServicio: {
+      type: String,
+      required: true,
+      trim: true,
+    },
   },
   { _id: false },
 );

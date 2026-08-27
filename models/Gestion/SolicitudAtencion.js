@@ -58,7 +58,7 @@ const SolicitudAtencionSchema = new Schema(
 
     clienteId: {
       type: Schema.Types.ObjectId,
-      ref: "pacienteCollection",
+      ref: "pacientesCollection",
       required: true,
     },
     tipoDoc: { type: String, required: true },
@@ -98,7 +98,7 @@ const SolicitudAtencionSchema = new Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 module.exports = mongoose.model("SolicitudAtencion", SolicitudAtencionSchema);
