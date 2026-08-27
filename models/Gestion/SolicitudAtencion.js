@@ -34,23 +34,51 @@ const ServicioSolicitudSchema = new mongoose.Schema({
 const SolicitudAtencionSchema = new Schema(
   {
     codSolicitud: { type: String, required: true, unique: true, trim: true },
+    origenAtencion: {
+      type: String,
+      required: true,
+      enum: ["PARTICULAR", "EMPRESA"],
+      default: "PARTICULAR",
+      index: true,
+    },
     pagoId: {
       type: Schema.Types.ObjectId,
       ref: "pagoCollection",
-      required: true,
+      required: function () {
+        return this.origenAtencion === "PARTICULAR";
+      },
+      default: null,
     },
     codPago: { type: String, default: null, trim: true },
     cotizacionId: {
       type: Schema.Types.ObjectId,
       ref: "cotizacionCollection",
-      required: true,
+      required: function () {
+        return this.origenAtencion === "PARTICULAR";
+      },
+      default: null,
     },
-    codCotizacion: { type: String, required: true, index: true },
+    codCotizacion: {
+      type: String,
+      required: function () {
+        return this.origenAtencion === "PARTICULAR";
+      },
+      default: null,
+      trim: true,
+      index: true,
+    },
     fechaCotizacion: { type: Date },
     tipo: {
       type: String,
       required: true,
-      enum: ["Laboratorio", "Ecografía", "Consulta", "Procedimiento", "Otro"],
+      enum: [
+        "Laboratorio",
+        "Ecografía",
+        "Consulta",
+        "Procedimiento",
+        "Radiografía",
+        "Otro",
+      ],
       trim: true,
     },
     servicios: { type: [ServicioSolicitudSchema], required: true },
@@ -80,7 +108,62 @@ const SolicitudAtencionSchema = new Schema(
       required: false,
     },
     fechaEmision: { type: Date, required: true },
-
+    programacionEmpresaId: {
+      type: Schema.Types.ObjectId,
+      ref: "programacionPacienteEmpresaCollection",
+      required: function () {
+        return this.origenAtencion === "EMPRESA";
+      },
+      default: null,
+    },
+    codProgramacion: {
+      type: String,
+      required: function () {
+        return this.origenAtencion === "EMPRESA";
+      },
+      default: null,
+      trim: true,
+      index: true,
+    },
+    empresaId: {
+      type: Schema.Types.ObjectId,
+      ref: "empresasCollection",
+      required: function () {
+        return this.origenAtencion === "EMPRESA";
+      },
+      default: null,
+    },
+    razonSocialEmpresa: {
+      type: String,
+      required: function () {
+        return this.origenAtencion === "EMPRESA";
+      },
+      default: null,
+      trim: true,
+    },
+    protocoloId: {
+      type: Schema.Types.ObjectId,
+      required: function () {
+        return this.origenAtencion === "EMPRESA";
+      },
+      default: null,
+    },
+    codProtocolo: {
+      type: String,
+      required: function () {
+        return this.origenAtencion === "EMPRESA";
+      },
+      default: null,
+      trim: true,
+    },
+    nombreProtocolo: {
+      type: String,
+      required: function () {
+        return this.origenAtencion === "EMPRESA";
+      },
+      default: null,
+      trim: true,
+    },
     estado: {
       type: String,
       required: true,

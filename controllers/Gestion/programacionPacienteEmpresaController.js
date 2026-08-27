@@ -1,4 +1,5 @@
 const { response } = require("express");
+const mongoose = require("mongoose");
 const ProgramacionPacienteEmpresa = require("../../models/Gestion/programacionPacienteEmpresa");
 
 const construirRangoDia = (fecha) => {
@@ -91,7 +92,7 @@ const crearProgramacion = async (req, res = response) => {
 
 const listarProgramaciones = async (req, res = response) => {
   try {
-    console.log("Query parameters:", req.query);
+    //console.log("Query parameters:", req.query);
     const { empresaId, estadoProgramacion, nroDoc, fechaInicio, fechaFin } =
       req.query;
     const filtro = {};
@@ -230,10 +231,89 @@ const actualizarEstadoProgramacion = async (req, res = response) => {
   }
 };
 
+// ==========================================
+// INICIAR ATENCIÓN DE PROGRAMACIÓN EMPRESARIAL
+// ==========================================
+
+const iniciarAtencionProgramacion = async (req, res = response) => {
+  const session = await mongoose.startSession();
+
+  session.startTransaction();
+
+  try {
+    const { id } = req.params;
+    const { uid, nombreUsuario } = req.user;
+
+    // ==========================================
+    // 1. VALIDAR ID DE PROGRAMACIÓN
+    // ==========================================
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        ok: false,
+        msg: "El ID de la programación no es válido",
+      });
+    }
+
+    // ==========================================
+    // 2. OBTENER PROGRAMACIÓN
+    // ==========================================
+
+    const programacion =
+      await ProgramacionPacienteEmpresa.findById(id).session(session);
+
+    if (!programacion) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        ok: false,
+        msg: "Programación no encontrada",
+      });
+    }
+
+    // ==========================================
+    // 3. VALIDAR ESTADO ACTUAL
+    // ==========================================
+
+    if (programacion.estadoProgramacion !== "PROGRAMADO") {
+      await session.abortTransaction();
+      return res.status(409).json({
+        ok: false,
+        msg: "La programación no se encuentra en estado PROGRAMADO",
+      });
+    }
+
+    // ==========================================
+    // POR AHORA NO HACEMOS CAMBIOS
+    // ==========================================
+
+    await session.commitTransaction();
+    return res.status(200).json({
+      ok: true,
+      msg: "Programación validada para iniciar atención",
+      programacion,
+    });
+  } catch (error) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    console.error("Error al iniciar atención empresarial:", error);
+
+    return res.status(500).json({
+      ok: false,
+      msg: "Error al iniciar la atención empresarial",
+    });
+  } finally {
+    await session.endSession();
+  }
+};
+
 module.exports = {
   crearProgramacion,
   listarProgramaciones,
   obtenerProgramacion,
   actualizarProgramacion,
   actualizarEstadoProgramacion,
+  iniciarAtencionProgramacion,
 };

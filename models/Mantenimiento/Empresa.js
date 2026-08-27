@@ -28,6 +28,7 @@ const ServiciosSchema = new mongoose.Schema({
   servicioId: { type: Schema.Types.ObjectId, ref: "servicioCollection" },
   codServicio: { type: String, required: true },
   nombreServicio: { type: String },
+  tipoServicio: { type: String },
 });
 
 // Schema para protocolos empresariales

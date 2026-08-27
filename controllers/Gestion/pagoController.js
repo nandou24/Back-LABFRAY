@@ -1,7 +1,7 @@
 const { response } = require("express");
 const {
-  generarCodigoSolicitud,
-} = require("../Gestion/solicitudAtencionController");
+  crearSolicitudesAtencion,
+} = require("../../controllers/Gestion/solicitudAtencionController");
 const Pago = require("../../models/Gestion/PagoPaciente");
 const Cotizacion =
   require("../../models/Gestion/CotizacionPaciente").CotizacionModel;
@@ -43,7 +43,7 @@ const generarPagoPersona = async (req, res = response) => {
         cotizacionOriginal,
         session,
         uid,
-        nombreUsuario
+        nombreUsuario,
       );
     }
 
@@ -77,7 +77,7 @@ const crearPago = async (
   session,
   cotizacionOriginal,
   uid,
-  nombreUsuario
+  nombreUsuario,
 ) => {
   const {
     codCotizacion,
@@ -112,7 +112,7 @@ const crearPago = async (
   // 3. Calcular monto total de los pagos enviados
   const totalPagado = detallePagos.reduce(
     (sum, pago) => sum + (pago.monto || 0),
-    0
+    0,
   );
 
   // 4. Calcular diferencia
@@ -151,59 +151,43 @@ const crearPago = async (
   await Cotizacion.updateOne(
     { codCotizacion },
     { $set: { estadoCotizacion: estadoBack } },
-    { session }
+    { session },
   );
 
-  // 9. Generar órdenes de atención si corresponde
   // Solo si la cotización está en un estado que permite generar órdenes
   const estadosPermitidos = ["GENERADA", "MODIFICADA", "PAGO ANULADO"];
 
+  // 9. Generar solicitudes de atención si corresponde
+
   if (estadosPermitidos.includes(cotizacionOriginal.estadoCotizacion)) {
-    const agrupados = agruparServiciosPorTipo(serviciosCotizacion);
+    await crearSolicitudesAtencion({
+      origenAtencion: "PARTICULAR",
 
-    const tipoMap = {
-      LAB: "LABORATORIO",
-      CON: "CONSULTA",
-      ECO: "ECOGRAFIA",
-      RX: "RADIOGRAFIA",
-    };
+      servicios: serviciosCotizacion,
 
-    for (const tipo in agrupados) {
-      const tipoValido = tipoMap[tipo] || tipo;
-      const servicios = agrupados[tipo];
+      paciente: {
+        clienteId,
+        hc: ultimoHistorial.hc,
+        tipoDoc,
+        nroDoc,
+        nombreCliente,
+        apePatCliente,
+        apeMatCliente,
+      },
 
-      const solicitud = new SolicitudAtencion({
-        codSolicitud: await generarCodigoSolicitud(session),
+      datosOrigen: {
         pagoId: nuevoPago._id,
         codPago: nuevoCodPago,
         cotizacionId: cotizacionOriginal._id,
-        codCotizacion: codCotizacion,
+        codCotizacion,
+        fechaCotizacion,
         solicitanteId: ultimoHistorial.solicitanteId,
-        fechaCotizacion: fechaCotizacion,
-        tipo: tipoValido,
-        servicios: servicios.map((serv) => ({
-          servicioId: serv.servicioId, // Referencia al servicio
-          codServicio: serv.codServicio,
-          nombreServicio: serv.nombreServicio,
-          estado: "PENDIENTE",
-          medicoAtiende: serv.medicoAtiende,
-        })),
-        hc: ultimoHistorial.hc,
-        clienteId: clienteId,
-        tipoDoc: tipoDoc,
-        nroDoc: nroDoc,
-        nombreCliente: nombreCliente,
-        apePatCliente: apePatCliente,
-        apeMatCliente: apeMatCliente,
-        fechaEmision: new Date(),
-        estado: "GENERADO",
-        createdBy: uid, // uid del usuario que creó el pago
-        usuarioRegistro: nombreUsuario, // Nombre de usuario que creó el pago
-        fechaRegistro: new Date(), // Fecha de registro
-      });
+      },
 
-      await solicitud.save({ session });
-    }
+      session,
+      uid,
+      nombreUsuario,
+    });
   }
 
   return nuevoCodPago;
@@ -215,21 +199,21 @@ const actualizarPago = async (
   cotizacionOriginal,
   session,
   uid,
-  nombreUsuario
+  nombreUsuario,
 ) => {
   const { codPago, codCotizacion, detallePagos } = datos;
 
   // 1. Calcular total pagado
   const totalPagadoAnterior = pagoExistente.detallePagos.reduce(
     (sum, p) => sum + (p.monto || 0),
-    0
+    0,
   );
   const totalNuevosPagos = detallePagos.reduce(
     (sum, p) => sum + (p.monto || 0),
-    0
+    0,
   );
   const totalPagadoActual = +(totalPagadoAnterior + totalNuevosPagos).toFixed(
-    2
+    2,
   );
 
   // 2. Calcular cuánto falta pagar
@@ -268,26 +252,18 @@ const actualizarPago = async (
         fechaActualizacion: new Date(), // Fecha de actualización
       },
     },
-    { session }
+    { session },
   );
 
   // 6. Actualizar estado de cotización
   await Cotizacion.updateOne(
     { codCotizacion },
     { $set: { estadoCotizacion: nuevoEstado } },
-    { session }
+    { session },
   );
 
   return nuevoEstado;
 };
-
-function agruparServiciosPorTipo(servicios) {
-  return servicios.reduce((acc, serv) => {
-    if (!acc[serv.tipoServicio]) acc[serv.tipoServicio] = [];
-    acc[serv.tipoServicio].push(serv);
-    return acc;
-  }, {});
-}
 
 const generarCodigoPago = async () => {
   const anioActual = new Date().getFullYear();
@@ -307,7 +283,7 @@ const generarCodigoPago = async () => {
 
   if (nuevoNumero > 99999) {
     const error = new Error(
-      `Se alcanzó el límite máximo de códigos de pago para el año ${anioActual}.`
+      `Se alcanzó el límite máximo de códigos de pago para el año ${anioActual}.`,
     );
     error.name = "LimitePagoError";
     throw error;
@@ -462,21 +438,21 @@ const anularPago = async (req, res = response) => {
           },
         },
       },
-      { session }
+      { session },
     );
 
     // Actualizar el estado de la cotización a MODIFICADO
     await Cotizacion.updateOne(
       { codCotizacion: pago.codCotizacion },
       { $set: { estadoCotizacion: "PAGO ANULADO" } },
-      { session }
+      { session },
     );
 
     // Actualizar el estado de las solicitudes asociadas
     await SolicitudAtencion.updateMany(
       { codCotizacion: pago.codCotizacion },
       { $set: { estado: "ANULADO", "servicios.$[].estado": "ANULADO" } },
-      { session }
+      { session },
     );
 
     await session.commitTransaction();

@@ -1,73 +1,14 @@
 const SolicitudAtencion = require("../../models/Gestion/SolicitudAtencion");
 const { response } = require("express");
-//const moment = require("moment");
-
-// Crear una nueva solicitud de atención
-const crearSolicitud = async (req, res) => {
-  try {
-    const {
-      codCotizacion,
-      codigoPago,
-      tipo,
-      servicios,
-      hc,
-      tipoDocumento,
-      nroDocumento,
-      nombreCompleto,
-      codUsuarioEmisor,
-      usuarioEmisor,
-    } = req.body;
-
-    const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
-
-    // Validación básica
-    if (
-      !codCotizacion ||
-      !tipo ||
-      servicios.length === 0 ||
-      !hc ||
-      !nombreCompleto
-    ) {
-      return res.status(400).json({ message: "Faltan campos obligatorios." });
-    }
-
-    let nuevCodigoSolicitud = await generarCodigoSolicitud();
-
-    const nuevaSolicitud = new SolicitudAtencion({
-      codigoSolicitud: nuevCodigoSolicitud,
-      codCotizacion: codCotizacion,
-      codigoPago: codigoPago, // Puede ser null si no se proporciona
-      tipo: tipo,
-      servicios: servicios.map((serv) => ({
-        ...serv,
-        estado: "PENDIENTE",
-      })),
-      hc: hc,
-      tipoDocumento: tipoDocumento,
-      nroDocumento: nroDocumento,
-      nombreCompleto: nombreCompleto.toUpperCase(),
-      fechaEmision: new Date(),
-      codUsuarioEmisor: codUsuarioEmisor,
-      usuarioEmisor: usuarioEmisor,
-      estado: "GENERADO",
-      createdBy: uid, // uid del usuario que creó la solicitud
-      usuarioRegistro: nombreUsuario, // Nombre de usuario que creó la solicitud
-      fechaRegistro: new Date(), // Fecha de registro
-    });
-
-    await nuevaSolicitud.save();
-    res.status(201).json({
-      message: "Solicitud registrada correctamente",
-      solicitud: nuevaSolicitud,
-    });
-  } catch (error) {
-    console.error("Error al crear solicitud de atención:", error);
-    res.status(500).json({ message: "Error interno del servidor" });
-  }
-};
 
 // Generar el código de solicitud con formato SOL'año''mes'0001
 async function generarCodigoSolicitud(session) {
+  if (!session) {
+    throw new Error(
+      "Se requiere una sesión de MongoDB para generar el código de solicitud",
+    );
+  }
+
   const ahora = new Date();
   const anio = ahora.getFullYear().toString().slice(-2); // '24'
   const mes = (ahora.getMonth() + 1).toString().padStart(2, "0"); // '06'
@@ -93,6 +34,261 @@ async function generarCodigoSolicitud(session) {
   return codigo;
 }
 
+// ==========================================
+// NORMALIZAR TIPO DE SOLICITUD
+// ==========================================
+
+const normalizarTipoSolicitud = (tipoServicio) => {
+  if (!tipoServicio) {
+    throw new Error("El servicio no tiene definido un tipo de servicio");
+  }
+
+  const tipoNormalizado = tipoServicio.trim().toUpperCase();
+
+  const tipos = {
+    LAB: "Laboratorio",
+    LABORATORIO: "Laboratorio",
+
+    CON: "Consulta",
+    CONSULTA: "Consulta",
+
+    ECO: "Ecografía",
+    ECOGRAFIA: "Ecografía",
+    ECOGRAFÍA: "Ecografía",
+
+    RX: "Radiografía",
+    RADIOGRAFIA: "Radiografía",
+    RADIOGRAFÍA: "Radiografía",
+    "RAYOS X": "Radiografía",
+
+    PRO: "Procedimiento",
+    PROCEDIMIENTO: "Procedimiento",
+
+    OTRO: "Otro",
+  };
+
+  const tipoSolicitud = tipos[tipoNormalizado];
+
+  if (!tipoSolicitud) {
+    throw new Error(
+      `Tipo de servicio no soportado para solicitud de atención: ${tipoServicio}`,
+    );
+  }
+
+  return tipoSolicitud;
+};
+
+// ==========================================
+// AGRUPAR SERVICIOS POR TIPO
+// ==========================================
+
+const agruparServiciosPorTipo = (servicios) => {
+  if (!Array.isArray(servicios) || servicios.length === 0) {
+    throw new Error(
+      "No existen servicios para generar solicitudes de atención",
+    );
+  }
+
+  return servicios.reduce((agrupados, servicio) => {
+    const tipo = normalizarTipoSolicitud(servicio.tipoServicio);
+
+    if (!agrupados[tipo]) {
+      agrupados[tipo] = [];
+    }
+
+    agrupados[tipo].push(servicio);
+
+    return agrupados;
+  }, {});
+};
+
+// ==========================================
+// CREAR SOLICITUDES DE ATENCIÓN
+// ==========================================
+
+const crearSolicitudesAtencion = async ({
+  origenAtencion,
+  servicios,
+  paciente,
+  datosOrigen,
+  session,
+  uid,
+  nombreUsuario,
+}) => {
+  // ==========================================
+  // VALIDAR SESIÓN
+  // ==========================================
+
+  if (!session) {
+    throw new Error(
+      "Se requiere una sesión de MongoDB para crear solicitudes de atención",
+    );
+  }
+
+  // ==========================================
+  // VALIDAR ORIGEN
+  // ==========================================
+
+  if (!["PARTICULAR", "EMPRESA"].includes(origenAtencion)) {
+    throw new Error("Origen de atención no válido");
+  }
+
+  // ==========================================
+  // VALIDAR PACIENTE
+  // ==========================================
+
+  if (
+    !paciente?.clienteId ||
+    !paciente?.hc ||
+    !paciente?.tipoDoc ||
+    !paciente?.nroDoc ||
+    !paciente?.nombreCliente ||
+    !paciente?.apePatCliente
+  ) {
+    throw new Error(
+      "Faltan datos obligatorios del paciente para generar las solicitudes",
+    );
+  }
+
+  // ==========================================
+  // VALIDAR DATOS DEL ORIGEN
+  // ==========================================
+
+  if (origenAtencion === "PARTICULAR") {
+    if (
+      !datosOrigen?.pagoId ||
+      !datosOrigen?.codPago ||
+      !datosOrigen?.cotizacionId ||
+      !datosOrigen?.codCotizacion
+    ) {
+      throw new Error(
+        "Faltan datos del pago o cotización para generar las solicitudes",
+      );
+    }
+  }
+
+  if (origenAtencion === "EMPRESA") {
+    if (
+      !datosOrigen?.programacionEmpresaId ||
+      !datosOrigen?.codProgramacion ||
+      !datosOrigen?.empresaId ||
+      !datosOrigen?.razonSocialEmpresa ||
+      !datosOrigen?.protocoloId ||
+      !datosOrigen?.codProtocolo ||
+      !datosOrigen?.nombreProtocolo
+    ) {
+      throw new Error(
+        "Faltan datos de la programación empresarial para generar las solicitudes",
+      );
+    }
+  }
+
+  // ==========================================
+  // AGRUPAR SERVICIOS
+  // ==========================================
+
+  const serviciosAgrupados = agruparServiciosPorTipo(servicios);
+
+  const solicitudesCreadas = [];
+
+  const ahora = new Date();
+
+  // ==========================================
+  // CREAR UNA SOLICITUD POR TIPO
+  // ==========================================
+
+  for (const [tipo, serviciosTipo] of Object.entries(serviciosAgrupados)) {
+    const codSolicitud = await generarCodigoSolicitud(session);
+
+    const datosSolicitud = {
+      codSolicitud,
+      origenAtencion,
+      tipo,
+      servicios: serviciosTipo.map((servicio) => ({
+        servicioId: servicio.servicioId,
+        codServicio: servicio.codServicio,
+        nombreServicio: servicio.nombreServicio,
+        estado: "PENDIENTE",
+        ...(servicio.medicoAtiende && {
+          medicoAtiende: servicio.medicoAtiende,
+        }),
+      })),
+
+      // ======================================
+      // PACIENTE
+      // ======================================
+
+      hc: paciente.hc,
+      clienteId: paciente.clienteId,
+      tipoDoc: paciente.tipoDoc,
+      nroDoc: paciente.nroDoc,
+      nombreCliente: paciente.nombreCliente,
+      apePatCliente: paciente.apePatCliente,
+      apeMatCliente: paciente.apeMatCliente || "",
+
+      // ======================================
+      // SOLICITUD
+      // ======================================
+
+      fechaEmision: ahora,
+      estado: "GENERADO",
+
+      // ======================================
+      // AUDITORÍA
+      // ======================================
+
+      createdBy: uid,
+      usuarioRegistro: nombreUsuario,
+      fechaRegistro: ahora,
+    };
+
+    // ==========================================
+    // ORIGEN PARTICULAR
+    // ==========================================
+
+    if (origenAtencion === "PARTICULAR") {
+      Object.assign(datosSolicitud, {
+        pagoId: datosOrigen.pagoId,
+        codPago: datosOrigen.codPago,
+        cotizacionId: datosOrigen.cotizacionId,
+        codCotizacion: datosOrigen.codCotizacion,
+        fechaCotizacion: datosOrigen.fechaCotizacion,
+        solicitanteId: datosOrigen.solicitanteId || null,
+      });
+    }
+
+    // ==========================================
+    // ORIGEN EMPRESA
+    // ==========================================
+
+    if (origenAtencion === "EMPRESA") {
+      Object.assign(datosSolicitud, {
+        programacionEmpresaId: datosOrigen.programacionEmpresaId,
+        codProgramacion: datosOrigen.codProgramacion,
+        empresaId: datosOrigen.empresaId,
+        razonSocialEmpresa: datosOrigen.razonSocialEmpresa,
+        protocoloId: datosOrigen.protocoloId,
+        codProtocolo: datosOrigen.codProtocolo,
+        nombreProtocolo: datosOrigen.nombreProtocolo,
+      });
+    }
+
+    // ==========================================
+    // GUARDAR SOLICITUD
+    // ==========================================
+
+    const nuevaSolicitud = new SolicitudAtencion(datosSolicitud);
+
+    await nuevaSolicitud.save({
+      session,
+    });
+
+    solicitudesCreadas.push(nuevaSolicitud);
+  }
+
+  return solicitudesCreadas;
+};
+
 // Actualizar el estado de una solicitud
 exports.actualizarEstado = async (req, res) => {
   try {
@@ -108,7 +304,7 @@ exports.actualizarEstado = async (req, res) => {
         usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza
         fechaActualizacion: new Date(), // Fecha de actualización
       },
-      { new: true }
+      { new: true },
     );
     if (!solicitud) {
       return res.status(404).json({ error: "Solicitud no encontrada" });
@@ -145,7 +341,7 @@ const obtenerPorRangoFechas = async (req, res) => {
     const solicitudes = await SolicitudAtencion.find(filtro)
       .populate(
         "solicitanteId",
-        "nombreRefMedico apePatRefMedico apeMatRefMedico"
+        "nombreRefMedico apePatRefMedico apeMatRefMedico",
       )
       .populate("pagoId", "subTotalFacturar")
       .sort({ fechaEmision: -1 });
@@ -177,7 +373,7 @@ exports.buscarSolicitudes = async (req, res) => {
 };
 
 module.exports = {
-  crearSolicitud,
+  crearSolicitudesAtencion,
   obtenerPorRangoFechas,
   generarCodigoSolicitud,
 };

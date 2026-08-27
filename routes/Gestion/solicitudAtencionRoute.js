@@ -1,7 +1,7 @@
 const { Router } = require("express");
 const { check } = require("express-validator");
 const {
-  crearSolicitud,
+  crearSolicitudesAtencion,
   obtenerPorRangoFechas,
 } = require("../../controllers/Gestion/solicitudAtencionController");
 const { validarCampos } = require("../../middlewares/validar-campo");
@@ -40,7 +40,7 @@ router.post(
       .withMessage("El estado de la solicitud es obligatorio"),
     validarCampos,
   ],
-  crearSolicitud
+  crearSolicitudesAtencion,
 );
 
 // // Actualizar rol
