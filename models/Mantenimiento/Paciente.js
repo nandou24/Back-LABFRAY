@@ -9,8 +9,26 @@ const telefonoSchema = new mongoose.Schema({
 const PacienteSchema = Schema(
   {
     hc: { type: String, unique: true },
-    tipoDoc: { type: String, required: true },
-    nroDoc: { type: String, required: true },
+    estadoIdentificacion: {
+      type: String,
+      required: true,
+      enum: ["PENDIENTE", "REGISTRADA"],
+      default: "REGISTRADA",
+    },
+    tipoDoc: {
+      type: String,
+      required: function () {
+        return this.estadoIdentificacion === "REGISTRADA";
+      },
+      default: null,
+    },
+    nroDoc: {
+      type: String,
+      required: function () {
+        return this.estadoIdentificacion === "REGISTRADA";
+      },
+      default: null,
+    },
     nombreCliente: {
       type: String,
       required: true,
@@ -24,9 +42,27 @@ const PacienteSchema = Schema(
     apeMatCliente: { type: String, set: (value) => value.toUpperCase() },
     fechaNacimiento: { type: Date, required: false },
     sexoCliente: { type: String, required: false },
-    departamentoCliente: { type: String, required: true },
-    provinciaCliente: { type: String, required: true },
-    distritoCliente: { type: String, required: true },
+    departamentoCliente: {
+      type: String,
+      required: function () {
+        return this.estadoIdentificacion === "REGISTRADA";
+      },
+      default: null,
+    },
+    provinciaCliente: {
+      type: String,
+      required: function () {
+        return this.estadoIdentificacion === "REGISTRADA";
+      },
+      default: null,
+    },
+    distritoCliente: {
+      type: String,
+      required: function () {
+        return this.estadoIdentificacion === "REGISTRADA";
+      },
+      default: null,
+    },
     direcCliente: { type: String },
     mailCliente: { type: String },
     phones: [telefonoSchema],
@@ -40,7 +76,7 @@ const PacienteSchema = Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 //aquí se define o elige la colección/tabla en la que queremos que se guarde

@@ -1,6 +1,9 @@
 const { response } = require("express");
 const mongoose = require("mongoose");
 const ProgramacionPacienteEmpresa = require("../../models/Gestion/programacionPacienteEmpresa");
+const Paciente = require("../../models/Mantenimiento/Paciente");
+
+const { registrarPaciente } = require("../Mantenimiento/pacienteController");
 
 const construirRangoDia = (fecha) => {
   const base = new Date(fecha);

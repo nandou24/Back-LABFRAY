@@ -57,7 +57,7 @@ router.post(
 
     validarCampos,
   ],
-  crearPaciente
+  crearPaciente,
 );
 
 //POST
@@ -68,7 +68,7 @@ router.get(
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
   ],
-  mostrarUltimosPacientes
+  mostrarUltimosPacientes,
 );
 
 router.get(
@@ -77,7 +77,7 @@ router.get(
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
   ],
-  mostrarUltimosPacientesCotizacion
+  mostrarUltimosPacientesCotizacion,
 );
 
 //GET
@@ -88,7 +88,7 @@ router.get(
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
   ],
-  encontrarTermino
+  encontrarTermino,
 );
 
 //GET
@@ -99,7 +99,7 @@ router.get(
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
   ],
-  encontrarTerminoporId
+  encontrarTerminoporId,
 );
 
 router.get(
@@ -108,20 +108,11 @@ router.get(
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
   ],
-  encontrarTerminoCotizaicon
+  encontrarTerminoCotizaicon,
 );
 
 //PUT
 //! Actualizar Paciente
 router.put("/updatePatient", [validarJWT], actualizarPaciente);
-
-router.post(
-  "/newPatientWhitoutHC",
-  [
-    //check('token')
-    //.notEmpty().withMessage('Es token es obligatorio'),
-  ],
-  registrarPacienteSinnHC
-);
 
 module.exports = router;
