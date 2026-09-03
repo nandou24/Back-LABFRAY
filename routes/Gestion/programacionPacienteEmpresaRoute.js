@@ -6,6 +6,7 @@ const {
   obtenerProgramacion,
   actualizarProgramacion,
   actualizarEstadoProgramacion,
+  iniciarAtencionProgramacion,
 } = require("../../controllers/Gestion/programacionPacienteEmpresaController");
 const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
@@ -113,6 +114,15 @@ router.put(
     validarCampos,
   ],
   actualizarEstadoProgramacion,
+);
+// ==========================================
+// INICIAR ATENCIÓN
+// ==========================================
+
+router.post(
+  "/:id/iniciar-atencion",
+  [validarJWT, check("id", "ID inválido").isMongoId(), validarCampos],
+  iniciarAtencionProgramacion,
 );
 
 module.exports = router;

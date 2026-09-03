@@ -344,6 +344,7 @@ const obtenerPorRangoFechas = async (req, res) => {
         "nombreRefMedico apePatRefMedico apeMatRefMedico",
       )
       .populate("pagoId", "subTotalFacturar")
+      .populate("programacionEmpresaId")
       .sort({ fechaEmision: -1 });
 
     console.log("Solicitudes encontradas:", solicitudes.length);
