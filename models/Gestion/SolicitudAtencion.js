@@ -171,6 +171,20 @@ const SolicitudAtencionSchema = new Schema(
       default: "GENERADO",
       trim: true,
     },
+    fechaAtencionArea: {
+      type: Date,
+      default: null,
+    },
+
+    atendidoPor: {
+      type: String,
+      default: null,
+    },
+
+    usuarioAtencion: {
+      type: String,
+      default: null,
+    },
     // 🔍 Campos de auditoría:
     createdBy: { type: String, required: true }, // uid
     usuarioRegistro: { type: String }, // nombre de usuario
