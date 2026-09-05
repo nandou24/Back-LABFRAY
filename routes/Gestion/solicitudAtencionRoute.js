@@ -3,6 +3,7 @@ const { check } = require("express-validator");
 const {
   crearSolicitudesAtencion,
   obtenerPorRangoFechas,
+  completarAtencionArea,
 } = require("../../controllers/Gestion/solicitudAtencionController");
 const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
@@ -51,5 +52,7 @@ router.post(
 
 // Buscar roles
 router.get("/findByRangoFechas", obtenerPorRangoFechas);
+
+router.put("/:id/completar-atencion", validarJWT, completarAtencionArea);
 
 module.exports = router;

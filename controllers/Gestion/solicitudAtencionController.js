@@ -1,4 +1,6 @@
+const mongoose = require("mongoose");
 const SolicitudAtencion = require("../../models/Gestion/SolicitudAtencion");
+const ProgramacionPacienteEmpresa = require("../../models/Gestion/programacionPacienteEmpresa");
 const { response } = require("express");
 
 // Generar el código de solicitud con formato SOL'año''mes'0001
@@ -373,8 +375,282 @@ exports.buscarSolicitudes = async (req, res) => {
   }
 };
 
+// ==========================================
+// RECALCULAR ESTADO DE PROGRAMACIÓN EMPRESA
+// SEGÚN ATENCIONES DE SUS ÁREAS
+// ==========================================
+
+const recalcularEstadoProgramacionEmpresa = async ({
+  programacionEmpresaId,
+  session,
+  uid,
+  nombreUsuario,
+  ahora,
+}) => {
+  // ==========================================
+  // VALIDAR PROGRAMACIÓN
+  // ==========================================
+
+  const programacion = await ProgramacionPacienteEmpresa.findById(
+    programacionEmpresaId,
+  ).session(session);
+
+  if (!programacion) {
+    const error = new Error("La programación empresarial asociada no existe");
+    error.codigo = "PROGRAMACION_NO_ENCONTRADA";
+    throw error;
+  }
+
+  // ==========================================
+  // VALIDAR ESTADO ACTUAL
+  // ==========================================
+
+  if (
+    !["EN ATENCION", "PENDIENTE DE COMPLETAR"].includes(
+      programacion.estadoProgramacion,
+    )
+  ) {
+    const error = new Error(
+      `No se puede recalcular una programación en estado ${programacion.estadoProgramacion}`,
+    );
+
+    error.codigo = "ESTADO_PROGRAMACION_NO_PERMITIDO";
+
+    throw error;
+  }
+
+  // ==========================================
+  // OBTENER TODAS LAS SOLICITUDES
+  // DE LA PROGRAMACIÓN
+  // ==========================================
+
+  const solicitudes = await SolicitudAtencion.find({
+    origenAtencion: "EMPRESA",
+    programacionEmpresaId: programacion._id,
+  })
+    .session(session)
+    .lean();
+
+  if (solicitudes.length === 0) {
+    const error = new Error(
+      "La programación no tiene solicitudes de atención asociadas",
+    );
+
+    error.codigo = "SOLICITUDES_NO_ENCONTRADAS";
+
+    throw error;
+  }
+
+  // ==========================================
+  // EVALUAR AVANCE DE ATENCIONES
+  // ==========================================
+
+  const totalSolicitudes = solicitudes.length;
+
+  const solicitudesAtendidas = solicitudes.filter(
+    (solicitud) => solicitud.estado === "ATENDIDO",
+  ).length;
+
+  const todasAtendidas = solicitudesAtendidas === totalSolicitudes;
+
+  // ==========================================
+  // ACTUALIZAR PROGRAMACIÓN
+  // ==========================================
+
+  programacion.estadoProgramacion = todasAtendidas
+    ? "ATENDIDO"
+    : "PENDIENTE DE COMPLETAR";
+
+  programacion.fechaUltimaAtencion = ahora;
+
+  if (todasAtendidas) {
+    programacion.fechaFinalizacion = ahora;
+  }
+
+  // ==========================================
+  // AUDITORÍA
+  // ==========================================
+
+  programacion.updatedBy = uid;
+
+  programacion.usuarioActualizacion = nombreUsuario;
+
+  programacion.fechaActualizacion = ahora;
+
+  await programacion.save({
+    session,
+  });
+
+  return {
+    programacion,
+    resumen: {
+      totalSolicitudes,
+      solicitudesAtendidas,
+      solicitudesPendientes: totalSolicitudes - solicitudesAtendidas,
+      todasAtendidas,
+    },
+  };
+};
+
+// ==========================================
+// COMPLETAR ATENCIÓN DE UN ÁREA
+// ==========================================
+
+const completarAtencionArea = async (req, res = response) => {
+  const session = await mongoose.startSession();
+
+  session.startTransaction();
+
+  try {
+    const { id } = req.params;
+    const { uid, nombreUsuario } = req.user;
+
+    // ========================================
+    // 1. VALIDAR ID
+    // ========================================
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      await session.abortTransaction();
+
+      return res.status(400).json({
+        ok: false,
+        codigo: "ID_SOLICITUD_INVALIDO",
+        msg: "El ID de la solicitud no es válido",
+      });
+    }
+
+    // ========================================
+    // 2. OBTENER SOLICITUD
+    // ========================================
+
+    const solicitud = await SolicitudAtencion.findById(id).session(session);
+
+    if (!solicitud) {
+      await session.abortTransaction();
+
+      return res.status(404).json({
+        ok: false,
+        codigo: "SOLICITUD_NO_ENCONTRADA",
+        msg: "Solicitud de atención no encontrada",
+      });
+    }
+
+    // ========================================
+    // 3. VALIDAR ESTADO ACTUAL
+    // ========================================
+
+    if (!["GENERADO", "EN PROCESO"].includes(solicitud.estado)) {
+      await session.abortTransaction();
+
+      return res.status(409).json({
+        ok: false,
+        codigo: "ATENCION_AREA_NO_PERMITIDA",
+        msg: `No se puede completar la atención de una solicitud en estado ${solicitud.estado}`,
+      });
+    }
+
+    // ========================================
+    // 4. VALIDAR ORIGEN EMPRESA
+    // ========================================
+
+    if (
+      solicitud.origenAtencion === "EMPRESA" &&
+      !solicitud.programacionEmpresaId
+    ) {
+      await session.abortTransaction();
+
+      return res.status(409).json({
+        ok: false,
+        codigo: "PROGRAMACION_EMPRESA_REQUERIDA",
+        msg: "La solicitud empresarial no tiene una programación asociada",
+      });
+    }
+
+    const ahora = new Date();
+
+    // ========================================
+    // 5. COMPLETAR ATENCIÓN DEL ÁREA
+    // ========================================
+
+    solicitud.estado = "ATENDIDO";
+    solicitud.fechaAtencionArea = ahora;
+    solicitud.atendidoPor = uid;
+    solicitud.usuarioAtencion = nombreUsuario;
+
+    // ========================================
+    // 6. AUDITORÍA GENERAL
+    // ========================================
+
+    solicitud.updatedBy = uid;
+    solicitud.usuarioActualizacion = nombreUsuario;
+    solicitud.fechaActualizacion = ahora;
+
+    await solicitud.save({
+      session,
+    });
+
+    // ========================================
+    // 7. RECALCULAR PROGRAMACIÓN
+    // SOLO PARA EMPRESA
+    // ========================================
+
+    let programacionActualizada = null;
+    let resumenProgramacion = null;
+
+    if (solicitud.origenAtencion === "EMPRESA") {
+      const resultado = await recalcularEstadoProgramacionEmpresa({
+        programacionEmpresaId: solicitud.programacionEmpresaId,
+        session,
+        uid,
+        nombreUsuario,
+        ahora,
+      });
+
+      programacionActualizada = resultado.programacion;
+      resumenProgramacion = resultado.resumen;
+    }
+
+    // ========================================
+    // 8. CONFIRMAR TRANSACCIÓN
+    // ========================================
+
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      ok: true,
+      msg: "Atención del área completada correctamente",
+      solicitud,
+      programacion: programacionActualizada,
+      resumenProgramacion,
+    });
+  } catch (error) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    console.error("Error al completar atención del área:", error);
+
+    // Errores de integridad / negocio
+    if (error.codigo) {
+      return res.status(409).json({
+        ok: false,
+        codigo: error.codigo,
+        msg: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      ok: false,
+      msg: "Error al completar la atención del área",
+    });
+  } finally {
+    await session.endSession();
+  }
+};
+
 module.exports = {
   crearSolicitudesAtencion,
   obtenerPorRangoFechas,
   generarCodigoSolicitud,
+  completarAtencionArea,
 };
