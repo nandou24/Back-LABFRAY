@@ -26,7 +26,7 @@ constObject = {
 
 app.use(
   // cors(constObject)
-  cors()
+  cors(),
   //! DOMINIO: .restaurantx.com
 ); //! Use cors, y se pueden filtrar origenes de peticiones
 
@@ -77,7 +77,7 @@ app.use("/api/recursoHumano", require("./routes/Mantenimiento/recHumanoRoute"));
 //! Referencia Medico
 app.use(
   "/api/referenciaMedico",
-  require("./routes/Mantenimiento/refMedicoRoute")
+  require("./routes/Mantenimiento/refMedicoRoute"),
 );
 
 //! Cotizacion Paciente
@@ -95,7 +95,7 @@ app.use("/api/roles", require("./routes/Mantenimiento/rolRoute"));
 //! Solicitud de Atención
 app.use(
   "/api/solicitudAtencion",
-  require("./routes/Gestion/solicitudAtencionRoute")
+  require("./routes/Gestion/solicitudAtencionRoute"),
 );
 
 //! Profesiones
@@ -104,7 +104,7 @@ app.use("/api/profesion", require("./routes/Mantenimiento/profesionRoute"));
 //! Especialidades
 app.use(
   "/api/especialidad",
-  require("./routes/Mantenimiento/especialidadRoute")
+  require("./routes/Mantenimiento/especialidadRoute"),
 );
 
 //! Empresas
@@ -113,26 +113,28 @@ app.use("/api/empresa", require("./routes/Mantenimiento/empresaRoute"));
 //! Cotizacion Empresas
 app.use(
   "/api/cotizacionEmpresa",
-  require("./routes/Gestion/cotizacionEmpresaRoute")
+  require("./routes/Gestion/cotizacionEmpresaRoute"),
 );
 
 //! Atención Empresas
 app.use(
   "/api/atencionEmpresa",
-  require("./routes/Gestion/atencionEmpresaRoute")
+  require("./routes/Gestion/atencionEmpresaRoute"),
 );
 
 //! Programación de pacientes por empresa
 app.use(
   "/api/programacionPacienteEmpresa",
-  require("./routes/Gestion/programacionPacienteEmpresaRoute")
+  require("./routes/Gestion/programacionPacienteEmpresaRoute"),
 );
 
 //! Archivos de pacientes
 app.use(
   "/api/archivoPaciente",
-  require("./routes/Mantenimiento/archivoPacienteRoute")
+  require("./routes/Mantenimiento/archivoPacienteRoute"),
 );
+
+app.use("/api/tipoMuestra", require("./routes/Mantenimiento/tipoMuestraRoute"));
 
 //!Levantar el servidor
 const PORT = process.env.PORT || 4000;
