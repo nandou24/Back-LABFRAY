@@ -5,10 +5,37 @@ const examenesSchema = new mongoose.Schema({
   pruebaLabId: {
     type: Schema.Types.ObjectId,
     ref: "pruebasLabCollection",
+    required: true,
   },
+
   codExamen: { type: String, required: true },
   nombreExamen: { type: String, required: true },
   tipoExamen: { type: String, required: false },
+
+  // ==========================================================
+  // CONFIGURACIÓN DE INSTANCIAS
+  // ==========================================================
+
+  numeroInstancias: {
+    type: Number,
+    default: 1,
+    min: 1,
+    validate: {
+      validator: Number.isInteger,
+      message: "El número de instancias debe ser un número entero",
+    },
+  },
+
+  modalidadInstancias: {
+    type: String,
+    enum: ["UNICA", "MUESTRAS_INDEPENDIENTES", "REPETICIONES_MISMA_MUESTRA"],
+    default: "UNICA",
+  },
+
+  etiquetasInstancias: {
+    type: [String],
+    default: [],
+  },
 });
 
 const profAsociadasSchema = new mongoose.Schema({
@@ -47,7 +74,7 @@ const ServicioSchema = Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 //aquí se define o elige la colección/tabla en la que queremos que se guarde

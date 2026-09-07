@@ -136,6 +136,8 @@ app.use(
 
 app.use("/api/tipoMuestra", require("./routes/Mantenimiento/tipoMuestraRoute"));
 
+app.use("/api/tuboEnvase", require("./routes/Mantenimiento/tuboEnvaseRoute"));
+
 //!Levantar el servidor
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
