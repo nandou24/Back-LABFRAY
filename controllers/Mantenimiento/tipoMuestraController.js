@@ -189,7 +189,8 @@ const actualizarTipoMuestra = async (req, res = response) => {
     const { id } = req.params;
     const { uid, nombreUsuario } = req.user;
 
-    const { nombreTipoMuestra, descripcionTipoMuestra } = req.body;
+    const { nombreTipoMuestra, descripcionTipoMuestra, estadoTipoMuestra } =
+      req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -231,8 +232,9 @@ const actualizarTipoMuestra = async (req, res = response) => {
     }
 
     tipoMuestra.nombreTipoMuestra = nombreNormalizado;
-
     tipoMuestra.descripcionTipoMuestra = descripcionTipoMuestra?.trim() || "";
+    tipoMuestra.estadoTipoMuestra =
+      estadoTipoMuestra?.trim().toUpperCase() || "ACTIVO";
 
     tipoMuestra.updatedBy = uid;
     tipoMuestra.usuarioActualizacion = nombreUsuario;

@@ -219,6 +219,7 @@ const actualizarTuboEnvase = async (req, res = response) => {
       aditivo = "",
       capacidad = null,
       unidadCapacidad = null,
+      estadoTuboEnvase,
     } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -282,6 +283,8 @@ const actualizarTuboEnvase = async (req, res = response) => {
       capacidad === null || capacidad === "" ? null : Number(capacidad);
 
     tuboEnvase.unidadCapacidad = unidadCapacidad?.trim() || null;
+    tuboEnvase.estadoTuboEnvase =
+      estadoTuboEnvase?.trim().toUpperCase() || "ACTIVO";
 
     tuboEnvase.updatedBy = uid;
     tuboEnvase.usuarioActualizacion = nombreUsuario;
