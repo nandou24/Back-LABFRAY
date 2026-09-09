@@ -6,7 +6,6 @@ const {
   mostrarUltimosItems,
   encontrarTermino,
   actualizarItem,
-  eliminarItem,
 } = require("../../controllers/Mantenimiento/itemLabController");
 
 const { validarCampos } = require("../../middlewares/validar-campo");
@@ -76,6 +75,11 @@ const validacionesItemLab = [
     return true;
   }),
 
+  check("permiteValorNoListado")
+    .optional()
+    .isBoolean()
+    .withMessage("Permite valor no listado debe ser verdadero o falso"),
+
   // ========================================================
   // LEGACY
   // ========================================================
@@ -115,11 +119,5 @@ router.put(
   [validarJWT, ...validacionesItemLab],
   actualizarItem,
 );
-
-// ==========================================================
-// DELETE LEGACY
-// ==========================================================
-
-router.delete("/:itemLabId/deleteItem", [validarJWT], eliminarItem);
 
 module.exports = router;

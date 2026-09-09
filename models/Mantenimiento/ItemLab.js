@@ -215,6 +215,11 @@ const ItemLabSchema = Schema(
       default: [],
     },
 
+    permiteValorNoListado: {
+      type: Boolean,
+      default: false,
+    },
+
     estadoItem: {
       type: String,
       enum: ["ACTIVO", "INACTIVO"],

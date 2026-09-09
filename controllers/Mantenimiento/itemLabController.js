@@ -217,7 +217,7 @@ const actualizarItem = async (req, res = response) => {
         usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza el item
         fechaActualizacion: new Date(), // Fecha de actualización
       },
-      { new: true } // Devuelve el documento actualizado
+      { new: true }, // Devuelve el documento actualizado
     );
 
     //Generar respuesta exitosa
@@ -233,39 +233,39 @@ const actualizarItem = async (req, res = response) => {
   }
 };
 
-const eliminarItem = async (req, res = response) => {
-  const itemLabId = req.params.itemLabId; // Recupera el ID del item
-  const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
-  console.log("ID del item a eliminar:", itemLabId);
+// const eliminarItem = async (req, res = response) => {
+//   const itemLabId = req.params.itemLabId; // Recupera el ID del item
+//   const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
+//   console.log("ID del item a eliminar:", itemLabId);
 
-  try {
-    const itemLab = await ItemLab.findByIdAndDelete(itemLabId);
+//   try {
+//     const itemLab = await ItemLab.findByIdAndDelete(itemLabId);
 
-    if (!itemLab) {
-      return res.status(404).json({
-        ok: false,
-        msg: "Item no encontrado",
-      });
-    }
+//     if (!itemLab) {
+//       return res.status(404).json({
+//         ok: false,
+//         msg: "Item no encontrado",
+//       });
+//     }
 
-    //Generar respuesta exitosa
-    return res.status(200).json({
-      ok: true,
-      msg: "Item eliminado",
-    });
-  } catch (error) {
-    console.error("Error al eliminar el item: ", error);
-    return res.status(500).json({
-      ok: false,
-      msg: "Error al momento de eliminar back end",
-    });
-  }
-};
+//     //Generar respuesta exitosa
+//     return res.status(200).json({
+//       ok: true,
+//       msg: "Item eliminado",
+//     });
+//   } catch (error) {
+//     console.error("Error al eliminar el item: ", error);
+//     return res.status(500).json({
+//       ok: false,
+//       msg: "Error al momento de eliminar back end",
+//     });
+//   }
+// };
 
 module.exports = {
   crearItemLab,
   mostrarUltimosItems,
   encontrarTermino,
   actualizarItem,
-  eliminarItem,
+  // eliminarItem,
 };
