@@ -200,7 +200,12 @@ const PruebaLabSchema = Schema(
     tipoTuboEnvase: { type: [String], required: true },
     tiempoRespuesta: { type: String, required: true },
     observPruebas: { type: String },
-    estadoPrueba: { type: String, required: true },
+    estadoPrueba: {
+      type: String,
+      enum: ["ACTIVO", "INACTIVO"],
+      default: "ACTIVO",
+      required: true,
+    },
     ordenImpresion: { type: Number, default: 0 },
     // ==========================================
     // LEGACY - TEMPORAL

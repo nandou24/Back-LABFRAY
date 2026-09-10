@@ -88,14 +88,13 @@ const mostrarUltimasPruebas = async (req, res = response) => {
   try {
     const pruebasLab = await PruebaLab.find()
       .populate({
-        path: "itemsComponentes.itemLabId",
-        populate: {
-          path: "perteneceAPrueba",
-          model: "pruebasLabCollection",
-          select: "codPruebaLab nombrePruebaLab"
-        }
+        path: "gruposResultado.items.itemLabId",
+        select:
+          "_id codItemLab nombreInforme nombreHojaTrabajo contextoAnalitico tipoResultado estadoItem",
       })
-      .sort({ createdAt: -1 });
+      .sort({
+        createdAt: -1,
+      });
 
     return res.json({
       ok: true,
@@ -103,6 +102,7 @@ const mostrarUltimasPruebas = async (req, res = response) => {
     });
   } catch (error) {
     console.log(error);
+
     return res.status(500).json({
       ok: false,
       msg: "Error en la consulta",
@@ -111,24 +111,41 @@ const mostrarUltimasPruebas = async (req, res = response) => {
 };
 
 const encontrarTermino = async (req, res = response) => {
-  const termino = req.query.search;
+  const termino = req.query.search ?? "";
 
   try {
     const pruebasLab = await PruebaLab.find({
-      //nroDoc: { $regex: termino, $options: 'i'}
-
       $or: [
-        { nombrePruebaLab: { $regex: termino, $options: "i" } }, // Búsqueda en el campo "nombre"
-        { codPruebaLab: { $regex: termino, $options: "i" } }, // Búsqueda en el campo "apellido paterno"
-        // Agrega más campos si es necesario
+        {
+          nombrePruebaLab: {
+            $regex: termino,
+            $options: "i",
+          },
+        },
+        {
+          codPruebaLab: {
+            $regex: termino,
+            $options: "i",
+          },
+        },
       ],
-    });
+    })
+      .populate({
+        path: "gruposResultado.items.itemLabId",
+        select:
+          "_id codItemLab nombreInforme nombreHojaTrabajo contextoAnalitico tipoResultado estadoItem",
+      })
+      .sort({
+        createdAt: -1,
+      });
+
     return res.json({
       ok: true,
-      pruebasLab, //! favoritos: favoritos
+      pruebasLab,
     });
   } catch (error) {
     console.log(error);
+
     return res.status(500).json({
       ok: false,
       msg: "Error en la consulta",
@@ -141,12 +158,11 @@ const actualizarPrueba = async (req, res = response) => {
   const datosActualizados = req.body; //recupera los datos a grabar
   const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
   delete datosActualizados._id; //quita los _id generados por el mongo y que no se pueden modificar
-  delete datosActualizados.itemsComponentes._id;
 
   try {
     // Obtener la prueba actual para validaciones
     const pruebaActual = await PruebaLab.findOne({ codPruebaLab: codPrueba });
-    
+
     if (!pruebaActual) {
       return res.status(404).json({
         ok: false,
@@ -161,7 +177,10 @@ const actualizarPrueba = async (req, res = response) => {
         _id: { $ne: pruebaActual._id }, // Excluir la prueba actual
       });
 
-      console.log("Prueba con mismo orden en actualización:", pruebaConMismoOrden);
+      console.log(
+        "Prueba con mismo orden en actualización:",
+        pruebaConMismoOrden,
+      );
 
       if (pruebaConMismoOrden) {
         return res.status(400).json({
@@ -179,7 +198,7 @@ const actualizarPrueba = async (req, res = response) => {
         usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza
         fechaActualizacion: new Date(), // Fecha de actualización
       },
-      { new: true }
+      { new: true },
     );
 
     //Generar respuesta exitosa
