@@ -1,16 +1,6 @@
 const mongoose = require("mongoose");
 const { Schema } = require("mongoose");
 
-const itemsSchema = new mongoose.Schema({
-  itemLabId: {
-    type: Schema.Types.ObjectId,
-    ref: "itemsLabCollection",
-  },
-  //   codItemLab: { type: String, required: true },
-  //   nombreItemLab: { type: String, required: true },
-  //   perteneceA: { type: String },
-});
-
 // ==========================================================
 // CONFIGURACIÓN DE PROCESAMIENTO
 // INTERNO / REFERENCIA
@@ -196,8 +186,6 @@ const PruebaLabSchema = Schema(
     },
     condPreAnalitPaciente: { type: String, required: true },
     condPreAnalitRefer: { type: String, required: true },
-    tipoMuestra: { type: [String], required: true },
-    tipoTuboEnvase: { type: [String], required: true },
     tiempoRespuesta: { type: String, required: true },
     observPruebas: { type: String },
     estadoPrueba: {
@@ -206,11 +194,7 @@ const PruebaLabSchema = Schema(
       default: "ACTIVO",
       required: true,
     },
-    ordenImpresion: { type: Number, default: 0 },
-    // ==========================================
-    // LEGACY - TEMPORAL
-    // ==========================================
-    itemsComponentes: [itemsSchema],
+
     // ==========================================================
     // NUEVA ESTRUCTURA DE COMPOSICIÓN DE LA PRUEBA
     // ==========================================================

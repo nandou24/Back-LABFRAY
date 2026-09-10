@@ -5,7 +5,7 @@ const { generarJWT } = require("../../helpers/jwt");
 const jwt = require("jsonwebtoken");
 
 const crearPruebaLab = async (req, res = response) => {
-  const { nombrePruebaLab, ordenImpresion } = req.body;
+  const { nombrePruebaLab } = req.body;
   const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
 
   const prefijoCodigo = "LC";
@@ -19,20 +19,6 @@ const crearPruebaLab = async (req, res = response) => {
         ok: false,
         msg: "Ya existe una prueba con ese nombre",
       });
-    }
-
-    // Validar que no exista el mismo número de orden de impresión
-    if (ordenImpresion) {
-      const pruebaConMismoOrden = await PruebaLab.findOne({ ordenImpresion });
-
-      console.log("Prueba con mismo orden:", pruebaConMismoOrden);
-
-      if (pruebaConMismoOrden) {
-        return res.status(400).json({
-          ok: false,
-          msg: `Ya existe la prueba "${pruebaConMismoOrden.nombrePruebaLab}" con el orden de impresión ${ordenImpresion}`,
-        });
-      }
     }
 
     //creando codigo prueba
@@ -168,26 +154,6 @@ const actualizarPrueba = async (req, res = response) => {
         ok: false,
         msg: "Prueba no encontrada con ese código",
       });
-    }
-
-    // Validar que no exista el mismo número de orden de impresión (excluyendo la prueba actual)
-    if (datosActualizados.ordenImpresion) {
-      const pruebaConMismoOrden = await PruebaLab.findOne({
-        ordenImpresion: datosActualizados.ordenImpresion,
-        _id: { $ne: pruebaActual._id }, // Excluir la prueba actual
-      });
-
-      console.log(
-        "Prueba con mismo orden en actualización:",
-        pruebaConMismoOrden,
-      );
-
-      if (pruebaConMismoOrden) {
-        return res.status(400).json({
-          ok: false,
-          msg: `Ya existe la prueba "${pruebaConMismoOrden.nombrePruebaLab}" con el orden de impresión ${datosActualizados.ordenImpresion}`,
-        });
-      }
     }
 
     const pruebaLab = await PruebaLab.findOneAndUpdate(

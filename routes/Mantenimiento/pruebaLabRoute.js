@@ -33,16 +33,8 @@ router.post(
     check("condPreAnalitRefer")
       .notEmpty()
       .withMessage(
-        "Condiciones pre-analíticas para referencia son obligatorias"
+        "Condiciones pre-analíticas para referencia son obligatorias",
       ),
-
-    check("tipoMuestra")
-      .notEmpty()
-      .withMessage("Tipo de muestra es obligatorio"),
-
-    check("tipoTuboEnvase")
-      .notEmpty()
-      .withMessage("Tipo de tubo / envase es obligatorio"),
 
     check("tiempoRespuesta")
       .notEmpty()
@@ -54,7 +46,7 @@ router.post(
 
     validarCampos,
   ],
-  crearPruebaLab
+  crearPruebaLab,
 );
 
 //POST
@@ -65,7 +57,7 @@ router.get(
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
   ],
-  mostrarUltimasPruebas
+  mostrarUltimasPruebas,
 );
 
 //POST
@@ -76,7 +68,7 @@ router.get(
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
   ],
-  encontrarTermino
+  encontrarTermino,
 );
 
 //POST

@@ -138,6 +138,12 @@ app.use("/api/tipoMuestra", require("./routes/Mantenimiento/tipoMuestraRoute"));
 
 app.use("/api/tuboEnvase", require("./routes/Mantenimiento/tuboEnvaseRoute"));
 
+//! Laboratorio de Referencia
+app.use(
+  "/api/laboratorioReferencia",
+  require("./routes/Mantenimiento/laboratorioReferenciaRoute"),
+);
+
 //!Levantar el servidor
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
