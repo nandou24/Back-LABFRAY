@@ -33,7 +33,7 @@ const crearEspecialidad = async (req, res = response) => {
     // Buscar el último código generado
     const ultimaEspecialidad = await Especialidad.findOne(
       {},
-      { codEspecialidad: 1 }
+      { codEspecialidad: 1 },
     )
       .sort({ codEspecialidad: -1 })
       .lean();
@@ -44,7 +44,7 @@ const crearEspecialidad = async (req, res = response) => {
     if (ultimaEspecialidad) {
       const ultimoCorrelativo = parseInt(
         ultimaEspecialidad.codEspecialidad.substring(3),
-        10
+        10,
       );
       console.log("Último correlativo:", ultimoCorrelativo);
       correlativo = ultimoCorrelativo + 1;
@@ -108,7 +108,7 @@ const actualizarEspecialidad = async (req, res) => {
         usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza
         fechaActualizacion: new Date(), // Fecha de actualización
       },
-      { new: true }
+      { new: true },
     );
 
     if (!actualizada) {
@@ -144,11 +144,10 @@ const eliminarEspecialidad = async (req, res) => {
 
 // Listar todas las especialidades
 const listarEspecialidades = async (req, res) => {
-  console.log("Listando especialidades...");
   try {
     const especialidades = await Especialidad.find().populate(
       "profesionRef", //campo de referencia
-      "codProfesion nombreProfesion" // Solo traer los campos necesarios
+      "codProfesion nombreProfesion", // Solo traer los campos necesarios
     );
 
     // Si alguna especialidad no tiene profesión asociada, lo marcamos
@@ -166,7 +165,6 @@ const listarEspecialidades = async (req, res) => {
       return e;
     });
 
-    console.log("Especialidades encontradas:", especialidadesConAviso);
     res.json({ ok: true, especialidades: especialidadesConAviso });
   } catch (error) {
     res

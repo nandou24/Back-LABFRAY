@@ -9,8 +9,7 @@ const examenesSchema = new Schema({
   tipoExamen: {
     type: String,
     enum: ["LABORATORIO", "ECOGRAFIA", "RAYOS_X", "CONSULTA", "PROCEDIMIENTO"],
-    required: false,
-    default: null,
+    required: true,
   },
 
   // Referencia dinámica al maestro clínico correspondiente.
@@ -40,17 +39,10 @@ const examenesSchema = new Schema({
       }
     },
 
-    default: null,
-  },
+    required: function () {
+      return this.tipoExamen === "LABORATORIO";
+    },
 
-  // ====== Compatibilidad temporal ======
-
-  // Legacy: retirar cuando todos los servicios de laboratorio
-  // hayan migrado a referenciaId.
-  pruebaLabId: {
-    type: Schema.Types.ObjectId,
-    ref: "pruebasLabCollection",
-    required: false,
     default: null,
   },
 
