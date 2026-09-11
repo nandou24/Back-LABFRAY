@@ -1,20 +1,74 @@
 const mongoose = require("mongoose");
 const { Schema } = require("mongoose");
 
-const examenesSchema = new mongoose.Schema({
+// ====== Componentes clínicos del servicio ======
+
+const examenesSchema = new Schema({
+  // Tipo funcional del componente.
+  // Temporalmente opcional hasta migrar completamente el frontend.
+  tipoExamen: {
+    type: String,
+    enum: ["LABORATORIO", "ECOGRAFIA", "RAYOS_X", "CONSULTA", "PROCEDIMIENTO"],
+    required: false,
+    default: null,
+  },
+
+  // Referencia dinámica al maestro clínico correspondiente.
+  referenciaId: {
+    type: Schema.Types.ObjectId,
+
+    ref: function () {
+      switch (this.tipoExamen) {
+        case "LABORATORIO":
+          return "pruebasLabCollection";
+
+        // Se habilitarán cuando existan los respectivos maestros.
+        // case "ECOGRAFIA":
+        //   return "pruebasEcografiaCollection";
+
+        // case "RAYOS_X":
+        //   return "pruebasRayosXCollection";
+
+        // case "CONSULTA":
+        //   return "consultaCollection";
+
+        // case "PROCEDIMIENTO":
+        //   return "procedimientoCollection";
+
+        default:
+          return null;
+      }
+    },
+
+    default: null,
+  },
+
+  // ====== Compatibilidad temporal ======
+
+  // Legacy: retirar cuando todos los servicios de laboratorio
+  // hayan migrado a referenciaId.
   pruebaLabId: {
     type: Schema.Types.ObjectId,
     ref: "pruebasLabCollection",
-    required: true,
+    required: false,
+    default: null,
   },
 
-  codExamen: { type: String, required: true },
-  nombreExamen: { type: String, required: true },
-  tipoExamen: { type: String, required: false },
+  // ====== Datos identificativos ======
 
-  // ==========================================================
-  // CONFIGURACIÓN DE INSTANCIAS
-  // ==========================================================
+  codExamen: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+
+  nombreExamen: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+
+  // ====== Configuración de instancias ======
 
   numeroInstancias: {
     type: Number,
@@ -38,44 +92,190 @@ const examenesSchema = new mongoose.Schema({
   },
 });
 
-const profAsociadasSchema = new mongoose.Schema({
-  profesionId: { type: Schema.Types.ObjectId, ref: "profesionCollection" },
-  especialidadId: {
-    type: Schema.Types.ObjectId,
-    ref: "especialidadCollection",
-    required: false,
-    default: null,
+// ====== Profesiones asociadas ======
+
+const profAsociadasSchema = new Schema(
+  {
+    profesionId: {
+      type: Schema.Types.ObjectId,
+      ref: "profesionCollection",
+      required: true,
+    },
+
+    especialidadId: {
+      type: Schema.Types.ObjectId,
+      ref: "especialidadCollection",
+      required: false,
+      default: null,
+    },
   },
-});
+  {
+    _id: false,
+  },
+);
+
+// ====== Servicios incluidos en un paquete ======
+
+const servicioIncluidoSchema = new Schema(
+  {
+    servicioId: {
+      type: Schema.Types.ObjectId,
+      ref: "servicioCollection",
+      required: true,
+    },
+
+    cantidad: {
+      type: Number,
+      default: 1,
+      min: 1,
+      validate: {
+        validator: Number.isInteger,
+        message: "La cantidad debe ser un número entero",
+      },
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+// ====== Servicio ======
 
 const ServicioSchema = Schema(
   {
-    codServicio: { type: String, required: true, unique: true },
-    tipoServicio: { type: String, required: true },
+    codServicio: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+    },
+
+    // ====== Clasificación ======
+
+    claseServicio: {
+      type: String,
+      enum: ["INDIVIDUAL", "PAQUETE"],
+      default: "INDIVIDUAL",
+      required: true,
+    },
+
+    // Solo corresponde a servicios individuales.
+    // Ej.: Laboratorio, Consulta, Ecografía, Procedimiento.
+    tipoServicio: {
+      type: String,
+      required: function () {
+        return this.claseServicio === "INDIVIDUAL";
+      },
+      default: null,
+      trim: true,
+    },
+
+    // ====== Datos generales ======
+
     nombreServicio: {
       type: String,
       required: true,
-      set: (value) => value.toUpperCase(),
+      trim: true,
+      set: (value) => value?.toUpperCase(),
     },
-    descripcionServicio: { type: String },
-    precioServicio: { type: String, required: true },
-    estadoServicio: { type: String, required: true },
-    favoritoServicio: { type: Boolean, default: false },
-    favoritoServicioEmpresa: { type: Boolean, default: false },
-    examenesServicio: [examenesSchema],
-    profesionesAsociadas: [profAsociadasSchema],
-    // 🔍 Campos de auditoría:
-    createdBy: { type: String, required: true }, // uid
-    usuarioRegistro: { type: String }, // nombre de usuario
-    fechaRegistro: { type: Date, default: Date.now },
-    updatedBy: { type: String }, // uid del usuario que actualiza
-    usuarioActualizacion: { type: String },
-    fechaActualizacion: { type: Date },
+
+    descripcionServicio: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    precioServicio: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+
+    estadoServicio: {
+      type: Boolean,
+      default: true,
+      required: true,
+    },
+
+    favoritoServicio: {
+      type: Boolean,
+      default: false,
+    },
+
+    favoritoServicioEmpresa: {
+      type: Boolean,
+      default: false,
+    },
+
+    // ====== Configuración profesional ======
+
+    // Indica si Cotización / Atención debe solicitar
+    // la selección de un profesional.
+    requiereSeleccionProfesional: {
+      type: Boolean,
+      default: false,
+    },
+
+    profesionesAsociadas: {
+      type: [profAsociadasSchema],
+      default: [],
+    },
+
+    // ====== Composición clínica ======
+
+    // Para servicios INDIVIDUALES.
+    // Conservamos el nombre actual para no hacer
+    // un refactor grande en esta etapa.
+    examenesServicio: {
+      type: [examenesSchema],
+      default: [],
+    },
+
+    // ====== Composición comercial ======
+
+    // Para servicios de clase PAQUETE.
+    serviciosIncluidos: {
+      type: [servicioIncluidoSchema],
+      default: [],
+    },
+
+    // ====== Auditoría ======
+
+    createdBy: {
+      type: String,
+      required: true,
+    },
+
+    usuarioRegistro: {
+      type: String,
+      default: "",
+    },
+
+    fechaRegistro: {
+      type: Date,
+      default: Date.now,
+    },
+
+    updatedBy: {
+      type: String,
+      default: null,
+    },
+
+    usuarioActualizacion: {
+      type: String,
+      default: "",
+    },
+
+    fechaActualizacion: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
   },
 );
 
-//aquí se define o elige la colección/tabla en la que queremos que se guarde
+// ====== Modelo ======
+
 module.exports = mongoose.model("servicioCollection", ServicioSchema);
