@@ -4,6 +4,7 @@ const {
   crearSolicitudesAtencion,
   obtenerPorRangoFechas,
   completarAtencionArea,
+  previsualizarExpansionAtencion,
 } = require("../../controllers/Gestion/solicitudAtencionController");
 const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
@@ -52,6 +53,9 @@ router.post(
 
 // Buscar roles
 router.get("/findByRangoFechas", obtenerPorRangoFechas);
+
+// ====== Previsualizar expansión ======
+router.post("/preview-expansion", validarJWT, previsualizarExpansionAtencion);
 
 router.put("/:id/completar-atencion", validarJWT, completarAtencionArea);
 

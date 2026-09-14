@@ -163,7 +163,8 @@ const crearPago = async (
     await crearSolicitudesAtencion({
       origenAtencion: "PARTICULAR",
 
-      servicios: serviciosCotizacion,
+      // ====== Usar snapshot persistido de cotización ======
+      servicios: ultimoHistorial.serviciosCotizacion,
 
       paciente: {
         clienteId,

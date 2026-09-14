@@ -59,6 +59,16 @@ const ItemGrupoResultadoSchema = new Schema({
   },
 });
 
+// ====== Compatibilidad items legacy ======
+
+const ItemComponenteLegacySchema = new Schema({
+  itemLabId: {
+    type: Schema.Types.ObjectId,
+    ref: "itemsLabCollection",
+    required: true,
+  },
+});
+
 // ==========================================================
 // GRUPO DE RESULTADOS DENTRO DE UNA PRUEBA
 // ==========================================================
@@ -193,6 +203,13 @@ const PruebaLabSchema = Schema(
       enum: ["ACTIVO", "INACTIVO"],
       default: "ACTIVO",
       required: true,
+    },
+
+    // ====== Compatibilidad temporal legacy ======
+
+    itemsComponentes: {
+      type: [ItemComponenteLegacySchema],
+      default: undefined,
     },
 
     // ==========================================================

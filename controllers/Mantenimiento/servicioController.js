@@ -935,18 +935,73 @@ const obtenerItemsLaboratorioPorServicio = async (req, res = response) => {
       });
     }
 
-    // ====== Consultar PruebaLab ======
-
     const pruebasLab = await PruebaLab.find({
       _id: {
         $in: [...referencias],
       },
-    }).populate("gruposResultado.items.itemLabId");
+    })
+      .populate("gruposResultado.items.itemLabId")
+      .populate("itemsComponentes.itemLabId");
+
+    // ====== Normalizar pruebas legacy ======
+
+    const pruebasLabNormalizadas = pruebasLab.map((prueba) => {
+      const pruebaNormalizada = prueba.toObject();
+
+      const tieneGruposResultado =
+        Array.isArray(pruebaNormalizada.gruposResultado) &&
+        pruebaNormalizada.gruposResultado.length > 0;
+
+      const itemsLegacy = Array.isArray(pruebaNormalizada.itemsComponentes)
+        ? pruebaNormalizada.itemsComponentes
+        : [];
+
+      // ====== Convertir composición legacy ======
+
+      if (!tieneGruposResultado && itemsLegacy.length > 0) {
+        pruebaNormalizada.gruposResultado = [
+          {
+            nombreGrupo: "",
+            ordenGrupo: 0,
+            mostrarTitulo: false,
+            procesamientoOverride: null,
+
+            items: itemsLegacy.map((item, index) => ({
+              itemLabId: item.itemLabId,
+              ordenItem: index,
+              mostrarItem: true,
+              procesamientoOverride: null,
+            })),
+          },
+        ];
+      }
+
+      // ====== Retirar estructura legacy ======
+      delete pruebaNormalizada.itemsComponentes;
+
+      // ====== Normalizar estado legacy ======
+
+      if (
+        pruebaNormalizada.estadoPrueba === true ||
+        pruebaNormalizada.estadoPrueba === "true"
+      ) {
+        pruebaNormalizada.estadoPrueba = "ACTIVO";
+      }
+
+      if (
+        pruebaNormalizada.estadoPrueba === false ||
+        pruebaNormalizada.estadoPrueba === "false"
+      ) {
+        pruebaNormalizada.estadoPrueba = "INACTIVO";
+      }
+
+      return pruebaNormalizada;
+    });
 
     return res.json({
       ok: true,
 
-      pruebasLab,
+      pruebasLab: pruebasLabNormalizadas,
 
       componentesLaboratorio,
     });
@@ -959,6 +1014,496 @@ const obtenerItemsLaboratorioPorServicio = async (req, res = response) => {
     return res.status(500).json({
       ok: false,
       msg: "Error interno al obtener pruebas de laboratorio",
+    });
+  }
+};
+
+// ====== Resolver laboratorio desde cotización ======
+
+const resolverLaboratorioCotizacion = async (req, res = response) => {
+  const lineasCotizacion = Array.isArray(req.body?.serviciosCotizacion)
+    ? req.body.serviciosCotizacion
+    : [];
+
+  const obtenerId = (valor) => {
+    if (valor && typeof valor === "object" && valor._id) {
+      return valor._id.toString();
+    }
+
+    return String(valor ?? "");
+  };
+
+  try {
+    // ====== Validar entrada ======
+
+    if (lineasCotizacion.length === 0) {
+      return res.status(400).json({
+        ok: false,
+        msg: "Debe proporcionar al menos un servicio de cotización",
+      });
+    }
+
+    for (let i = 0; i < lineasCotizacion.length; i++) {
+      const linea = lineasCotizacion[i];
+
+      const servicioId = obtenerId(linea.servicioId);
+      const cantidad = Number(linea.cantidad);
+
+      if (!mongoose.Types.ObjectId.isValid(servicioId)) {
+        return res.status(400).json({
+          ok: false,
+          msg: `El servicio de la línea ${i + 1} no es válido`,
+        });
+      }
+
+      if (!Number.isInteger(cantidad) || cantidad < 1) {
+        return res.status(400).json({
+          ok: false,
+          msg: `La cantidad de la línea ${i + 1} no es válida`,
+        });
+      }
+
+      const incluidos = Array.isArray(linea.serviciosIncluidos)
+        ? linea.serviciosIncluidos
+        : [];
+
+      for (const incluido of incluidos) {
+        const servicioIncluidoId = obtenerId(incluido.servicioId);
+        const cantidadIncluida = Number(incluido.cantidad ?? 1);
+
+        if (!mongoose.Types.ObjectId.isValid(servicioIncluidoId)) {
+          return res.status(400).json({
+            ok: false,
+            msg: `La composición de la línea ${i + 1} contiene un servicio no válido`,
+          });
+        }
+
+        if (!Number.isInteger(cantidadIncluida) || cantidadIncluida < 1) {
+          return res.status(400).json({
+            ok: false,
+            msg: `La composición de la línea ${i + 1} contiene una cantidad no válida`,
+          });
+        }
+      }
+    }
+
+    // ====== Obtener servicios principales ======
+
+    const idsPrincipales = [
+      ...new Set(lineasCotizacion.map((linea) => obtenerId(linea.servicioId))),
+    ];
+
+    const serviciosPrincipales = await Servicio.find({
+      _id: {
+        $in: idsPrincipales,
+      },
+    });
+
+    const mapaPrincipales = new Map();
+
+    serviciosPrincipales.forEach((servicio) => {
+      mapaPrincipales.set(servicio._id.toString(), servicio);
+    });
+
+    if (mapaPrincipales.size !== idsPrincipales.length) {
+      return res.status(404).json({
+        ok: false,
+        msg: "Uno o más servicios cotizados ya no existen",
+      });
+    }
+
+    // ====== Resolver composición de paquetes ======
+
+    const composicionesPorLinea = new Map();
+    const idsIncluidos = new Set();
+    const advertencias = [];
+
+    for (let i = 0; i < lineasCotizacion.length; i++) {
+      const linea = lineasCotizacion[i];
+
+      const servicioId = obtenerId(linea.servicioId);
+      const servicio = mapaPrincipales.get(servicioId);
+
+      if (!servicio) {
+        continue;
+      }
+
+      if (servicio.claseServicio !== "PAQUETE") {
+        composicionesPorLinea.set(i, {
+          fuente: "DIRECTO",
+          incluidos: [],
+        });
+
+        continue;
+      }
+
+      const snapshotCotizacion = Array.isArray(linea.serviciosIncluidos)
+        ? linea.serviciosIncluidos
+        : [];
+
+      let incluidos;
+      let fuente;
+
+      // ====== Priorizar snapshot de cotización ======
+
+      if (snapshotCotizacion.length > 0) {
+        incluidos = snapshotCotizacion;
+        fuente = "SNAPSHOT_COTIZACION";
+      } else {
+        incluidos = servicio.serviciosIncluidos ?? [];
+        fuente = "MAESTRO_ACTUAL_FALLBACK";
+
+        advertencias.push(
+          `La línea ${i + 1} del paquete ${servicio.codServicio} no tiene snapshot de composición; se utilizó el maestro actual`,
+        );
+      }
+
+      if (incluidos.length === 0) {
+        return res.status(400).json({
+          ok: false,
+          msg: `No existe composición disponible para el paquete ${servicio.codServicio}`,
+        });
+      }
+
+      const incluidosNormalizados = incluidos.map((incluido) => ({
+        servicioId: obtenerId(incluido.servicioId),
+        cantidad: Number(incluido.cantidad ?? 1),
+      }));
+
+      incluidosNormalizados.forEach((incluido) => {
+        idsIncluidos.add(incluido.servicioId);
+      });
+
+      composicionesPorLinea.set(i, {
+        fuente,
+        incluidos: incluidosNormalizados,
+      });
+    }
+
+    // ====== Consultar servicios incluidos ======
+
+    let serviciosIncluidos = [];
+
+    if (idsIncluidos.size > 0) {
+      serviciosIncluidos = await Servicio.find({
+        _id: {
+          $in: [...idsIncluidos],
+        },
+        claseServicio: "INDIVIDUAL",
+      });
+    }
+
+    const mapaIncluidos = new Map();
+
+    serviciosIncluidos.forEach((servicio) => {
+      mapaIncluidos.set(servicio._id.toString(), servicio);
+    });
+
+    if (mapaIncluidos.size !== idsIncluidos.size) {
+      return res.status(404).json({
+        ok: false,
+        msg: "Uno o más servicios del snapshot del paquete ya no existen o no son individuales",
+      });
+    }
+
+    // ====== Expandir cantidades transaccionales ======
+
+    const serviciosExpandidos = [];
+
+    for (let i = 0; i < lineasCotizacion.length; i++) {
+      const linea = lineasCotizacion[i];
+
+      const servicioId = obtenerId(linea.servicioId);
+      const cantidadCotizada = Number(linea.cantidad);
+
+      const servicio = mapaPrincipales.get(servicioId);
+
+      if (!servicio) {
+        continue;
+      }
+
+      // ====== Individual ======
+
+      if (servicio.claseServicio === "INDIVIDUAL") {
+        serviciosExpandidos.push({
+          lineaCotizacion: i + 1,
+
+          servicio,
+
+          cantidadCotizada,
+          cantidadEnPaquete: 1,
+
+          cantidadServicio: cantidadCotizada,
+
+          fuenteComposicion: "DIRECTO",
+
+          origen: {
+            claseServicio: "INDIVIDUAL",
+
+            servicioOrigenId: servicio._id,
+
+            codServicioOrigen: servicio.codServicio,
+
+            nombreServicioOrigen: servicio.nombreServicio,
+          },
+        });
+
+        continue;
+      }
+
+      // ====== Paquete ======
+
+      const composicion = composicionesPorLinea.get(i);
+
+      for (const incluido of composicion.incluidos) {
+        const servicioIncluido = mapaIncluidos.get(incluido.servicioId);
+
+        if (!servicioIncluido) {
+          continue;
+        }
+
+        const cantidadEnPaquete = Number(incluido.cantidad ?? 1);
+
+        const cantidadServicio = cantidadCotizada * cantidadEnPaquete;
+
+        serviciosExpandidos.push({
+          lineaCotizacion: i + 1,
+
+          servicio: servicioIncluido,
+
+          cantidadCotizada,
+          cantidadEnPaquete,
+
+          cantidadServicio,
+
+          fuenteComposicion: composicion.fuente,
+
+          origen: {
+            claseServicio: "PAQUETE",
+
+            servicioOrigenId: servicio._id,
+
+            codServicioOrigen: servicio.codServicio,
+
+            nombreServicioOrigen: servicio.nombreServicio,
+          },
+        });
+      }
+    }
+
+    // ====== Generar unidades laboratorio ======
+
+    const referencias = new Set();
+    const unidadesLaboratorio = [];
+
+    serviciosExpandidos.forEach(
+      ({
+        lineaCotizacion,
+        servicio,
+        cantidadCotizada,
+        cantidadEnPaquete,
+        cantidadServicio,
+        fuenteComposicion,
+        origen,
+      }) => {
+        const componentes = servicio.examenesServicio ?? [];
+
+        componentes.forEach((componente) => {
+          if (
+            componente.tipoExamen !== "LABORATORIO" ||
+            !componente.referenciaId
+          ) {
+            return;
+          }
+
+          const pruebaLabId = componente.referenciaId.toString();
+
+          referencias.add(pruebaLabId);
+
+          const modalidad = componente.modalidadInstancias ?? "UNICA";
+
+          const numeroInstancias =
+            modalidad === "UNICA"
+              ? 1
+              : Number(componente.numeroInstancias ?? 1);
+
+          const etiquetas = Array.isArray(componente.etiquetasInstancias)
+            ? componente.etiquetasInstancias
+            : [];
+
+          for (
+            let numeroServicio = 1;
+            numeroServicio <= cantidadServicio;
+            numeroServicio++
+          ) {
+            for (
+              let numeroInstancia = 1;
+              numeroInstancia <= numeroInstancias;
+              numeroInstancia++
+            ) {
+              const etiquetaInstancia =
+                modalidad === "UNICA"
+                  ? null
+                  : (etiquetas[numeroInstancia - 1] ?? null);
+
+              unidadesLaboratorio.push({
+                claveUnidad:
+                  `${lineaCotizacion}:` +
+                  `${origen.servicioOrigenId}:` +
+                  `${servicio._id}:` +
+                  `${pruebaLabId}:` +
+                  `${numeroServicio}:` +
+                  `${numeroInstancia}`,
+
+                lineaCotizacion,
+
+                servicioId: servicio._id,
+
+                codServicio: servicio.codServicio,
+
+                nombreServicio: servicio.nombreServicio,
+
+                cantidadCotizada,
+
+                cantidadEnPaquete,
+
+                cantidadServicio,
+
+                numeroServicio,
+
+                origenServicio: origen,
+
+                fuenteComposicion,
+
+                pruebaLabId,
+
+                codExamen: componente.codExamen,
+
+                nombreExamen: componente.nombreExamen,
+
+                modalidadInstancias: modalidad,
+
+                numeroInstancias,
+
+                numeroInstancia,
+
+                etiquetaInstancia,
+              });
+            }
+          }
+        });
+      },
+    );
+
+    // ====== Sin laboratorio ======
+
+    if (referencias.size === 0) {
+      return res.json({
+        ok: true,
+
+        msg: "La cotización no contiene componentes de laboratorio",
+
+        pruebasLab: [],
+
+        unidadesLaboratorio: [],
+
+        resumen: {
+          lineasCotizacion: lineasCotizacion.length,
+          pruebasLab: 0,
+          unidadesLaboratorio: 0,
+        },
+
+        advertencias,
+      });
+    }
+
+    // ====== Obtener pruebas laboratorio ======
+
+    const pruebasLab = await PruebaLab.find({
+      _id: {
+        $in: [...referencias],
+      },
+    })
+      .populate("gruposResultado.items.itemLabId")
+      .populate("itemsComponentes.itemLabId");
+
+    // ====== Normalizar pruebas legacy ======
+
+    const pruebasLabNormalizadas = pruebasLab.map((prueba) => {
+      const pruebaNormalizada = prueba.toObject();
+
+      const tieneGruposResultado =
+        Array.isArray(pruebaNormalizada.gruposResultado) &&
+        pruebaNormalizada.gruposResultado.length > 0;
+
+      const itemsLegacy = Array.isArray(pruebaNormalizada.itemsComponentes)
+        ? pruebaNormalizada.itemsComponentes
+        : [];
+
+      if (!tieneGruposResultado && itemsLegacy.length > 0) {
+        pruebaNormalizada.gruposResultado = [
+          {
+            nombreGrupo: "",
+            ordenGrupo: 0,
+            mostrarTitulo: false,
+            procesamientoOverride: null,
+
+            items: itemsLegacy.map((item, index) => ({
+              itemLabId: item.itemLabId,
+              ordenItem: index,
+              mostrarItem: true,
+              procesamientoOverride: null,
+            })),
+          },
+        ];
+      }
+
+      // ====== Retirar estructura legacy ======
+
+      delete pruebaNormalizada.itemsComponentes;
+
+      // ====== Normalizar estado legacy ======
+
+      if (
+        pruebaNormalizada.estadoPrueba === true ||
+        pruebaNormalizada.estadoPrueba === "true"
+      ) {
+        pruebaNormalizada.estadoPrueba = "ACTIVO";
+      }
+
+      if (
+        pruebaNormalizada.estadoPrueba === false ||
+        pruebaNormalizada.estadoPrueba === "false"
+      ) {
+        pruebaNormalizada.estadoPrueba = "INACTIVO";
+      }
+
+      return pruebaNormalizada;
+    });
+
+    // ====== Respuesta ======
+
+    return res.json({
+      ok: true,
+
+      pruebasLab: pruebasLabNormalizadas,
+
+      unidadesLaboratorio,
+
+      resumen: {
+        lineasCotizacion: lineasCotizacion.length,
+        pruebasLab: pruebasLabNormalizadas.length,
+        unidadesLaboratorio: unidadesLaboratorio.length,
+      },
+
+      advertencias,
+    });
+  } catch (error) {
+    console.error("Error al resolver laboratorio desde cotización:", error);
+
+    return res.status(500).json({
+      ok: false,
+      msg: "Error interno al resolver laboratorio desde cotización",
     });
   }
 };
@@ -1135,4 +1680,5 @@ module.exports = {
   mostrarServiciosFavoritosEmpresa,
   obtenerServiciosExpandidos,
   obtenerItemsLaboratorioPorServicio,
+  resolverLaboratorioCotizacion,
 };

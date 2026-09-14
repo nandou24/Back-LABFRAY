@@ -11,6 +11,7 @@ const {
   obtenerServiciosExpandidos,
   obtenerItemsLaboratorioPorServicio,
   mostrarServiciosFavoritosEmpresa,
+  resolverLaboratorioCotizacion,
 } = require("../../controllers/Mantenimiento/servicioController");
 
 const { validarCampos } = require("../../middlewares/validar-campo");
@@ -220,11 +221,13 @@ router.put(
 );
 
 // ====== Expandir servicios ======
-
-router.get("/expandir", obtenerServiciosExpandidos);
+router.get("/expandidos", obtenerServiciosExpandidos);
 
 // ====== Obtener pruebas laboratorio por servicios ======
 
 router.get("/pruebaLab-items", obtenerItemsLaboratorioPorServicio);
+
+// ====== Resolver laboratorio de cotización ======
+router.post("/resolver-laboratorio-cotizacion", resolverLaboratorioCotizacion);
 
 module.exports = router;

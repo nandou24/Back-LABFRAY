@@ -1,6 +1,35 @@
 const mongoose = require("mongoose");
 const { Schema } = require("mongoose");
 
+// ====== Origen del servicio solicitado ======
+
+const OrigenServicioSolicitudSchema = new Schema(
+  {
+    claseServicio: {
+      type: String,
+      enum: ["INDIVIDUAL", "PAQUETE"],
+    },
+
+    servicioOrigenId: {
+      type: Schema.Types.ObjectId,
+      ref: "servicioCollection",
+    },
+
+    codServicioOrigen: {
+      type: String,
+      trim: true,
+    },
+
+    nombreServicioOrigen: {
+      type: String,
+      trim: true,
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
 // Define the ServicioSolicitud subdocument schema
 const ServicioSolicitudSchema = new mongoose.Schema({
   servicioId: {
@@ -9,6 +38,34 @@ const ServicioSolicitudSchema = new mongoose.Schema({
   },
   codServicio: { type: String, required: true, trim: true },
   nombreServicio: { type: String, required: true, trim: true },
+  // ====== Datos transaccionales ======
+
+  lineaCotizacion: {
+    type: Number,
+    default: null,
+  },
+
+  cantidadServicio: {
+    type: Number,
+    default: 1,
+    min: 1,
+  },
+
+  requiereSeleccionProfesional: {
+    type: Boolean,
+    default: false,
+  },
+
+  fuenteComposicion: {
+    type: String,
+    enum: ["DIRECTO", "SNAPSHOT_COTIZACION", "MAESTRO_ACTUAL_FALLBACK"],
+    default: "DIRECTO",
+  },
+
+  origenServicio: {
+    type: OrigenServicioSolicitudSchema,
+    default: null,
+  },
   estado: {
     type: String,
     required: true,
@@ -30,6 +87,139 @@ const ServicioSolicitudSchema = new mongoose.Schema({
     rne: { type: String },
   },
 });
+
+// ====== Unidad clínica de laboratorio ======
+
+const UnidadLaboratorioSchema = new Schema(
+  {
+    claveUnidad: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    lineaCotizacion: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+
+    // ====== Servicio ======
+
+    servicioId: {
+      type: Schema.Types.ObjectId,
+      ref: "servicioCollection",
+      required: true,
+    },
+
+    codServicio: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    nombreServicio: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    // ====== Cantidades ======
+
+    cantidadCotizada: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+
+    cantidadEnPaquete: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+
+    cantidadServicio: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+
+    numeroServicio: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+
+    // ====== Origen comercial ======
+
+    origenServicio: {
+      type: OrigenServicioSolicitudSchema,
+      required: true,
+    },
+
+    fuenteComposicion: {
+      type: String,
+      enum: ["DIRECTO", "SNAPSHOT_COTIZACION", "MAESTRO_ACTUAL_FALLBACK"],
+      required: true,
+    },
+
+    // ====== Prueba laboratorio ======
+
+    pruebaLabId: {
+      type: Schema.Types.ObjectId,
+      ref: "pruebasLabCollection",
+      required: true,
+    },
+
+    codExamen: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    nombreExamen: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    // ====== Instancia clínica ======
+
+    modalidadInstancias: {
+      type: String,
+      enum: ["UNICA", "MUESTRAS_INDEPENDIENTES", "REPETICIONES_MISMA_MUESTRA"],
+      required: true,
+    },
+
+    numeroInstancias: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+
+    numeroInstancia: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+
+    etiquetaInstancia: {
+      type: String,
+      default: null,
+    },
+
+    // ====== Estado de la unidad ======
+
+    estado: {
+      type: String,
+      enum: ["PENDIENTE", "EN PROCESO", "TERMINADO", "ANULADO"],
+      default: "PENDIENTE",
+    },
+  },
+  {
+    _id: false,
+  },
+);
 
 const SolicitudAtencionSchema = new Schema(
   {
@@ -81,8 +271,23 @@ const SolicitudAtencionSchema = new Schema(
       ],
       trim: true,
     },
-    servicios: { type: [ServicioSolicitudSchema], required: true },
-    hc: { type: String, required: true, trim: true },
+    servicios: {
+      type: [ServicioSolicitudSchema],
+      required: true,
+    },
+
+    // ====== Unidades clínicas de laboratorio ======
+
+    unidadesLaboratorio: {
+      type: [UnidadLaboratorioSchema],
+      default: [],
+    },
+
+    hc: {
+      type: String,
+      required: true,
+      trim: true,
+    },
 
     clienteId: {
       type: Schema.Types.ObjectId,
