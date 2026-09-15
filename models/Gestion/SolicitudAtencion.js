@@ -1054,6 +1054,19 @@ const SolicitudAtencionSchema = new Schema(
       set: (value) => value.toUpperCase(),
     },
     apeMatCliente: { type: String, set: (value) => value.toUpperCase() },
+    // ====== Contexto demográfico histórico ======
+
+    sexoPaciente: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    fechaNacimientoPaciente: {
+      type: Date,
+      default: null,
+    },
+
     solicitanteId: {
       type: Schema.Types.ObjectId,
       ref: "referenciaMedicoCollection",

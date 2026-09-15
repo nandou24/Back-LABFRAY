@@ -3,6 +3,7 @@ const SolicitudAtencion = require("../../models/Gestion/SolicitudAtencion");
 const ProgramacionPacienteEmpresa = require("../../models/Gestion/programacionPacienteEmpresa");
 const Servicio = require("../../models/Mantenimiento/Servicio");
 const PruebaLab = require("../../models/Mantenimiento/PruebaLab");
+const Paciente = require("../../models/Mantenimiento/Paciente");
 // ====== Registrar maestros de muestra ======
 require("../../models/Mantenimiento/TipoMuestra");
 require("../../models/Mantenimiento/TuboEnvase");
@@ -1175,6 +1176,28 @@ const crearSolicitudesAtencion = async ({
     );
   }
 
+  // ====== Obtener contexto demográfico ======
+
+  if (!mongoose.Types.ObjectId.isValid(paciente.clienteId)) {
+    throw new Error("El id del paciente no es válido");
+  }
+
+  const pacienteMaestro = await Paciente.findById(paciente.clienteId)
+    .session(session)
+    .lean();
+
+  if (!pacienteMaestro) {
+    throw new Error("El paciente asociado a la atención no existe");
+  }
+
+  const sexoPaciente =
+    typeof pacienteMaestro.sexoCliente === "string" &&
+    pacienteMaestro.sexoCliente.trim()
+      ? pacienteMaestro.sexoCliente.trim().toUpperCase()
+      : null;
+
+  const fechaNacimientoPaciente = pacienteMaestro.fechaNacimiento ?? null;
+
   // ====== Validar origen particular ======
 
   if (origenAtencion === "PARTICULAR") {
@@ -1296,6 +1319,12 @@ const crearSolicitudesAtencion = async ({
       apePatCliente: paciente.apePatCliente,
 
       apeMatCliente: paciente.apeMatCliente || "",
+
+      // ====== Contexto demográfico histórico ======
+
+      sexoPaciente,
+
+      fechaNacimientoPaciente,
 
       // ====== Solicitud ======
 
