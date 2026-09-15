@@ -88,6 +88,744 @@ const ServicioSolicitudSchema = new mongoose.Schema({
   },
 });
 
+// ====== Laboratorio de referencia snapshot ======
+
+const LaboratorioReferenciaSnapshotSchema = new Schema(
+  {
+    codLaboratorioReferencia: {
+      type: String,
+      default: null,
+    },
+
+    nombreLaboratorio: {
+      type: String,
+      default: "",
+    },
+
+    razonSocial: {
+      type: String,
+      default: "",
+    },
+
+    ruc: {
+      type: String,
+      default: "",
+    },
+
+    codigoCliente: {
+      type: String,
+      default: "",
+    },
+
+    direccion: {
+      type: String,
+      default: "",
+    },
+
+    observacion: {
+      type: String,
+      default: "",
+    },
+
+    estadoLaboratorioReferencia: {
+      type: String,
+      enum: ["ACTIVO", "INACTIVO"],
+      default: "ACTIVO",
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+// ====== Procesamiento clínico snapshot ======
+
+const ProcesamientoClinicoSnapshotSchema = new Schema(
+  {
+    tipo: {
+      type: String,
+      enum: ["INTERNO", "REFERENCIA"],
+      required: true,
+    },
+
+    laboratorioReferenciaId: {
+      type: Schema.Types.ObjectId,
+      ref: "laboratorioReferenciaCollection",
+      default: null,
+    },
+
+    laboratorioReferencia: {
+      type: LaboratorioReferenciaSnapshotSchema,
+      default: null,
+    },
+
+    observacion: {
+      type: String,
+      default: "",
+    },
+
+    origenConfiguracion: {
+      type: String,
+      enum: ["PRUEBA", "GRUPO", "ITEM"],
+      default: undefined,
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+// ====== Tipo de muestra snapshot ======
+
+const TipoMuestraSnapshotSchema = new Schema(
+  {
+    codTipoMuestra: {
+      type: String,
+      default: null,
+    },
+
+    nombreTipoMuestra: {
+      type: String,
+      default: "",
+    },
+
+    descripcionTipoMuestra: {
+      type: String,
+      default: "",
+    },
+
+    estadoTipoMuestra: {
+      type: String,
+      enum: ["ACTIVO", "INACTIVO"],
+      default: "ACTIVO",
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+// ====== Tubo / envase snapshot ======
+
+const TuboEnvaseSnapshotSchema = new Schema(
+  {
+    codTuboEnvase: {
+      type: String,
+      default: null,
+    },
+
+    nombreTuboEnvase: {
+      type: String,
+      default: "",
+    },
+
+    descripcionTuboEnvase: {
+      type: String,
+      default: "",
+    },
+
+    color: {
+      type: String,
+      default: "",
+    },
+
+    aditivo: {
+      type: String,
+      default: "",
+    },
+
+    capacidad: {
+      type: Number,
+      default: null,
+    },
+
+    unidadCapacidad: {
+      type: String,
+      default: null,
+    },
+
+    estadoTuboEnvase: {
+      type: String,
+      enum: ["ACTIVO", "INACTIVO"],
+      default: "ACTIVO",
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+// ====== Opción de muestra snapshot ======
+
+const OpcionMuestraSnapshotSchema = new Schema(
+  {
+    tipoMuestraId: {
+      type: Schema.Types.ObjectId,
+      ref: "tipoMuestraCollection",
+      required: true,
+    },
+
+    tipoMuestra: {
+      type: TipoMuestraSnapshotSchema,
+      required: true,
+    },
+
+    tuboEnvaseId: {
+      type: Schema.Types.ObjectId,
+      ref: "tuboEnvaseCollection",
+      required: true,
+    },
+
+    tuboEnvase: {
+      type: TuboEnvaseSnapshotSchema,
+      required: true,
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+// ====== Requerimiento de muestra snapshot ======
+
+const RequerimientoMuestraSnapshotSchema = new Schema(
+  {
+    descripcion: {
+      type: String,
+      default: "",
+    },
+
+    alcance: {
+      type: String,
+      enum: ["TODA_PRUEBA", "ITEMS_ESPECIFICOS"],
+      default: "TODA_PRUEBA",
+    },
+
+    opciones: {
+      type: [OpcionMuestraSnapshotSchema],
+      default: [],
+    },
+
+    itemsAsociados: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: "itemsLabCollection",
+      },
+    ],
+
+    cantidadRecipientes: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
+
+    volumenMinimo: {
+      type: Number,
+      default: null,
+      min: 0,
+    },
+
+    unidadVolumen: {
+      type: String,
+      enum: ["uL", "mL", "L"],
+      default: null,
+    },
+
+    permiteCompartirMuestra: {
+      type: Boolean,
+      default: true,
+    },
+
+    observacion: {
+      type: String,
+      default: "",
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+// ====== Validación legacy de ItemLab ======
+
+const ParamValidacionSnapshotSchema = new Schema(
+  {
+    descrValidacion: {
+      type: String,
+      default: "",
+    },
+
+    sexo: {
+      type: String,
+      default: "",
+    },
+
+    edadIndistinta: {
+      type: String,
+      default: null,
+    },
+
+    edadMin: {
+      type: String,
+      default: null,
+    },
+
+    edadMax: {
+      type: String,
+      default: null,
+    },
+
+    descRegla: {
+      type: String,
+      default: "",
+    },
+
+    valor1: {
+      type: String,
+      default: null,
+    },
+
+    valor2: {
+      type: String,
+      default: null,
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+// ====== Referencia de resultado snapshot ======
+
+const ReferenciaResultadoSnapshotSchema = new Schema(
+  {
+    descripcion: {
+      type: String,
+      default: "",
+    },
+
+    sexo: {
+      type: String,
+      enum: ["TODOS", "MASCULINO", "FEMENINO"],
+      default: "TODOS",
+    },
+
+    edadMin: {
+      type: Number,
+      default: null,
+    },
+
+    edadMax: {
+      type: Number,
+      default: null,
+    },
+
+    unidadEdad: {
+      type: String,
+      enum: ["DIAS", "MESES", "ANIOS"],
+      default: "ANIOS",
+    },
+
+    tipoReferencia: {
+      type: String,
+      enum: [
+        "RANGO",
+        "MENOR_QUE",
+        "MENOR_IGUAL_QUE",
+        "MAYOR_QUE",
+        "MAYOR_IGUAL_QUE",
+        "VALORES_PERMITIDOS",
+        "TEXTO",
+      ],
+      required: true,
+    },
+
+    valorMin: {
+      type: Number,
+      default: null,
+    },
+
+    valorMax: {
+      type: Number,
+      default: null,
+    },
+
+    valorLimite: {
+      type: Number,
+      default: null,
+    },
+
+    valoresPermitidos: {
+      type: [String],
+      default: [],
+    },
+
+    textoReferencia: {
+      type: String,
+      default: "",
+    },
+
+    activo: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+// ====== Regla de alerta snapshot ======
+
+const ReglaAlertaSnapshotSchema = new Schema(
+  {
+    descripcion: {
+      type: String,
+      default: "",
+    },
+
+    sexo: {
+      type: String,
+      enum: ["TODOS", "MASCULINO", "FEMENINO"],
+      default: "TODOS",
+    },
+
+    edadMin: {
+      type: Number,
+      default: null,
+    },
+
+    edadMax: {
+      type: Number,
+      default: null,
+    },
+
+    unidadEdad: {
+      type: String,
+      enum: ["DIAS", "MESES", "ANIOS"],
+      default: "ANIOS",
+    },
+
+    condicion: {
+      type: String,
+      enum: [
+        "MENOR_QUE",
+        "MENOR_IGUAL_QUE",
+        "MAYOR_QUE",
+        "MAYOR_IGUAL_QUE",
+        "FUERA_DE_RANGO",
+        "IGUAL_A",
+        "DISTINTO_DE",
+      ],
+      required: true,
+    },
+
+    valor1: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+
+    valor2: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+
+    nivelAlerta: {
+      type: String,
+      enum: ["INFORMATIVA", "ADVERTENCIA", "CRITICA"],
+      default: "ADVERTENCIA",
+    },
+
+    mensaje: {
+      type: String,
+      default: "",
+    },
+
+    activo: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+// ====== Snapshot ItemLab ======
+
+const ItemLabSnapshotSchema = new Schema(
+  {
+    itemLabId: {
+      type: Schema.Types.ObjectId,
+      ref: "itemsLabCollection",
+      required: true,
+    },
+
+    codItemLab: {
+      type: String,
+      default: null,
+    },
+
+    nombreInforme: {
+      type: String,
+      required: true,
+    },
+
+    nombreHojaTrabajo: {
+      type: String,
+      required: true,
+    },
+
+    metodoItemLab: {
+      type: String,
+      required: true,
+    },
+
+    valoresHojaTrabajo: {
+      type: String,
+      default: "",
+    },
+
+    valoresInforme: {
+      type: String,
+      default: "",
+    },
+
+    unidadesRef: {
+      type: String,
+      default: "",
+    },
+
+    ordenImpresion: {
+      type: Number,
+      default: 0,
+    },
+
+    poseeValidacion: {
+      type: Boolean,
+      default: false,
+    },
+
+    paramValidacion: {
+      type: [ParamValidacionSnapshotSchema],
+      default: [],
+    },
+
+    contextoAnalitico: {
+      type: String,
+      default: "",
+    },
+
+    tipoResultado: {
+      type: String,
+      enum: ["NUMERICO", "TEXTO", "CATEGORICO"],
+      default: "TEXTO",
+    },
+
+    opcionesResultado: {
+      type: [String],
+      default: [],
+    },
+
+    permiteValorNoListado: {
+      type: Boolean,
+      default: false,
+    },
+
+    estadoItem: {
+      type: String,
+      enum: ["ACTIVO", "INACTIVO"],
+      default: "ACTIVO",
+    },
+
+    referenciasResultado: {
+      type: [ReferenciaResultadoSnapshotSchema],
+      default: [],
+    },
+
+    reglasAlerta: {
+      type: [ReglaAlertaSnapshotSchema],
+      default: [],
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+// ====== Resultado transaccional del Item ======
+
+const ResultadoItemLaboratorioSchema = new Schema(
+  {
+    valor: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+
+    observacion: {
+      type: String,
+      default: "",
+    },
+
+    estado: {
+      type: String,
+      default: "PENDIENTE",
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+// ====== Item clínico de la unidad ======
+
+const ItemResultadoClinicoSchema = new Schema(
+  {
+    itemLabId: {
+      type: Schema.Types.ObjectId,
+      ref: "itemsLabCollection",
+      required: true,
+    },
+
+    ordenItem: {
+      type: Number,
+      default: 0,
+    },
+
+    mostrarItem: {
+      type: Boolean,
+      default: true,
+    },
+
+    procesamientoEfectivo: {
+      type: ProcesamientoClinicoSnapshotSchema,
+      default: null,
+    },
+
+    snapshotItem: {
+      type: ItemLabSnapshotSchema,
+      required: true,
+    },
+
+    resultado: {
+      type: ResultadoItemLaboratorioSchema,
+      default: () => ({
+        valor: null,
+        observacion: "",
+        estado: "PENDIENTE",
+      }),
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+// ====== Grupo clínico de resultados ======
+
+const GrupoResultadoClinicoSchema = new Schema(
+  {
+    nombreGrupo: {
+      type: String,
+      default: "",
+    },
+
+    ordenGrupo: {
+      type: Number,
+      default: 0,
+    },
+
+    mostrarTitulo: {
+      type: Boolean,
+      default: true,
+    },
+
+    items: {
+      type: [ItemResultadoClinicoSchema],
+      default: [],
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+// ====== Snapshot clínico de PruebaLab ======
+
+const SnapshotClinicoPruebaLabSchema = new Schema(
+  {
+    pruebaLabId: {
+      type: Schema.Types.ObjectId,
+      ref: "pruebasLabCollection",
+      required: true,
+    },
+
+    codPruebaLab: {
+      type: String,
+      required: true,
+    },
+
+    nombrePruebaLab: {
+      type: String,
+      required: true,
+    },
+
+    areaLab: {
+      type: String,
+      required: true,
+    },
+
+    condPreAnalitPaciente: {
+      type: String,
+      default: "",
+    },
+
+    condPreAnalitRefer: {
+      type: String,
+      default: "",
+    },
+
+    tiempoRespuesta: {
+      type: String,
+      default: "",
+    },
+
+    observPruebas: {
+      type: String,
+      default: null,
+    },
+
+    estadoPrueba: {
+      type: String,
+      enum: ["ACTIVO", "INACTIVO"],
+      default: "ACTIVO",
+    },
+
+    procesamientoDefault: {
+      type: ProcesamientoClinicoSnapshotSchema,
+      default: null,
+    },
+
+    requiereMuestra: {
+      type: Boolean,
+      default: true,
+    },
+
+    requerimientosMuestra: {
+      type: [RequerimientoMuestraSnapshotSchema],
+      default: [],
+    },
+
+    gruposResultado: {
+      type: [GrupoResultadoClinicoSchema],
+      default: [],
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
 // ====== Unidad clínica de laboratorio ======
 
 const UnidadLaboratorioSchema = new Schema(
@@ -205,6 +943,15 @@ const UnidadLaboratorioSchema = new Schema(
 
     etiquetaInstancia: {
       type: String,
+      default: null,
+    },
+
+    // ====== Snapshot clínico ======
+
+    snapshotClinico: {
+      type: SnapshotClinicoPruebaLabSchema,
+
+      // Compatibilidad con solicitudes creadas antes de 7B.
       default: null,
     },
 

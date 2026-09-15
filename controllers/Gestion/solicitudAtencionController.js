@@ -1146,9 +1146,7 @@ const crearSolicitudesAtencion = async ({
   uid,
   nombreUsuario,
 }) => {
-  // ==========================================
-  // VALIDAR SESIÓN
-  // ==========================================
+  // ====== Validar sesión ======
 
   if (!session) {
     throw new Error(
@@ -1156,17 +1154,13 @@ const crearSolicitudesAtencion = async ({
     );
   }
 
-  // ==========================================
-  // VALIDAR ORIGEN
-  // ==========================================
+  // ====== Validar origen ======
 
   if (!["PARTICULAR", "EMPRESA"].includes(origenAtencion)) {
     throw new Error("Origen de atención no válido");
   }
 
-  // ==========================================
-  // VALIDAR PACIENTE
-  // ==========================================
+  // ====== Validar paciente ======
 
   if (
     !paciente?.clienteId ||
@@ -1181,9 +1175,7 @@ const crearSolicitudesAtencion = async ({
     );
   }
 
-  // ==========================================
-  // VALIDAR DATOS DEL ORIGEN
-  // ==========================================
+  // ====== Validar origen particular ======
 
   if (origenAtencion === "PARTICULAR") {
     if (
@@ -1197,6 +1189,8 @@ const crearSolicitudesAtencion = async ({
       );
     }
   }
+
+  // ====== Validar origen empresa ======
 
   if (origenAtencion === "EMPRESA") {
     if (
@@ -1214,34 +1208,39 @@ const crearSolicitudesAtencion = async ({
     }
   }
 
-  // ==========================================
-  // AGRUPAR SERVICIOS
-  // ==========================================
-
-  // ====== Expandir servicios de cotización ======
+  // ====== Expandir servicios ======
 
   const serviciosExpandidos = await expandirServiciosCotizacionParaAtencion(
     servicios,
     session,
   );
 
-  // ====== Agrupar servicios individuales ======
+  // ====== Agrupar servicios ======
 
   const serviciosAgrupados = agruparServiciosPorTipo(serviciosExpandidos);
 
-  // ====== Materializar unidades laboratorio ======
+  // ====== Generar unidades laboratorio ======
 
   const serviciosLaboratorio = serviciosAgrupados.Laboratorio ?? [];
 
   const unidadesLaboratorio = generarUnidadesLaboratorio(serviciosLaboratorio);
 
+  // ====== Materializar snapshot clínico ======
+
+  const unidadesLaboratorioClinicas =
+    await materializarSnapshotClinicoLaboratorio(unidadesLaboratorio, session);
+
+  if (unidadesLaboratorioClinicas.length !== unidadesLaboratorio.length) {
+    throw new Error(
+      "No se pudo materializar correctamente todas las unidades de laboratorio",
+    );
+  }
+
   const solicitudesCreadas = [];
 
   const ahora = new Date();
 
-  // ==========================================
-  // CREAR UNA SOLICITUD POR TIPO
-  // ==========================================
+  // ====== Crear una solicitud por tipo ======
 
   for (const [tipo, serviciosTipo] of Object.entries(serviciosAgrupados)) {
     const codSolicitud = await generarCodigoSolicitud(session);
@@ -1250,6 +1249,9 @@ const crearSolicitudesAtencion = async ({
       codSolicitud,
       origenAtencion,
       tipo,
+
+      // ====== Servicios ======
+
       servicios: serviciosTipo.map((servicio) => ({
         servicioId: servicio.servicioId,
 
@@ -1257,7 +1259,7 @@ const crearSolicitudesAtencion = async ({
 
         nombreServicio: servicio.nombreServicio,
 
-        // ====== Trazabilidad transaccional ======
+        // ====== Trazabilidad ======
 
         lineaCotizacion: servicio.lineaCotizacion,
 
@@ -1272,86 +1274,95 @@ const crearSolicitudesAtencion = async ({
 
         estado: "PENDIENTE",
 
-        // ====== Profesional seleccionado ======
+        // ====== Profesional ======
 
         ...(servicio.medicoAtiende?.medicoId && {
           medicoAtiende: servicio.medicoAtiende,
         }),
       })),
 
-      // ======================================
-      // PACIENTE
-      // ======================================
+      // ====== Paciente ======
 
       hc: paciente.hc,
+
       clienteId: paciente.clienteId,
+
       tipoDoc: paciente.tipoDoc,
+
       nroDoc: paciente.nroDoc,
+
       nombreCliente: paciente.nombreCliente,
+
       apePatCliente: paciente.apePatCliente,
+
       apeMatCliente: paciente.apeMatCliente || "",
 
-      // ======================================
-      // SOLICITUD
-      // ======================================
+      // ====== Solicitud ======
 
       fechaEmision: ahora,
+
       estado: "GENERADO",
 
-      // ======================================
-      // AUDITORÍA
-      // ======================================
+      // ====== Auditoría ======
 
       createdBy: uid,
+
       usuarioRegistro: nombreUsuario,
+
       fechaRegistro: ahora,
     };
 
     // ====== Unidades clínicas de laboratorio ======
 
     if (tipo === "Laboratorio") {
-      datosSolicitud.unidadesLaboratorio = unidadesLaboratorio.map(
+      datosSolicitud.unidadesLaboratorio = unidadesLaboratorioClinicas.map(
         (unidad) => ({
           ...unidad,
+
           estado: "PENDIENTE",
         }),
       );
     }
 
-    // ==========================================
-    // ORIGEN PARTICULAR
-    // ==========================================
+    // ====== Origen particular ======
 
     if (origenAtencion === "PARTICULAR") {
       Object.assign(datosSolicitud, {
         pagoId: datosOrigen.pagoId,
+
         codPago: datosOrigen.codPago,
+
         cotizacionId: datosOrigen.cotizacionId,
+
         codCotizacion: datosOrigen.codCotizacion,
+
         fechaCotizacion: datosOrigen.fechaCotizacion,
+
         solicitanteId: datosOrigen.solicitanteId || null,
       });
     }
 
-    // ==========================================
-    // ORIGEN EMPRESA
-    // ==========================================
+    // ====== Origen empresa ======
 
     if (origenAtencion === "EMPRESA") {
       Object.assign(datosSolicitud, {
         programacionEmpresaId: datosOrigen.programacionEmpresaId,
+
         codProgramacion: datosOrigen.codProgramacion,
+
         empresaId: datosOrigen.empresaId,
+
         razonSocialEmpresa: datosOrigen.razonSocialEmpresa,
+
         protocoloId: datosOrigen.protocoloId,
+
         codProtocolo: datosOrigen.codProtocolo,
+
         nombreProtocolo: datosOrigen.nombreProtocolo,
       });
     }
 
-    // ==========================================
-    // GUARDAR SOLICITUD
-    // ==========================================
+    // ====== Guardar solicitud ======
 
     const nuevaSolicitud = new SolicitudAtencion(datosSolicitud);
 
