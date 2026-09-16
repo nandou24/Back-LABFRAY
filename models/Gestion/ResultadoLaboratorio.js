@@ -425,6 +425,37 @@ const ResultadoLaboratorioSchema = new Schema(
       default: null,
     },
 
+    // ====== Anulación ======
+
+    estadoPrevioAnulacion: {
+      type: String,
+      enum: ["PENDIENTE", "EN PROCESO", "COMPLETO", "VALIDADO", "LIBERADO"],
+      default: null,
+    },
+
+    anuladoPor: {
+      type: String,
+      default: null,
+    },
+
+    usuarioAnulacion: {
+      type: String,
+      default: null,
+    },
+
+    fechaAnulacion: {
+      type: Date,
+      default: null,
+    },
+
+    motivoAnulacion: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    // ====== Auditoría ======
+
     // ====== Auditoría ======
 
     createdBy: {

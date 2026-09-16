@@ -971,6 +971,14 @@ const UnidadLaboratorioSchema = new Schema(
 const SolicitudAtencionSchema = new Schema(
   {
     codSolicitud: { type: String, required: true, unique: true, trim: true },
+    // ====== Identificación de laboratorio ======
+
+    codigoLaboratorio: {
+      type: String,
+      default: null,
+      trim: true,
+      index: true,
+    },
     origenAtencion: {
       type: String,
       required: true,
@@ -1160,6 +1168,22 @@ const SolicitudAtencionSchema = new Schema(
   },
   {
     timestamps: true,
+  },
+);
+
+// ====== Índice código laboratorio ======
+
+SolicitudAtencionSchema.index(
+  {
+    codigoLaboratorio: 1,
+  },
+  {
+    unique: true,
+    partialFilterExpression: {
+      codigoLaboratorio: {
+        $type: "string",
+      },
+    },
   },
 );
 

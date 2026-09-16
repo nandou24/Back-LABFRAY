@@ -150,6 +150,12 @@ app.use(
   require("./routes/Gestion/resultadoLaboratorioRoute"),
 );
 
+//! Muestra de Laboratorio
+app.use(
+  "/api/muestraLaboratorio",
+  require("./routes/Gestion/muestraLaboratorioRoute"),
+);
+
 //!Levantar el servidor
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {

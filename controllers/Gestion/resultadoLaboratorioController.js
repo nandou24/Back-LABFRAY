@@ -782,6 +782,199 @@ const evaluarReferenciaResultado = ({ solicitud, snapshotItem, valor }) => {
   };
 };
 
+// ====== Obtener reglas de alerta aplicables ======
+
+const obtenerReglasAlertaAplicables = ({ solicitud, snapshotItem }) => {
+  const reglas = Array.isArray(snapshotItem.reglasAlerta)
+    ? snapshotItem.reglasAlerta.filter((regla) => regla.activo !== false)
+    : [];
+
+  if (reglas.length === 0) {
+    return [];
+  }
+
+  const sexoPaciente = normalizarSexoClinico(solicitud.sexoPaciente);
+
+  const fechaNacimientoPaciente = solicitud.fechaNacimientoPaciente ?? null;
+
+  const fechaReferencia = solicitud.fechaEmision;
+
+  // ====== Filtrar por contexto demográfico ======
+
+  return reglas.filter((regla) =>
+    referenciaAplicaPaciente({
+      referencia: regla,
+      sexoPaciente,
+      fechaNacimientoPaciente,
+      fechaReferencia,
+    }),
+  );
+};
+
+// ====== Normalizar texto para comparación ======
+
+const normalizarTextoComparacion = (valor) =>
+  String(valor ?? "")
+    .trim()
+    .toUpperCase();
+
+// ====== Evaluar condición de alerta ======
+
+const cumpleCondicionAlerta = ({ valor, tipoResultado, regla }) => {
+  const condicion = regla.condicion;
+
+  if (!condicion) {
+    throw new Error("Existe una regla de alerta sin condición configurada");
+  }
+
+  const condicionesNumericas = [
+    "MENOR_QUE",
+    "MENOR_IGUAL_QUE",
+    "MAYOR_QUE",
+    "MAYOR_IGUAL_QUE",
+    "FUERA_DE_RANGO",
+  ];
+
+  // ====== Condiciones numéricas ======
+
+  if (condicionesNumericas.includes(condicion)) {
+    if (tipoResultado !== "NUMERICO") {
+      throw new Error(
+        `La regla de alerta ${regla.descripcion || condicion} requiere un resultado NUMERICO`,
+      );
+    }
+
+    const valorNumerico = Number(valor);
+
+    if (!Number.isFinite(valorNumerico)) {
+      throw new Error(
+        "No se puede evaluar una alerta numérica con un resultado no numérico",
+      );
+    }
+
+    const valor1 = Number(regla.valor1);
+
+    if (!Number.isFinite(valor1)) {
+      throw new Error(
+        `La regla de alerta ${regla.descripcion || condicion} no posee un valor1 numérico válido`,
+      );
+    }
+
+    if (condicion === "MENOR_QUE") {
+      return valorNumerico < valor1;
+    }
+
+    if (condicion === "MENOR_IGUAL_QUE") {
+      return valorNumerico <= valor1;
+    }
+
+    if (condicion === "MAYOR_QUE") {
+      return valorNumerico > valor1;
+    }
+
+    if (condicion === "MAYOR_IGUAL_QUE") {
+      return valorNumerico >= valor1;
+    }
+
+    // ====== Fuera de rango ======
+
+    const valor2 = Number(regla.valor2);
+
+    if (!Number.isFinite(valor2)) {
+      throw new Error(
+        `La regla de alerta ${regla.descripcion || condicion} no posee un valor2 numérico válido`,
+      );
+    }
+
+    if (valor1 > valor2) {
+      throw new Error(
+        `La regla de alerta ${regla.descripcion || condicion} posee un rango inválido`,
+      );
+    }
+
+    return valorNumerico < valor1 || valorNumerico > valor2;
+  }
+
+  // ====== Igual o distinto ======
+
+  if (condicion === "IGUAL_A" || condicion === "DISTINTO_DE") {
+    let sonIguales;
+
+    if (tipoResultado === "NUMERICO") {
+      const valorNumerico = Number(valor);
+      const valorRegla = Number(regla.valor1);
+
+      if (!Number.isFinite(valorNumerico) || !Number.isFinite(valorRegla)) {
+        throw new Error(
+          `La regla de alerta ${regla.descripcion || condicion} no posee un valor numérico válido`,
+        );
+      }
+
+      sonIguales = valorNumerico === valorRegla;
+    } else {
+      sonIguales =
+        normalizarTextoComparacion(valor) ===
+        normalizarTextoComparacion(regla.valor1);
+    }
+
+    return condicion === "IGUAL_A" ? sonIguales : !sonIguales;
+  }
+
+  throw new Error(`Condición de alerta no soportada: ${condicion}`);
+};
+
+// ====== Detectar alertas del resultado ======
+
+const detectarAlertasResultado = ({
+  solicitud,
+  snapshotItem,
+  valor,
+  fechaDeteccion,
+}) => {
+  const reglas = obtenerReglasAlertaAplicables({
+    solicitud,
+    snapshotItem,
+  });
+
+  if (reglas.length === 0) {
+    return [];
+  }
+
+  const alertasDetectadas = [];
+
+  // ====== Evaluar todas las reglas ======
+
+  for (const regla of reglas) {
+    const detectada = cumpleCondicionAlerta({
+      valor,
+      tipoResultado: snapshotItem.tipoResultado,
+      regla,
+    });
+
+    if (!detectada) {
+      continue;
+    }
+
+    alertasDetectadas.push({
+      descripcion: regla.descripcion ?? "",
+
+      condicion: regla.condicion,
+
+      valor1: regla.valor1 ?? null,
+
+      valor2: regla.valor2 ?? null,
+
+      nivelAlerta: regla.nivelAlerta ?? "ADVERTENCIA",
+
+      mensaje: regla.mensaje ?? "",
+
+      fechaDeteccion: fechaDeteccion ?? new Date(),
+    });
+  }
+
+  return alertasDetectadas;
+};
+
 // ====== Registrar o editar resultado de Item ======
 
 const registrarEditarResultadoItem = async (req, res = response) => {
@@ -938,9 +1131,14 @@ const registrarEditarResultadoItem = async (req, res = response) => {
 
     resultadoItem.evaluacionReferencia = evaluacionReferencia;
 
-    // ====== Reiniciar alertas ======
+    // ====== Detectar alertas ======
 
-    resultadoItem.alertasDetectadas = [];
+    resultadoItem.alertasDetectadas = detectarAlertasResultado({
+      solicitud,
+      snapshotItem,
+      valor: valorNormalizado,
+      fechaDeteccion: ahora,
+    });
 
     // ====== Recalcular estado general ======
 
@@ -1182,9 +1380,14 @@ const registrarResultadosMasivos = async (req, res = response) => {
 
       resultadoItem.evaluacionReferencia = evaluacionReferencia;
 
-      // ====== Reiniciar alertas ======
+      // ====== Detectar alertas ======
 
-      resultadoItem.alertasDetectadas = [];
+      resultadoItem.alertasDetectadas = detectarAlertasResultado({
+        solicitud,
+        snapshotItem,
+        valor: valorNormalizado,
+        fechaDeteccion: ahora,
+      });
 
       itemsActualizados.push(resultadoItem);
     }
@@ -1243,6 +1446,828 @@ const registrarResultadosMasivos = async (req, res = response) => {
     });
   } finally {
     await session.endSession();
+  }
+};
+
+// ====== Validar resultado de laboratorio ======
+
+const validarResultadoLaboratorio = async (req, res = response) => {
+  const session = await mongoose.startSession();
+
+  session.startTransaction();
+
+  try {
+    const { resultadoLaboratorioId } = req.params;
+
+    const { uid, nombreUsuario } = req.user;
+
+    const observacionValidacion = req.body?.observacionValidacion;
+
+    // ====== Validar id ======
+
+    if (!mongoose.Types.ObjectId.isValid(resultadoLaboratorioId)) {
+      throw new Error("El id del resultado de laboratorio no es válido");
+    }
+
+    // ====== Validar observación ======
+
+    if (
+      observacionValidacion !== undefined &&
+      typeof observacionValidacion !== "string"
+    ) {
+      throw new Error("La observación de validación debe ser un texto");
+    }
+
+    // ====== Obtener resultado ======
+
+    const resultadoLaboratorio = await ResultadoLaboratorio.findById(
+      resultadoLaboratorioId,
+    ).session(session);
+
+    if (!resultadoLaboratorio) {
+      throw new Error("El resultado de laboratorio no existe");
+    }
+
+    // ====== Validar estado general ======
+
+    if (resultadoLaboratorio.estadoResultado !== "COMPLETO") {
+      throw new Error(
+        `Solo se puede validar un resultado en estado COMPLETO. Estado actual: ${resultadoLaboratorio.estadoResultado}`,
+      );
+    }
+
+    // ====== Validar Items ======
+
+    const items = Array.isArray(resultadoLaboratorio.resultadosItems)
+      ? resultadoLaboratorio.resultadosItems
+      : [];
+
+    if (items.length === 0) {
+      throw new Error("El resultado no contiene Items para validar");
+    }
+
+    // ====== Validar registro completo ======
+
+    const itemsNoRegistrados = items.filter(
+      (item) => item.estado !== "REGISTRADO",
+    );
+
+    if (itemsNoRegistrados.length > 0) {
+      const nombres = itemsNoRegistrados
+        .map((item) => item.nombreInforme)
+        .join(", ");
+
+      throw new Error(
+        `Existen Items que no se encuentran REGISTRADOS: ${nombres}`,
+      );
+    }
+
+    // ====== Validar evaluación clínica ======
+
+    const itemsEvaluacionPendiente = items.filter(
+      (item) =>
+        !item.evaluacionReferencia ||
+        item.evaluacionReferencia.estado === "PENDIENTE",
+    );
+
+    if (itemsEvaluacionPendiente.length > 0) {
+      const nombres = itemsEvaluacionPendiente
+        .map((item) => item.nombreInforme)
+        .join(", ");
+
+      throw new Error(
+        `Existen Items con evaluación clínica pendiente: ${nombres}`,
+      );
+    }
+
+    // ====== Obtener solicitud original ======
+
+    const solicitud = await SolicitudAtencion.findById(
+      resultadoLaboratorio.solicitudAtencionId,
+    ).session(session);
+
+    if (!solicitud) {
+      throw new Error("La solicitud de atención asociada no existe");
+    }
+
+    if (solicitud.tipo !== "Laboratorio") {
+      throw new Error("La solicitud asociada no corresponde a Laboratorio");
+    }
+
+    if (solicitud.estado === "ANULADO") {
+      throw new Error(
+        "No se puede validar un resultado de una solicitud anulada",
+      );
+    }
+
+    const ahora = new Date();
+
+    // ====== Validar Items ======
+
+    for (const item of items) {
+      item.estado = "VALIDADO";
+    }
+
+    // ====== Validar resultado general ======
+
+    resultadoLaboratorio.estadoResultado = "VALIDADO";
+
+    resultadoLaboratorio.validadoPor = uid;
+
+    resultadoLaboratorio.usuarioValidacion = nombreUsuario ?? null;
+
+    resultadoLaboratorio.fechaValidacion = ahora;
+
+    resultadoLaboratorio.observacionValidacion =
+      typeof observacionValidacion === "string"
+        ? observacionValidacion.trim()
+        : "";
+
+    // ====== Auditoría ======
+
+    resultadoLaboratorio.updatedBy = uid;
+
+    resultadoLaboratorio.usuarioActualizacion = nombreUsuario ?? null;
+
+    resultadoLaboratorio.fechaActualizacion = ahora;
+
+    // ====== Resumen de alertas ======
+
+    const alertasDetectadas = items.flatMap((item) =>
+      Array.isArray(item.alertasDetectadas) ? item.alertasDetectadas : [],
+    );
+
+    const resumenAlertas = {
+      total: alertasDetectadas.length,
+
+      informativas: alertasDetectadas.filter(
+        (alerta) => alerta.nivelAlerta === "INFORMATIVA",
+      ).length,
+
+      advertencias: alertasDetectadas.filter(
+        (alerta) => alerta.nivelAlerta === "ADVERTENCIA",
+      ).length,
+
+      criticas: alertasDetectadas.filter(
+        (alerta) => alerta.nivelAlerta === "CRITICA",
+      ).length,
+    };
+
+    // ====== Guardar ======
+
+    await resultadoLaboratorio.save({
+      session,
+    });
+
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      ok: true,
+
+      msg:
+        resumenAlertas.criticas > 0
+          ? "Resultado validado correctamente. Existen alertas críticas detectadas"
+          : "Resultado de laboratorio validado correctamente",
+
+      estadoResultado: resultadoLaboratorio.estadoResultado,
+
+      resumenAlertas,
+
+      resultado: resultadoLaboratorio,
+    });
+  } catch (error) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    console.error("Error al validar resultado de laboratorio:", error);
+
+    return res.status(400).json({
+      ok: false,
+
+      msg: error.message || "No se pudo validar el resultado de laboratorio",
+    });
+  } finally {
+    await session.endSession();
+  }
+};
+
+// ====== Liberar resultado de laboratorio ======
+
+const liberarResultadoLaboratorio = async (req, res = response) => {
+  const session = await mongoose.startSession();
+
+  session.startTransaction();
+
+  try {
+    const { resultadoLaboratorioId } = req.params;
+
+    const { uid, nombreUsuario } = req.user;
+
+    // ====== Validar id ======
+
+    if (!mongoose.Types.ObjectId.isValid(resultadoLaboratorioId)) {
+      throw new Error("El id del resultado de laboratorio no es válido");
+    }
+
+    // ====== Obtener resultado ======
+
+    const resultadoLaboratorio = await ResultadoLaboratorio.findById(
+      resultadoLaboratorioId,
+    ).session(session);
+
+    if (!resultadoLaboratorio) {
+      throw new Error("El resultado de laboratorio no existe");
+    }
+
+    // ====== Validar estado general ======
+
+    if (resultadoLaboratorio.estadoResultado !== "VALIDADO") {
+      throw new Error(
+        `Solo se puede liberar un resultado en estado VALIDADO. Estado actual: ${resultadoLaboratorio.estadoResultado}`,
+      );
+    }
+
+    // ====== Validar Items ======
+
+    const items = Array.isArray(resultadoLaboratorio.resultadosItems)
+      ? resultadoLaboratorio.resultadosItems
+      : [];
+
+    if (items.length === 0) {
+      throw new Error("El resultado no contiene Items para liberar");
+    }
+
+    const itemsNoValidados = items.filter((item) => item.estado !== "VALIDADO");
+
+    if (itemsNoValidados.length > 0) {
+      const nombres = itemsNoValidados
+        .map((item) => item.nombreInforme)
+        .join(", ");
+
+      throw new Error(
+        `Existen Items que no se encuentran VALIDADOS: ${nombres}`,
+      );
+    }
+
+    // ====== Validar trazabilidad de validación ======
+
+    if (
+      !resultadoLaboratorio.validadoPor ||
+      !resultadoLaboratorio.fechaValidacion
+    ) {
+      throw new Error(
+        "El resultado no posee trazabilidad de validación completa",
+      );
+    }
+
+    // ====== Obtener solicitud original ======
+
+    const solicitud = await SolicitudAtencion.findById(
+      resultadoLaboratorio.solicitudAtencionId,
+    ).session(session);
+
+    if (!solicitud) {
+      throw new Error("La solicitud de atención asociada no existe");
+    }
+
+    if (solicitud.tipo !== "Laboratorio") {
+      throw new Error("La solicitud asociada no corresponde a Laboratorio");
+    }
+
+    if (solicitud.estado === "ANULADO") {
+      throw new Error(
+        "No se puede liberar un resultado de una solicitud anulada",
+      );
+    }
+
+    const ahora = new Date();
+
+    // ====== Liberar resultado ======
+
+    resultadoLaboratorio.estadoResultado = "LIBERADO";
+
+    resultadoLaboratorio.liberadoPor = uid;
+
+    resultadoLaboratorio.usuarioLiberacion = nombreUsuario ?? null;
+
+    resultadoLaboratorio.fechaLiberacion = ahora;
+
+    // ====== Auditoría ======
+
+    resultadoLaboratorio.updatedBy = uid;
+
+    resultadoLaboratorio.usuarioActualizacion = nombreUsuario ?? null;
+
+    resultadoLaboratorio.fechaActualizacion = ahora;
+
+    // ====== Resumen de alertas ======
+
+    const alertasDetectadas = items.flatMap((item) =>
+      Array.isArray(item.alertasDetectadas) ? item.alertasDetectadas : [],
+    );
+
+    const resumenAlertas = {
+      total: alertasDetectadas.length,
+
+      informativas: alertasDetectadas.filter(
+        (alerta) => alerta.nivelAlerta === "INFORMATIVA",
+      ).length,
+
+      advertencias: alertasDetectadas.filter(
+        (alerta) => alerta.nivelAlerta === "ADVERTENCIA",
+      ).length,
+
+      criticas: alertasDetectadas.filter(
+        (alerta) => alerta.nivelAlerta === "CRITICA",
+      ).length,
+    };
+
+    // ====== Guardar ======
+
+    await resultadoLaboratorio.save({
+      session,
+    });
+
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      ok: true,
+
+      msg:
+        resumenAlertas.criticas > 0
+          ? "Resultado liberado correctamente. Existen alertas críticas detectadas"
+          : "Resultado de laboratorio liberado correctamente",
+
+      estadoResultado: resultadoLaboratorio.estadoResultado,
+
+      resumenAlertas,
+
+      resultado: resultadoLaboratorio,
+    });
+  } catch (error) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    console.error("Error al liberar resultado de laboratorio:", error);
+
+    return res.status(400).json({
+      ok: false,
+
+      msg: error.message || "No se pudo liberar el resultado de laboratorio",
+    });
+  } finally {
+    await session.endSession();
+  }
+};
+
+// ====== Anular resultado de laboratorio ======
+
+const anularResultadoLaboratorio = async (req, res = response) => {
+  const session = await mongoose.startSession();
+
+  session.startTransaction();
+
+  try {
+    const { resultadoLaboratorioId } = req.params;
+
+    const { uid, nombreUsuario } = req.user;
+
+    const { motivoAnulacion } = req.body;
+
+    // ====== Validar id ======
+
+    if (!mongoose.Types.ObjectId.isValid(resultadoLaboratorioId)) {
+      throw new Error("El id del resultado de laboratorio no es válido");
+    }
+
+    // ====== Validar motivo ======
+
+    if (typeof motivoAnulacion !== "string" || !motivoAnulacion.trim()) {
+      throw new Error("El motivo de anulación es obligatorio");
+    }
+
+    // ====== Obtener resultado ======
+
+    const resultadoLaboratorio = await ResultadoLaboratorio.findById(
+      resultadoLaboratorioId,
+    ).session(session);
+
+    if (!resultadoLaboratorio) {
+      throw new Error("El resultado de laboratorio no existe");
+    }
+
+    // ====== Validar estado actual ======
+
+    if (resultadoLaboratorio.estadoResultado === "ANULADO") {
+      throw new Error("El resultado de laboratorio ya se encuentra ANULADO");
+    }
+
+    const estadosPermitidos = [
+      "PENDIENTE",
+      "EN PROCESO",
+      "COMPLETO",
+      "VALIDADO",
+      "LIBERADO",
+    ];
+
+    if (!estadosPermitidos.includes(resultadoLaboratorio.estadoResultado)) {
+      throw new Error(
+        `No se puede anular un resultado en estado ${resultadoLaboratorio.estadoResultado}`,
+      );
+    }
+
+    // ====== Obtener solicitud original ======
+
+    const solicitud = await SolicitudAtencion.findById(
+      resultadoLaboratorio.solicitudAtencionId,
+    ).session(session);
+
+    if (!solicitud) {
+      throw new Error("La solicitud de atención asociada no existe");
+    }
+
+    if (solicitud.tipo !== "Laboratorio") {
+      throw new Error("La solicitud asociada no corresponde a Laboratorio");
+    }
+
+    const ahora = new Date();
+
+    // ====== Conservar estado previo ======
+
+    resultadoLaboratorio.estadoPrevioAnulacion =
+      resultadoLaboratorio.estadoResultado;
+
+    // ====== Anular resultado ======
+
+    resultadoLaboratorio.estadoResultado = "ANULADO";
+
+    resultadoLaboratorio.anuladoPor = uid;
+
+    resultadoLaboratorio.usuarioAnulacion = nombreUsuario ?? null;
+
+    resultadoLaboratorio.fechaAnulacion = ahora;
+
+    resultadoLaboratorio.motivoAnulacion = motivoAnulacion.trim();
+
+    // ====== Auditoría ======
+
+    resultadoLaboratorio.updatedBy = uid;
+
+    resultadoLaboratorio.usuarioActualizacion = nombreUsuario ?? null;
+
+    resultadoLaboratorio.fechaActualizacion = ahora;
+
+    // ====== Guardar ======
+
+    await resultadoLaboratorio.save({
+      session,
+    });
+
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      ok: true,
+
+      msg: "Resultado de laboratorio anulado correctamente",
+
+      estadoPrevioAnulacion: resultadoLaboratorio.estadoPrevioAnulacion,
+
+      estadoResultado: resultadoLaboratorio.estadoResultado,
+
+      motivoAnulacion: resultadoLaboratorio.motivoAnulacion,
+
+      resultado: resultadoLaboratorio,
+    });
+  } catch (error) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    console.error("Error al anular resultado de laboratorio:", error);
+
+    return res.status(400).json({
+      ok: false,
+
+      msg: error.message || "No se pudo anular el resultado de laboratorio",
+    });
+  } finally {
+    await session.endSession();
+  }
+};
+
+// ====== Obtener resultados por solicitud ======
+
+const obtenerResultadosPorSolicitud = async (req, res = response) => {
+  try {
+    const { solicitudAtencionId } = req.params;
+
+    // ====== Validar id ======
+
+    if (!mongoose.Types.ObjectId.isValid(solicitudAtencionId)) {
+      throw new Error("El id de la solicitud de atención no es válido");
+    }
+
+    // ====== Obtener solicitud ======
+
+    const solicitud = await SolicitudAtencion.findById(solicitudAtencionId)
+      .select("_id codSolicitud tipo estado")
+      .lean();
+
+    if (!solicitud) {
+      throw new Error("La solicitud de atención no existe");
+    }
+
+    if (solicitud.tipo !== "Laboratorio") {
+      throw new Error("La solicitud indicada no corresponde a Laboratorio");
+    }
+
+    // ====== Obtener resultados ======
+
+    const resultados = await ResultadoLaboratorio.find({
+      solicitudAtencionId: solicitud._id,
+    })
+      .sort({
+        numeroInstancia: 1,
+        createdAt: 1,
+      })
+      .lean();
+
+    // ====== Construir resumen ======
+
+    const resumen = {
+      total: resultados.length,
+
+      pendientes: resultados.filter(
+        (resultado) => resultado.estadoResultado === "PENDIENTE",
+      ).length,
+
+      enProceso: resultados.filter(
+        (resultado) => resultado.estadoResultado === "EN PROCESO",
+      ).length,
+
+      completos: resultados.filter(
+        (resultado) => resultado.estadoResultado === "COMPLETO",
+      ).length,
+
+      validados: resultados.filter(
+        (resultado) => resultado.estadoResultado === "VALIDADO",
+      ).length,
+
+      liberados: resultados.filter(
+        (resultado) => resultado.estadoResultado === "LIBERADO",
+      ).length,
+
+      anulados: resultados.filter(
+        (resultado) => resultado.estadoResultado === "ANULADO",
+      ).length,
+    };
+
+    // ====== Respuesta ======
+
+    return res.status(200).json({
+      ok: true,
+
+      msg:
+        resultados.length > 0
+          ? "Resultados de laboratorio obtenidos correctamente"
+          : "La solicitud aún no posee resultados de laboratorio inicializados",
+
+      solicitudAtencionId: solicitud._id,
+
+      codSolicitud: solicitud.codSolicitud,
+
+      estadoSolicitud: solicitud.estado,
+
+      resumen,
+
+      resultados,
+    });
+  } catch (error) {
+    console.error(
+      "Error al obtener resultados de laboratorio por solicitud:",
+      error,
+    );
+
+    return res.status(400).json({
+      ok: false,
+
+      msg:
+        error.message || "No se pudieron obtener los resultados de laboratorio",
+    });
+  }
+};
+
+// ====== Obtener resultado por id ======
+
+const obtenerResultadoPorId = async (req, res = response) => {
+  try {
+    const { resultadoLaboratorioId } = req.params;
+
+    // ====== Validar id ======
+
+    if (!mongoose.Types.ObjectId.isValid(resultadoLaboratorioId)) {
+      throw new Error("El id del resultado de laboratorio no es válido");
+    }
+
+    // ====== Obtener resultado ======
+
+    const resultado = await ResultadoLaboratorio.findById(
+      resultadoLaboratorioId,
+    ).lean();
+
+    if (!resultado) {
+      throw new Error("El resultado de laboratorio no existe");
+    }
+
+    // ====== Resumen de alertas ======
+
+    const items = Array.isArray(resultado.resultadosItems)
+      ? resultado.resultadosItems
+      : [];
+
+    const alertasDetectadas = items.flatMap((item) =>
+      Array.isArray(item.alertasDetectadas) ? item.alertasDetectadas : [],
+    );
+
+    const resumenAlertas = {
+      total: alertasDetectadas.length,
+
+      informativas: alertasDetectadas.filter(
+        (alerta) => alerta.nivelAlerta === "INFORMATIVA",
+      ).length,
+
+      advertencias: alertasDetectadas.filter(
+        (alerta) => alerta.nivelAlerta === "ADVERTENCIA",
+      ).length,
+
+      criticas: alertasDetectadas.filter(
+        (alerta) => alerta.nivelAlerta === "CRITICA",
+      ).length,
+    };
+
+    // ====== Respuesta ======
+
+    return res.status(200).json({
+      ok: true,
+
+      msg: "Resultado de laboratorio obtenido correctamente",
+
+      resumenAlertas,
+
+      resultado,
+    });
+  } catch (error) {
+    console.error("Error al obtener resultado de laboratorio:", error);
+
+    return res.status(400).json({
+      ok: false,
+
+      msg: error.message || "No se pudo obtener el resultado de laboratorio",
+    });
+  }
+};
+
+// ====== Obtener resultados liberados por solicitud ======
+
+const obtenerResultadosLiberadosPorSolicitud = async (req, res = response) => {
+  try {
+    const { solicitudAtencionId } = req.params;
+
+    // ====== Validar id ======
+
+    if (!mongoose.Types.ObjectId.isValid(solicitudAtencionId)) {
+      throw new Error("El id de la solicitud de atención no es válido");
+    }
+
+    // ====== Obtener solicitud ======
+
+    const solicitud = await SolicitudAtencion.findById(solicitudAtencionId)
+      .select(
+        [
+          "_id",
+          "codSolicitud",
+          "tipo",
+          "estado",
+          "fechaEmision",
+          "hc",
+          "clienteId",
+          "tipoDoc",
+          "nroDoc",
+          "nombreCliente",
+          "apePatCliente",
+          "apeMatCliente",
+          "sexoPaciente",
+          "fechaNacimientoPaciente",
+        ].join(" "),
+      )
+      .lean();
+
+    if (!solicitud) {
+      throw new Error("La solicitud de atención no existe");
+    }
+
+    if (solicitud.tipo !== "Laboratorio") {
+      throw new Error("La solicitud indicada no corresponde a Laboratorio");
+    }
+
+    // ====== Obtener resultados liberados ======
+
+    const resultados = await ResultadoLaboratorio.find({
+      solicitudAtencionId: solicitud._id,
+      estadoResultado: "LIBERADO",
+    })
+      .sort({
+        numeroInstancia: 1,
+        createdAt: 1,
+      })
+      .lean();
+
+    // ====== Construir resumen ======
+
+    const alertas = resultados.flatMap((resultado) => {
+      const items = Array.isArray(resultado.resultadosItems)
+        ? resultado.resultadosItems
+        : [];
+
+      return items.flatMap((item) =>
+        Array.isArray(item.alertasDetectadas) ? item.alertasDetectadas : [],
+      );
+    });
+
+    const resumen = {
+      totalLiberados: resultados.length,
+
+      totalAlertas: alertas.length,
+
+      informativas: alertas.filter(
+        (alerta) => alerta.nivelAlerta === "INFORMATIVA",
+      ).length,
+
+      advertencias: alertas.filter(
+        (alerta) => alerta.nivelAlerta === "ADVERTENCIA",
+      ).length,
+
+      criticas: alertas.filter((alerta) => alerta.nivelAlerta === "CRITICA")
+        .length,
+    };
+
+    // ====== Respuesta ======
+
+    return res.status(200).json({
+      ok: true,
+
+      msg:
+        resultados.length > 0
+          ? "Resultados liberados obtenidos correctamente"
+          : "La solicitud no posee resultados liberados",
+
+      solicitud: {
+        _id: solicitud._id,
+
+        codSolicitud: solicitud.codSolicitud,
+
+        estado: solicitud.estado,
+
+        fechaEmision: solicitud.fechaEmision,
+
+        paciente: {
+          hc: solicitud.hc,
+
+          clienteId: solicitud.clienteId,
+
+          tipoDoc: solicitud.tipoDoc,
+
+          nroDoc: solicitud.nroDoc,
+
+          nombreCliente: solicitud.nombreCliente,
+
+          apePatCliente: solicitud.apePatCliente,
+
+          apeMatCliente: solicitud.apeMatCliente,
+
+          sexoPaciente: solicitud.sexoPaciente,
+
+          fechaNacimientoPaciente: solicitud.fechaNacimientoPaciente,
+        },
+      },
+
+      resumen,
+
+      resultados,
+    });
+  } catch (error) {
+    console.error(
+      "Error al obtener resultados liberados de laboratorio:",
+      error,
+    );
+
+    return res.status(400).json({
+      ok: false,
+
+      msg: error.message || "No se pudieron obtener los resultados liberados",
+    });
   }
 };
 
@@ -1394,4 +2419,10 @@ module.exports = {
   inicializarResultadosSolicitud,
   registrarEditarResultadoItem,
   registrarResultadosMasivos,
+  validarResultadoLaboratorio,
+  liberarResultadoLaboratorio,
+  anularResultadoLaboratorio,
+  obtenerResultadosPorSolicitud,
+  obtenerResultadoPorId,
+  obtenerResultadosLiberadosPorSolicitud,
 };

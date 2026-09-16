@@ -4,6 +4,7 @@ const ProgramacionPacienteEmpresa = require("../../models/Gestion/programacionPa
 const Servicio = require("../../models/Mantenimiento/Servicio");
 const PruebaLab = require("../../models/Mantenimiento/PruebaLab");
 const Paciente = require("../../models/Mantenimiento/Paciente");
+const CorrelativoLaboratorio = require("../../models/Gestion/CorrelativoLaboratorio");
 // ====== Registrar maestros de muestra ======
 require("../../models/Mantenimiento/TipoMuestra");
 require("../../models/Mantenimiento/TuboEnvase");
@@ -43,6 +44,47 @@ async function generarCodigoSolicitud(session) {
 
   const codigo = `${prefijo}${consecutivo.toString().padStart(4, "0")}`;
   return codigo;
+}
+
+// ====== Generar código mensual de laboratorio ======
+
+async function generarCodigoLaboratorio(session, fecha = new Date()) {
+  if (!session) {
+    throw new Error(
+      "Se requiere una sesión de MongoDB para generar el código de laboratorio",
+    );
+  }
+
+  const anioCompleto = fecha.getFullYear().toString();
+
+  const anioCorto = anioCompleto.slice(-2);
+
+  const mes = (fecha.getMonth() + 1).toString().padStart(2, "0");
+
+  const periodo = `${anioCompleto}${mes}`;
+
+  // ====== Incrementar correlativo ======
+
+  const correlativo = await CorrelativoLaboratorio.findOneAndUpdate(
+    {
+      _id: periodo,
+    },
+    {
+      $inc: {
+        ultimoNumero: 1,
+      },
+    },
+    {
+      new: true,
+      upsert: true,
+      session,
+      setDefaultsOnInsert: true,
+    },
+  );
+
+  const consecutivo = correlativo.ultimoNumero.toString().padStart(4, "0");
+
+  return `L${anioCorto}${mes}-` + consecutivo;
 }
 
 // ==========================================
@@ -1027,6 +1069,25 @@ const materializarSnapshotClinicoLaboratorio = async (
 
   const pruebas = await consulta;
 
+  // ====== Validar pruebas activas ======
+
+  const pruebaInactiva = pruebas.find((prueba) => {
+    const estadoPrueba =
+      prueba.estadoPrueba === true || prueba.estadoPrueba === "true"
+        ? "ACTIVO"
+        : prueba.estadoPrueba === false || prueba.estadoPrueba === "false"
+          ? "INACTIVO"
+          : (prueba.estadoPrueba ?? "ACTIVO");
+
+    return estadoPrueba !== "ACTIVO";
+  });
+
+  if (pruebaInactiva) {
+    throw new Error(
+      `La prueba ${pruebaInactiva.codPruebaLab} - ${pruebaInactiva.nombrePruebaLab} se encuentra INACTIVA y no puede incluirse en una nueva solicitud`,
+    );
+  }
+
   // ====== Indexar pruebas ======
 
   const mapaPruebas = new Map();
@@ -1268,7 +1329,21 @@ const crearSolicitudesAtencion = async ({
   for (const [tipo, serviciosTipo] of Object.entries(serviciosAgrupados)) {
     const codSolicitud = await generarCodigoSolicitud(session);
 
+    // ====== Código de laboratorio ======
+
+    const codigoLaboratorio =
+      tipo === "Laboratorio"
+        ? await generarCodigoLaboratorio(session, ahora)
+        : null;
+
     const datosSolicitud = {
+      codSolicitud,
+
+      codigoLaboratorio,
+
+      origenAtencion,
+
+      tipo,
       codSolicitud,
       origenAtencion,
       tipo,
