@@ -44,6 +44,9 @@ const cargarEvidenciaMuestra = (req, res, next) => {
     }
 
     if (error instanceof multer.MulterError) {
+      console.log("Multer error code:", error.code);
+      console.log("Multer error field:", error.field);
+
       if (error.code === "LIMIT_FILE_SIZE") {
         return res.status(400).json({
           ok: false,
@@ -55,6 +58,13 @@ const cargarEvidenciaMuestra = (req, res, next) => {
         return res.status(400).json({
           ok: false,
           msg: "Solo se permite cargar una imagen por operación",
+        });
+      }
+
+      if (error.code === "LIMIT_UNEXPECTED_FILE") {
+        return res.status(400).json({
+          ok: false,
+          msg: `Campo de archivo inesperado: ${error.field}. Se esperaba: imagen`,
         });
       }
 
