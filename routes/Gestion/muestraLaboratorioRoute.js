@@ -11,6 +11,7 @@ const {
   obtenerMuestrasPorCodigoLaboratorio,
   obtenerDetalleMuestra,
   registrarEvidenciaMuestra,
+  obtenerEvidenciasMuestra,
 } = require("../../controllers/Gestion/muestraLaboratorioController");
 
 const { validarJWT } = require("../../middlewares/validar-token");
@@ -60,6 +61,14 @@ router.post(
   validarJWT,
   cargarEvidenciaMuestra,
   registrarEvidenciaMuestra,
+);
+
+// ====== Consultar evidencias fotográficas ======
+
+router.get(
+  "/:muestraLaboratorioId/evidencias",
+  validarJWT,
+  obtenerEvidenciasMuestra,
 );
 
 // ====== Consultar por solicitud ======

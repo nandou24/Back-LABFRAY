@@ -90,10 +90,24 @@ const subirArchivoStorage = async ({ keyPrefix, buffer, mimeType }) => {
 // URL TEMPORAL PARA VISUALIZAR
 // ==========================================
 
-const generarUrlTemporal = async (key, expiresIn = 300) => {
+// ====== Generar URL temporal ======
+
+const generarUrlTemporal = async (
+  key,
+  expiresIn = 300,
+  versionId = undefined,
+) => {
+  if (typeof key !== "string" || !key.trim()) {
+    throw new Error("Debe indicar una clave de almacenamiento válida");
+  }
+
   const command = new GetObjectCommand({
     Bucket: bucket,
-    Key: key,
+    Key: key.trim(),
+
+    ...(versionId && {
+      VersionId: versionId,
+    }),
   });
 
   return await getSignedUrl(s3Client, command, {

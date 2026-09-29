@@ -7,6 +7,7 @@ const SolicitudAtencion = require("../../models/Gestion/SolicitudAtencion");
 const MuestraLaboratorio = require("../../models/Gestion/MuestraLaboratorio");
 const {
   subirArchivoStorage,
+  generarUrlTemporal,
   eliminarArchivo,
 } = require("../../utils/aws/s3Storage");
 
@@ -2316,6 +2317,139 @@ const registrarEvidenciaMuestra = async (req, res = response) => {
   }
 };
 
+// ====== Consultar evidencias fotográficas ======
+
+const obtenerEvidenciasMuestra = async (req, res = response) => {
+  try {
+    const { muestraLaboratorioId } = req.params;
+
+    // ====== Validar id ======
+
+    if (!mongoose.Types.ObjectId.isValid(muestraLaboratorioId)) {
+      throw new Error("El id de la muestra de laboratorio no es válido");
+    }
+
+    // ====== Obtener muestra ======
+
+    const muestra =
+      await MuestraLaboratorio.findById(muestraLaboratorioId).lean();
+
+    if (!muestra) {
+      throw new Error("La muestra de laboratorio no existe");
+    }
+
+    // ====== Validar solicitud ======
+
+    const solicitud = await SolicitudAtencion.findById(
+      muestra.solicitudAtencionId,
+    )
+      .select("_id tipo estado")
+      .lean();
+
+    if (!solicitud) {
+      throw new Error("La solicitud de atención asociada no existe");
+    }
+
+    if (solicitud.tipo !== "Laboratorio") {
+      throw new Error("La solicitud asociada no corresponde a Laboratorio");
+    }
+
+    // ====== Obtener evidencias ======
+
+    const evidenciasRegistradas = Array.isArray(muestra.evidenciasFotograficas)
+      ? muestra.evidenciasFotograficas
+      : [];
+
+    const expiraEnSegundos = 300;
+
+    // ====== Generar URLs temporales ======
+
+    const evidencias = await Promise.all(
+      evidenciasRegistradas.map(async (evidencia) => {
+        if (!evidencia.storageKey) {
+          throw new Error(
+            `La evidencia ${evidencia._id} no posee referencia de almacenamiento`,
+          );
+        }
+
+        const urlTemporal = await generarUrlTemporal(
+          evidencia.storageKey,
+          expiraEnSegundos,
+          evidencia.versionId ?? undefined,
+        );
+
+        return {
+          _id: evidencia._id,
+
+          archivoId: evidencia.archivoId,
+
+          nombreArchivo: evidencia.nombreArchivo,
+
+          mimeType: evidencia.mimeType,
+
+          tamanoBytes: evidencia.tamanoBytes,
+
+          etapa: evidencia.etapa,
+
+          observacion: evidencia.observacion,
+
+          registradoPor: evidencia.registradoPor,
+
+          usuarioRegistro: evidencia.usuarioRegistro,
+
+          fechaRegistro: evidencia.fechaRegistro,
+
+          urlTemporal,
+        };
+      }),
+    );
+
+    return res.status(200).json({
+      ok: true,
+
+      msg: "Evidencias fotográficas obtenidas correctamente",
+
+      muestra: {
+        _id: muestra._id,
+
+        solicitudAtencionId: muestra.solicitudAtencionId,
+
+        codSolicitud: muestra.codSolicitud,
+
+        codigoLaboratorio: muestra.codigoLaboratorio,
+
+        codMuestra: muestra.codMuestra,
+
+        codigoEtiqueta: muestra.codigoEtiqueta,
+
+        numeroRecipiente: muestra.numeroRecipiente,
+
+        numeroIntento: muestra.numeroIntento,
+
+        estadoMuestra: muestra.estadoMuestra,
+      },
+
+      totalEvidencias: evidencias.length,
+
+      expiraEnSegundos,
+
+      evidencias,
+    });
+  } catch (error) {
+    console.error(
+      "Error al consultar evidencias fotográficas de muestra:",
+      error,
+    );
+
+    return res.status(400).json({
+      ok: false,
+
+      msg:
+        error.message || "No se pudieron consultar las evidencias fotográficas",
+    });
+  }
+};
+
 module.exports = {
   inicializarMuestrasSolicitud,
   recolectarMuestra,
@@ -2327,4 +2461,5 @@ module.exports = {
   obtenerMuestrasPorCodigoLaboratorio,
   obtenerDetalleMuestra,
   registrarEvidenciaMuestra,
+  obtenerEvidenciasMuestra,
 };
