@@ -331,6 +331,39 @@ const EvidenciaFotograficaMuestraSchema = new Schema(
       type: Date,
       default: Date.now,
     },
+    // ====== Estado de evidencia ======
+
+    estadoEvidencia: {
+      type: String,
+      enum: ["ACTIVA", "ANULADA"],
+      default: "ACTIVA",
+      required: true,
+    },
+
+    // ====== Anulación ======
+
+    anuladaPor: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    usuarioAnulacion: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    fechaAnulacion: {
+      type: Date,
+      default: null,
+    },
+
+    motivoAnulacion: {
+      type: String,
+      default: null,
+      trim: true,
+    },
   },
   {
     _id: true,

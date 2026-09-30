@@ -6,11 +6,14 @@ const {
   recibirMuestra,
   aceptarMuestra,
   rechazarMuestra,
+  anularMuestra,
   generarReintentoMuestra,
+  obtenerBandejaTomaMuestras,
   obtenerMuestrasPorSolicitud,
   obtenerMuestrasPorCodigoLaboratorio,
   obtenerDetalleMuestra,
   registrarEvidenciaMuestra,
+  anularEvidenciaMuestra,
   obtenerEvidenciasMuestra,
 } = require("../../controllers/Gestion/muestraLaboratorioController");
 
@@ -46,6 +49,10 @@ router.put("/:muestraLaboratorioId/aceptar", validarJWT, aceptarMuestra);
 
 router.put("/:muestraLaboratorioId/rechazar", validarJWT, rechazarMuestra);
 
+// ====== Anular muestra ======
+
+router.put("/:muestraLaboratorioId/anular", validarJWT, anularMuestra);
+
 // ====== Generar reintento ======
 
 router.post(
@@ -63,6 +70,14 @@ router.post(
   registrarEvidenciaMuestra,
 );
 
+// ====== Anular evidencia fotográfica ======
+
+router.put(
+  "/:muestraLaboratorioId/evidencias/:evidenciaId/anular",
+  validarJWT,
+  anularEvidenciaMuestra,
+);
+
 // ====== Consultar evidencias fotográficas ======
 
 router.get(
@@ -70,6 +85,10 @@ router.get(
   validarJWT,
   obtenerEvidenciasMuestra,
 );
+
+// ====== Bandeja operativa ======
+
+router.get("/bandeja", validarJWT, obtenerBandejaTomaMuestras);
 
 // ====== Consultar por solicitud ======
 

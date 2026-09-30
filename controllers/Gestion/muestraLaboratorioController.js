@@ -467,6 +467,240 @@ const construirPlanesMuestra = (slots) => {
   });
 };
 
+// ====== Resolver opciones de un plan ======
+
+const obtenerOpcionesComunesPlan = (plan) => {
+  const clavesComunes = new Set(
+    Array.isArray(plan.opcionesComunes) ? plan.opcionesComunes : [],
+  );
+
+  const opcionesPorClave = new Map();
+
+  const coberturas = Array.isArray(plan.coberturas) ? plan.coberturas : [];
+
+  coberturas.forEach((cobertura) => {
+    const opciones = Array.isArray(cobertura.opcionesPermitidas)
+      ? cobertura.opcionesPermitidas
+      : [];
+
+    opciones.forEach((opcion) => {
+      const clave = construirClaveOpcion(opcion);
+
+      if (!clave || !clavesComunes.has(clave) || opcionesPorClave.has(clave)) {
+        return;
+      }
+
+      opcionesPorClave.set(clave, {
+        tipoMuestraId: obtenerId(opcion.tipoMuestraId),
+
+        tipoMuestra: {
+          codTipoMuestra: opcion.tipoMuestra?.codTipoMuestra ?? null,
+
+          nombreTipoMuestra: opcion.tipoMuestra?.nombreTipoMuestra ?? "",
+
+          descripcionTipoMuestra:
+            opcion.tipoMuestra?.descripcionTipoMuestra ?? "",
+        },
+
+        tuboEnvaseId: obtenerId(opcion.tuboEnvaseId),
+
+        tuboEnvase: {
+          codTuboEnvase: opcion.tuboEnvase?.codTuboEnvase ?? null,
+
+          nombreTuboEnvase: opcion.tuboEnvase?.nombreTuboEnvase ?? "",
+
+          descripcionTuboEnvase: opcion.tuboEnvase?.descripcionTuboEnvase ?? "",
+
+          color: opcion.tuboEnvase?.color ?? "",
+
+          aditivo: opcion.tuboEnvase?.aditivo ?? "",
+
+          capacidad: opcion.tuboEnvase?.capacidad ?? null,
+
+          unidadCapacidad: opcion.tuboEnvase?.unidadCapacidad ?? null,
+        },
+      });
+    });
+  });
+
+  return [...opcionesPorClave.entries()]
+    .sort(([claveA], [claveB]) => claveA.localeCompare(claveB))
+    .map(([, opcion]) => opcion);
+};
+
+// ====== Construir exámenes de un recipiente ======
+
+const construirExamenesPlanToma = (plan) => {
+  const coberturas = Array.isArray(plan.coberturas) ? plan.coberturas : [];
+
+  const examenesPorUnidad = new Map();
+
+  coberturas.forEach((cobertura) => {
+    const claveUnidad =
+      cobertura.claveUnidad ??
+      [
+        cobertura.codServicio,
+        cobertura.codPruebaLab,
+        cobertura.numeroInstancia,
+      ].join("|");
+
+    if (examenesPorUnidad.has(claveUnidad)) {
+      return;
+    }
+
+    examenesPorUnidad.set(claveUnidad, {
+      claveUnidad: cobertura.claveUnidad ?? null,
+
+      servicioId: obtenerId(cobertura.servicioId),
+
+      codServicio: cobertura.codServicio ?? "",
+
+      nombreServicio: cobertura.nombreServicio ?? "",
+
+      pruebaLabId: obtenerId(cobertura.pruebaLabId),
+
+      codPruebaLab: cobertura.codPruebaLab ?? "",
+
+      nombrePruebaLab: cobertura.nombrePruebaLab ?? "",
+
+      numeroInstancia: Number(cobertura.numeroInstancia ?? 1),
+
+      etiquetaInstancia: cobertura.etiquetaInstancia ?? null,
+    });
+  });
+
+  return [...examenesPorUnidad.values()].sort((a, b) => {
+    const codigoA = a.codServicio ?? "";
+
+    const codigoB = b.codServicio ?? "";
+
+    const comparacionCodigo = codigoA.localeCompare(codigoB);
+
+    if (comparacionCodigo !== 0) {
+      return comparacionCodigo;
+    }
+
+    return Number(a.numeroInstancia ?? 1) - Number(b.numeroInstancia ?? 1);
+  });
+};
+
+// ====== Construir resumen de plan de toma ======
+
+const construirPlanTomaSolicitud = (solicitud) => {
+  const unidades = Array.isArray(solicitud.unidadesLaboratorio)
+    ? solicitud.unidadesLaboratorio
+    : [];
+
+  const requiereMuestra = solicitudRequiereMuestra(solicitud);
+
+  if (!requiereMuestra) {
+    return {
+      disponible: false,
+
+      requiereMuestra: false,
+
+      totalRecipientes: 0,
+
+      gruposRecipientes: [],
+
+      mensaje: "La solicitud no requiere toma de muestra",
+    };
+  }
+
+  try {
+    // ====== Reutilizar planificación real ======
+
+    const { slots } = construirSlotsMuestra(unidades);
+
+    const planes = construirPlanesMuestra(slots);
+
+    // ====== Construir recipientes previstos ======
+
+    const recipientes = planes.map((plan) => {
+      const opciones = obtenerOpcionesComunesPlan(plan);
+
+      if (opciones.length === 0) {
+        throw new Error(
+          "No se pudieron resolver las opciones comunes de un recipiente",
+        );
+      }
+
+      const examenes = construirExamenesPlanToma(plan);
+
+      if (examenes.length === 0) {
+        throw new Error(
+          "No se pudieron resolver los exámenes asociados a un recipiente",
+        );
+      }
+
+      return {
+        tipo: opciones.length === 1 ? "DEFINIDO" : "ALTERNATIVO",
+
+        opciones,
+
+        examenes,
+      };
+    });
+
+    // ====== Agrupar recipientes equivalentes ======
+
+    const grupos = new Map();
+
+    recipientes.forEach((recipiente) => {
+      const clavesOpciones = recipiente.opciones
+        .map(construirClaveOpcion)
+        .filter(Boolean)
+        .sort();
+
+      const claveGrupo = clavesOpciones.join("|");
+
+      if (!grupos.has(claveGrupo)) {
+        grupos.set(claveGrupo, {
+          tipo: recipiente.tipo,
+
+          cantidad: 0,
+
+          opciones: recipiente.opciones,
+
+          recipientes: [],
+        });
+      }
+
+      const grupo = grupos.get(claveGrupo);
+
+      grupo.cantidad += 1;
+
+      grupo.recipientes.push({
+        examenes: recipiente.examenes,
+      });
+    });
+
+    return {
+      disponible: true,
+
+      requiereMuestra: true,
+
+      totalRecipientes: planes.length,
+
+      gruposRecipientes: [...grupos.values()],
+
+      mensaje: null,
+    };
+  } catch (error) {
+    return {
+      disponible: false,
+
+      requiereMuestra: true,
+
+      totalRecipientes: 0,
+
+      gruposRecipientes: [],
+
+      mensaje: error.message || "No se pudo construir el plan de toma",
+    };
+  }
+};
+
 // ====== Contar estados de muestras ======
 
 const construirConteoEstadosMuestra = (muestras = []) => {
@@ -549,14 +783,24 @@ const construirPlanesConsultaMuestra = (muestras = []) => {
       );
     });
 
-    const intentoVigente = intentosOrdenados[intentosOrdenados.length - 1];
+    // ====== Resolver último intento ======
 
-    const intentoVigenteId = intentoVigente?._id?.toString();
+    const ultimoIntento =
+      intentosOrdenados[intentosOrdenados.length - 1] ?? null;
+
+    // ====== Resolver intento vigente ======
+
+    const intentoVigente =
+      ultimoIntento && ultimoIntento.estadoMuestra !== "ANULADA"
+        ? ultimoIntento
+        : null;
+
+    const intentoVigenteId = intentoVigente?._id?.toString() ?? null;
 
     planes.push({
       claveMuestraPlan: grupo.claveMuestraPlan,
 
-      numeroRecipiente: intentoVigente?.numeroRecipiente ?? null,
+      numeroRecipiente: ultimoIntento?.numeroRecipiente ?? null,
 
       totalIntentos: intentosOrdenados.length,
 
@@ -579,7 +823,9 @@ const construirPlanesConsultaMuestra = (muestras = []) => {
       intentos: intentosOrdenados.map((intento) => ({
         ...intento,
 
-        esVigente: intento._id.toString() === intentoVigenteId,
+        esVigente:
+          intentoVigenteId !== null &&
+          intento._id.toString() === intentoVigenteId,
       })),
     });
   }
@@ -598,7 +844,6 @@ const construirPlanesConsultaMuestra = (muestras = []) => {
 
   return planes;
 };
-
 // ====== Construir resumen operativo ======
 
 const construirResumenOperativoMuestras = (muestras, planes) => {
@@ -660,6 +905,151 @@ const construirSolicitudMuestraResponse = (solicitud) => {
 
       fechaNacimientoPaciente: solicitud.fechaNacimientoPaciente ?? null,
     },
+  };
+};
+
+// ====== Escapar búsqueda regex ======
+
+const escaparRegex = (valor = "") => {
+  return String(valor).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+};
+
+// ====== Verificar requerimiento de muestra ======
+
+const solicitudRequiereMuestra = (solicitud) => {
+  const unidades = Array.isArray(solicitud.unidadesLaboratorio)
+    ? solicitud.unidadesLaboratorio
+    : [];
+
+  return unidades.some(
+    (unidad) =>
+      unidad.estado !== "ANULADO" &&
+      unidad.snapshotClinico?.requiereMuestra === true,
+  );
+};
+
+// ====== Construir solicitud para bandeja ======
+
+const construirSolicitudBandejaMuestraResponse = (solicitud) => {
+  const programacion =
+    solicitud.programacionEmpresaId?.codProgramacion ||
+    solicitud.programacionEmpresaId?.razonSocialEmpresa
+      ? solicitud.programacionEmpresaId
+      : null;
+
+  const esEmpresa = solicitud.origenAtencion === "EMPRESA";
+
+  const pacienteOrigen = esEmpresa && programacion ? programacion : solicitud;
+
+  return {
+    _id: solicitud._id,
+
+    codSolicitud: solicitud.codSolicitud,
+
+    codigoLaboratorio: solicitud.codigoLaboratorio ?? null,
+
+    origenAtencion: solicitud.origenAtencion,
+
+    tipo: solicitud.tipo,
+
+    estado: solicitud.estado,
+
+    fechaEmision: solicitud.fechaEmision,
+
+    paciente: {
+      hc: pacienteOrigen.hc ?? solicitud.hc ?? null,
+
+      clienteId:
+        obtenerId(solicitud.clienteId) ??
+        obtenerId(programacion?.pacienteId) ??
+        null,
+
+      tipoDoc: pacienteOrigen.tipoDoc ?? solicitud.tipoDoc ?? null,
+
+      nroDoc: pacienteOrigen.nroDoc ?? solicitud.nroDoc ?? null,
+
+      nombreCliente:
+        pacienteOrigen.nombreCliente ?? solicitud.nombreCliente ?? "",
+
+      apePatCliente:
+        pacienteOrigen.apePatCliente ?? solicitud.apePatCliente ?? "",
+
+      apeMatCliente:
+        pacienteOrigen.apeMatCliente ?? solicitud.apeMatCliente ?? "",
+
+      sexoPaciente: solicitud.sexoPaciente ?? null,
+
+      fechaNacimientoPaciente: solicitud.fechaNacimientoPaciente ?? null,
+    },
+
+    particular:
+      solicitud.origenAtencion === "PARTICULAR"
+        ? {
+            cotizacionId: obtenerId(solicitud.cotizacionId),
+
+            codCotizacion: solicitud.codCotizacion ?? null,
+
+            pagoId: obtenerId(solicitud.pagoId),
+
+            codPago: solicitud.codPago ?? null,
+          }
+        : null,
+
+    empresa: esEmpresa
+      ? {
+          programacionEmpresaId: obtenerId(solicitud.programacionEmpresaId),
+
+          codProgramacion:
+            programacion?.codProgramacion ?? solicitud.codProgramacion ?? null,
+
+          empresaId:
+            obtenerId(programacion?.empresaId) ??
+            obtenerId(solicitud.empresaId) ??
+            null,
+
+          rucEmpresa: programacion?.rucEmpresa ?? null,
+
+          razonSocialEmpresa:
+            programacion?.razonSocialEmpresa ??
+            solicitud.razonSocialEmpresa ??
+            "",
+
+          protocoloId:
+            obtenerId(programacion?.protocoloId) ??
+            obtenerId(solicitud.protocoloId) ??
+            null,
+
+          codProtocolo:
+            programacion?.codProtocolo ?? solicitud.codProtocolo ?? null,
+
+          nombreProtocolo:
+            programacion?.nombreProtocolo ?? solicitud.nombreProtocolo ?? null,
+
+          sede: programacion?.sede ?? null,
+
+          tipoEvaluacion: programacion?.tipoEvaluacion ?? null,
+
+          tipoAtencion: programacion?.tipoAtencion ?? null,
+
+          prioridad: programacion?.prioridad ?? null,
+
+          estadoProgramacion: programacion?.estadoProgramacion ?? null,
+        }
+      : null,
+
+    servicios: Array.isArray(solicitud.servicios)
+      ? solicitud.servicios.map((servicio) => ({
+          servicioId: obtenerId(servicio.servicioId),
+
+          codServicio: servicio.codServicio,
+
+          nombreServicio: servicio.nombreServicio,
+
+          estado: servicio.estado,
+
+          medicoAtiende: servicio.medicoAtiende ?? null,
+        }))
+      : [],
   };
 };
 
@@ -1558,6 +1948,149 @@ const rechazarMuestra = async (req, res = response) => {
   }
 };
 
+// ====== Anular muestra ======
+
+const anularMuestra = async (req, res = response) => {
+  const session = await mongoose.startSession();
+
+  session.startTransaction();
+
+  try {
+    const { muestraLaboratorioId } = req.params;
+
+    const { uid, nombreUsuario } = req.user;
+
+    const { motivoAnulacion } = req.body;
+
+    // ====== Validar id ======
+
+    if (!mongoose.Types.ObjectId.isValid(muestraLaboratorioId)) {
+      throw new Error("El id de la muestra de laboratorio no es válido");
+    }
+
+    // ====== Validar motivo ======
+
+    if (typeof motivoAnulacion !== "string") {
+      throw new Error("Debe indicar el motivo de anulación de la muestra");
+    }
+
+    const motivoNormalizado = motivoAnulacion.trim();
+
+    if (!motivoNormalizado) {
+      throw new Error("Debe indicar el motivo de anulación de la muestra");
+    }
+
+    // ====== Obtener muestra ======
+
+    const muestra =
+      await MuestraLaboratorio.findById(muestraLaboratorioId).session(session);
+
+    if (!muestra) {
+      throw new Error("La muestra de laboratorio no existe");
+    }
+
+    // ====== Validar estado ======
+
+    const estadosPermitidos = ["PENDIENTE", "RECOLECTADA", "RECEPCIONADA"];
+
+    if (!estadosPermitidos.includes(muestra.estadoMuestra)) {
+      if (muestra.estadoMuestra === "RECHAZADA") {
+        throw new Error(
+          "Una muestra rechazada conserva su resolución preanalítica y no puede ser anulada",
+        );
+      }
+
+      if (muestra.estadoMuestra === "ACEPTADA") {
+        throw new Error("No se puede anular una muestra aceptada");
+      }
+
+      if (muestra.estadoMuestra === "ANULADA") {
+        throw new Error("La muestra ya se encuentra anulada");
+      }
+
+      throw new Error(
+        `No se puede anular una muestra en estado ${muestra.estadoMuestra}`,
+      );
+    }
+
+    // ====== Validar solicitud ======
+
+    const solicitud = await SolicitudAtencion.findById(
+      muestra.solicitudAtencionId,
+    ).session(session);
+
+    if (!solicitud) {
+      throw new Error("La solicitud de atención asociada no existe");
+    }
+
+    if (solicitud.tipo !== "Laboratorio") {
+      throw new Error("La solicitud asociada no corresponde a Laboratorio");
+    }
+
+    const ahora = new Date();
+
+    const estadoAnterior = muestra.estadoMuestra;
+
+    // ====== Registrar anulación ======
+
+    muestra.estadoPrevioAnulacion = estadoAnterior;
+
+    muestra.estadoMuestra = "ANULADA";
+
+    muestra.anuladoPor = uid;
+
+    muestra.usuarioAnulacion = nombreUsuario ?? null;
+
+    muestra.fechaAnulacion = ahora;
+
+    muestra.motivoAnulacion = motivoNormalizado;
+
+    // ====== Auditoría ======
+
+    muestra.updatedBy = uid;
+
+    muestra.usuarioActualizacion = nombreUsuario ?? null;
+
+    muestra.fechaActualizacion = ahora;
+
+    // ====== Guardar ======
+
+    await muestra.save({
+      session,
+    });
+
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      ok: true,
+
+      msg: "Muestra anulada correctamente",
+
+      estadoAnterior,
+
+      estadoMuestra: muestra.estadoMuestra,
+
+      generaReintentoAutomatico: false,
+
+      muestra,
+    });
+  } catch (error) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    console.error("Error al anular muestra de laboratorio:", error);
+
+    return res.status(400).json({
+      ok: false,
+
+      msg: error.message || "No se pudo anular la muestra de laboratorio",
+    });
+  } finally {
+    await session.endSession();
+  }
+};
+
 // ====== Generar reintento de muestra ======
 
 const generarReintentoMuestra = async (req, res = response) => {
@@ -1821,6 +2354,269 @@ const generarReintentoMuestra = async (req, res = response) => {
   }
 };
 
+// ====== Obtener bandeja operativa ======
+
+const obtenerBandejaTomaMuestras = async (req, res = response) => {
+  try {
+    const { fechaInicio, fechaFin, terminoBusqueda } = req.query;
+
+    // ====== Validar fechas ======
+
+    if (!fechaInicio || !fechaFin) {
+      throw new Error("Debe indicar la fecha de inicio y la fecha fin");
+    }
+
+    const inicio = new Date(fechaInicio);
+
+    const fin = new Date(fechaFin);
+
+    if (Number.isNaN(inicio.getTime()) || Number.isNaN(fin.getTime())) {
+      throw new Error("El rango de fechas no es válido");
+    }
+
+    if (inicio.getTime() > fin.getTime()) {
+      throw new Error("La fecha de inicio no puede ser mayor que la fecha fin");
+    }
+
+    // ====== Construir filtro ======
+
+    const filtroSolicitud = {
+      tipo: "Laboratorio",
+
+      fechaEmision: {
+        $gte: inicio,
+        $lte: fin,
+      },
+    };
+
+    const terminoNormalizado = String(terminoBusqueda ?? "").trim();
+
+    if (terminoNormalizado) {
+      const regex = new RegExp(escaparRegex(terminoNormalizado), "i");
+
+      filtroSolicitud.$or = [
+        { codigoLaboratorio: regex },
+        { codSolicitud: regex },
+        { hc: regex },
+        { tipoDoc: regex },
+        { nroDoc: regex },
+        { nombreCliente: regex },
+        { apePatCliente: regex },
+        { apeMatCliente: regex },
+        { codCotizacion: regex },
+        { codPago: regex },
+        { codProgramacion: regex },
+        { razonSocialEmpresa: regex },
+        { codProtocolo: regex },
+        { nombreProtocolo: regex },
+      ];
+    }
+
+    // ====== Obtener solicitudes ======
+
+    const solicitudes = await SolicitudAtencion.find(filtroSolicitud)
+      .select(
+        [
+          "_id",
+          "codSolicitud",
+          "codigoLaboratorio",
+          "origenAtencion",
+          "cotizacionId",
+          "codCotizacion",
+          "pagoId",
+          "codPago",
+          "programacionEmpresaId",
+          "codProgramacion",
+          "empresaId",
+          "razonSocialEmpresa",
+          "protocoloId",
+          "codProtocolo",
+          "nombreProtocolo",
+          "tipo",
+          "servicios",
+          "hc",
+          "tipoDoc",
+          "nroDoc",
+          "clienteId",
+          "nombreCliente",
+          "apePatCliente",
+          "apeMatCliente",
+          "sexoPaciente",
+          "fechaNacimientoPaciente",
+          "fechaEmision",
+          "estado",
+          "usuarioEmisor",
+          "unidadesLaboratorio",
+        ].join(" "),
+      )
+      .populate({
+        path: "programacionEmpresaId",
+
+        select: [
+          "_id",
+          "codProgramacion",
+          "empresaId",
+          "rucEmpresa",
+          "razonSocialEmpresa",
+          "pacienteId",
+          "hc",
+          "tipoDoc",
+          "nroDoc",
+          "nombreCliente",
+          "apePatCliente",
+          "apeMatCliente",
+          "protocoloId",
+          "codProtocolo",
+          "nombreProtocolo",
+          "sede",
+          "tipoEvaluacion",
+          "tipoAtencion",
+          "prioridad",
+          "estadoProgramacion",
+        ].join(" "),
+      })
+      .sort({
+        fechaEmision: -1,
+        codSolicitud: -1,
+      })
+      .lean();
+
+    // ====== Obtener muestras en bloque ======
+
+    const solicitudIds = solicitudes.map((solicitud) => solicitud._id);
+
+    const muestras =
+      solicitudIds.length > 0
+        ? await MuestraLaboratorio.find({
+            solicitudAtencionId: {
+              $in: solicitudIds,
+            },
+          })
+            .select("-evidenciasFotograficas -__v")
+            .sort({
+              solicitudAtencionId: 1,
+              numeroRecipiente: 1,
+              numeroIntento: 1,
+              createdAt: 1,
+            })
+            .lean()
+        : [];
+
+    // ====== Agrupar muestras por solicitud ======
+
+    const muestrasPorSolicitud = new Map();
+
+    muestras.forEach((muestra) => {
+      const clave = muestra.solicitudAtencionId.toString();
+
+      if (!muestrasPorSolicitud.has(clave)) {
+        muestrasPorSolicitud.set(clave, []);
+      }
+
+      muestrasPorSolicitud.get(clave).push(muestra);
+    });
+
+    // ====== Construir bandeja ======
+
+    const bandeja = solicitudes.map((solicitud) => {
+      const claveSolicitud = solicitud._id.toString();
+
+      const muestrasSolicitud = muestrasPorSolicitud.get(claveSolicitud) ?? [];
+
+      const planes = construirPlanesConsultaMuestra(muestrasSolicitud);
+
+      const resumen = construirResumenOperativoMuestras(
+        muestrasSolicitud,
+        planes,
+      );
+
+      const inicializadas = muestrasSolicitud.length > 0;
+
+      const requiereMuestra = solicitudRequiereMuestra(solicitud);
+
+      // ====== Plan previo de toma ======
+
+      const planToma = construirPlanTomaSolicitud(solicitud);
+
+      // ====== Validar inicialización ======
+
+      const puedeInicializar =
+        !inicializadas &&
+        requiereMuestra &&
+        solicitud.estado !== "ANULADO" &&
+        Boolean(solicitud.codigoLaboratorio) &&
+        planToma.disponible === true &&
+        planToma.totalRecipientes > 0;
+
+      return {
+        solicitud: construirSolicitudBandejaMuestraResponse(solicitud),
+
+        muestras: {
+          requiereMuestra,
+
+          inicializadas,
+
+          puedeInicializar,
+
+          planToma,
+
+          resumen,
+        },
+      };
+    });
+
+    // ====== Resumen de bandeja ======
+
+    const resumenBandeja = {
+      totalSolicitudes: bandeja.length,
+
+      particulares: bandeja.filter(
+        (item) => item.solicitud.origenAtencion === "PARTICULAR",
+      ).length,
+
+      empresas: bandeja.filter(
+        (item) => item.solicitud.origenAtencion === "EMPRESA",
+      ).length,
+
+      solicitudesAnuladas: bandeja.filter(
+        (item) => item.solicitud.estado === "ANULADO",
+      ).length,
+
+      conMuestrasInicializadas: bandeja.filter(
+        (item) => item.muestras.inicializadas === true,
+      ).length,
+
+      sinMuestrasInicializadas: bandeja.filter(
+        (item) => item.muestras.inicializadas === false,
+      ).length,
+
+      pendientesInicializacion: bandeja.filter(
+        (item) => item.muestras.puedeInicializar === true,
+      ).length,
+    };
+
+    return res.status(200).json({
+      ok: true,
+
+      msg: "Bandeja operativa de toma de muestras obtenida correctamente",
+
+      resumen: resumenBandeja,
+
+      solicitudes: bandeja,
+    });
+  } catch (error) {
+    console.error("Error al obtener bandeja de toma de muestras:", error);
+
+    return res.status(400).json({
+      ok: false,
+
+      msg:
+        error.message ||
+        "No se pudo obtener la bandeja operativa de toma de muestras",
+    });
+  }
+};
+
 // ====== Consultar muestras por solicitud ======
 
 const obtenerMuestrasPorSolicitud = async (req, res = response) => {
@@ -1869,7 +2665,7 @@ const obtenerMuestrasPorSolicitud = async (req, res = response) => {
 
       msg:
         muestras.length > 0
-          ? "Muestras de laboratorio obtenidas correctamente"
+          ? "Historial de muestras de laboratorio obtenido correctamente"
           : "La solicitud no posee muestras de laboratorio inicializadas",
 
       solicitud: construirSolicitudMuestraResponse(solicitud),
@@ -1945,7 +2741,7 @@ const obtenerMuestrasPorCodigoLaboratorio = async (req, res = response) => {
 
       msg:
         muestras.length > 0
-          ? "Solicitud y muestras de laboratorio obtenidas correctamente"
+          ? "Solicitud e historial de muestras de laboratorio obtenidos correctamente"
           : "La solicitud todavía no posee muestras inicializadas",
 
       solicitud: construirSolicitudMuestraResponse(solicitud),
@@ -2016,7 +2812,16 @@ const obtenerDetalleMuestra = async (req, res = response) => {
       (intento) => intento._id.toString() === muestra._id.toString(),
     );
 
-    const intentoVigente = intentos[intentos.length - 1] ?? null;
+    // ====== Resolver último intento ======
+
+    const ultimoIntento = intentos[intentos.length - 1] ?? null;
+
+    // ====== Resolver intento vigente ======
+
+    const intentoVigente =
+      ultimoIntento && ultimoIntento.estadoMuestra !== "ANULADA"
+        ? ultimoIntento
+        : null;
 
     const intentoAnterior =
       indiceActual > 0 ? intentos[indiceActual - 1] : null;
@@ -2053,15 +2858,27 @@ const obtenerDetalleMuestra = async (req, res = response) => {
 
       fechaRechazo: intento.fechaRechazo ?? null,
 
+      // ====== Anulación ======
+
+      estadoPrevioAnulacion: intento.estadoPrevioAnulacion ?? null,
+
+      anuladoPor: intento.anuladoPor ?? null,
+
+      usuarioAnulacion: intento.usuarioAnulacion ?? null,
+
+      fechaAnulacion: intento.fechaAnulacion ?? null,
+
+      motivoAnulacion: intento.motivoAnulacion ?? null,
+
       esActual: intento._id.toString() === muestra._id.toString(),
 
-      esVigente: indice === intentos.length - 1,
+      esVigente: intentoVigente?._id?.toString() === intento._id.toString(),
     }));
 
     return res.status(200).json({
       ok: true,
 
-      msg: "Detalle de muestra obtenido correctamente",
+      msg: "Detalle e historial de la muestra obtenidos correctamente",
 
       solicitud: construirSolicitudMuestraResponse(solicitud),
 
@@ -2317,6 +3134,142 @@ const registrarEvidenciaMuestra = async (req, res = response) => {
   }
 };
 
+// ====== Anular evidencia fotográfica ======
+
+const anularEvidenciaMuestra = async (req, res = response) => {
+  try {
+    const { muestraLaboratorioId, evidenciaId } = req.params;
+
+    const { uid, nombreUsuario } = req.user;
+
+    const { motivoAnulacion } = req.body;
+
+    // ====== Validar ids ======
+
+    if (!mongoose.Types.ObjectId.isValid(muestraLaboratorioId)) {
+      throw new Error("El id de la muestra de laboratorio no es válido");
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(evidenciaId)) {
+      throw new Error("El id de la evidencia fotográfica no es válido");
+    }
+
+    // ====== Validar motivo ======
+
+    if (typeof motivoAnulacion !== "string") {
+      throw new Error("Debe indicar el motivo de anulación de la evidencia");
+    }
+
+    const motivoNormalizado = motivoAnulacion.trim();
+
+    if (!motivoNormalizado) {
+      throw new Error("Debe indicar el motivo de anulación de la evidencia");
+    }
+
+    // ====== Obtener muestra ======
+
+    const muestra = await MuestraLaboratorio.findById(muestraLaboratorioId);
+
+    if (!muestra) {
+      throw new Error("La muestra de laboratorio no existe");
+    }
+
+    // ====== Obtener evidencia ======
+
+    const evidencia = muestra.evidenciasFotograficas.id(evidenciaId);
+
+    if (!evidencia) {
+      throw new Error("La evidencia fotográfica no existe en la muestra");
+    }
+
+    // ====== Validar estado ======
+
+    const estadoActual = evidencia.estadoEvidencia ?? "ACTIVA";
+
+    if (estadoActual === "ANULADA") {
+      throw new Error("La evidencia fotográfica ya se encuentra anulada");
+    }
+
+    // ====== Validar solicitud ======
+
+    const solicitud = await SolicitudAtencion.findById(
+      muestra.solicitudAtencionId,
+    )
+      .select("_id tipo")
+      .lean();
+
+    if (!solicitud) {
+      throw new Error("La solicitud de atención asociada no existe");
+    }
+
+    if (solicitud.tipo !== "Laboratorio") {
+      throw new Error("La solicitud asociada no corresponde a Laboratorio");
+    }
+
+    const ahora = new Date();
+
+    // ====== Registrar anulación ======
+
+    evidencia.estadoEvidencia = "ANULADA";
+
+    evidencia.anuladaPor = uid;
+
+    evidencia.usuarioAnulacion = nombreUsuario ?? null;
+
+    evidencia.fechaAnulacion = ahora;
+
+    evidencia.motivoAnulacion = motivoNormalizado;
+
+    // ====== Auditoría de muestra ======
+
+    muestra.updatedBy = uid;
+
+    muestra.usuarioActualizacion = nombreUsuario ?? null;
+
+    muestra.fechaActualizacion = ahora;
+
+    await muestra.save();
+
+    return res.status(200).json({
+      ok: true,
+
+      msg: "Evidencia fotográfica anulada correctamente",
+
+      muestraLaboratorioId: muestra._id,
+
+      codigoEtiqueta: muestra.codigoEtiqueta,
+
+      evidencia: {
+        _id: evidencia._id,
+
+        archivoId: evidencia.archivoId,
+
+        nombreArchivo: evidencia.nombreArchivo,
+
+        etapa: evidencia.etapa,
+
+        estadoEvidencia: evidencia.estadoEvidencia,
+
+        anuladaPor: evidencia.anuladaPor,
+
+        usuarioAnulacion: evidencia.usuarioAnulacion,
+
+        fechaAnulacion: evidencia.fechaAnulacion,
+
+        motivoAnulacion: evidencia.motivoAnulacion,
+      },
+    });
+  } catch (error) {
+    console.error("Error al anular evidencia fotográfica de muestra:", error);
+
+    return res.status(400).json({
+      ok: false,
+
+      msg: error.message || "No se pudo anular la evidencia fotográfica",
+    });
+  }
+};
+
 // ====== Consultar evidencias fotográficas ======
 
 const obtenerEvidenciasMuestra = async (req, res = response) => {
@@ -2328,6 +3281,13 @@ const obtenerEvidenciasMuestra = async (req, res = response) => {
     if (!mongoose.Types.ObjectId.isValid(muestraLaboratorioId)) {
       throw new Error("El id de la muestra de laboratorio no es válido");
     }
+
+    // ====== Resolver inclusión de anuladas ======
+
+    const incluirAnuladas =
+      String(req.query.incluirAnuladas ?? "")
+        .trim()
+        .toLowerCase() === "true";
 
     // ====== Obtener muestra ======
 
@@ -2360,23 +3320,59 @@ const obtenerEvidenciasMuestra = async (req, res = response) => {
       ? muestra.evidenciasFotograficas
       : [];
 
+    // ====== Contar estados ======
+
+    const resumenEvidencias = {
+      total: evidenciasRegistradas.length,
+
+      activas: 0,
+
+      anuladas: 0,
+    };
+
+    evidenciasRegistradas.forEach((evidencia) => {
+      const estado = evidencia.estadoEvidencia ?? "ACTIVA";
+
+      if (estado === "ANULADA") {
+        resumenEvidencias.anuladas += 1;
+      } else {
+        resumenEvidencias.activas += 1;
+      }
+    });
+
+    // ====== Filtrar evidencias ======
+
+    const evidenciasFiltradas = evidenciasRegistradas.filter((evidencia) => {
+      const estado = evidencia.estadoEvidencia ?? "ACTIVA";
+
+      return incluirAnuladas || estado !== "ANULADA";
+    });
+
     const expiraEnSegundos = 300;
 
-    // ====== Generar URLs temporales ======
+    // ====== Construir respuesta ======
 
     const evidencias = await Promise.all(
-      evidenciasRegistradas.map(async (evidencia) => {
-        if (!evidencia.storageKey) {
-          throw new Error(
-            `La evidencia ${evidencia._id} no posee referencia de almacenamiento`,
+      evidenciasFiltradas.map(async (evidencia) => {
+        const estadoEvidencia = evidencia.estadoEvidencia ?? "ACTIVA";
+
+        let urlTemporal = null;
+
+        // ====== Firmar solo evidencias activas ======
+
+        if (estadoEvidencia === "ACTIVA") {
+          if (!evidencia.storageKey) {
+            throw new Error(
+              `La evidencia ${evidencia._id} no posee referencia de almacenamiento`,
+            );
+          }
+
+          urlTemporal = await generarUrlTemporal(
+            evidencia.storageKey,
+            expiraEnSegundos,
+            evidencia.versionId ?? undefined,
           );
         }
-
-        const urlTemporal = await generarUrlTemporal(
-          evidencia.storageKey,
-          expiraEnSegundos,
-          evidencia.versionId ?? undefined,
-        );
 
         return {
           _id: evidencia._id,
@@ -2393,11 +3389,21 @@ const obtenerEvidenciasMuestra = async (req, res = response) => {
 
           observacion: evidencia.observacion,
 
+          estadoEvidencia,
+
           registradoPor: evidencia.registradoPor,
 
           usuarioRegistro: evidencia.usuarioRegistro,
 
           fechaRegistro: evidencia.fechaRegistro,
+
+          anuladaPor: evidencia.anuladaPor ?? null,
+
+          usuarioAnulacion: evidencia.usuarioAnulacion ?? null,
+
+          fechaAnulacion: evidencia.fechaAnulacion ?? null,
+
+          motivoAnulacion: evidencia.motivoAnulacion ?? null,
 
           urlTemporal,
         };
@@ -2429,6 +3435,10 @@ const obtenerEvidenciasMuestra = async (req, res = response) => {
         estadoMuestra: muestra.estadoMuestra,
       },
 
+      resumenEvidencias,
+
+      incluirAnuladas,
+
       totalEvidencias: evidencias.length,
 
       expiraEnSegundos,
@@ -2456,10 +3466,13 @@ module.exports = {
   recibirMuestra,
   aceptarMuestra,
   rechazarMuestra,
+  anularMuestra,
   generarReintentoMuestra,
+  obtenerBandejaTomaMuestras,
   obtenerMuestrasPorSolicitud,
   obtenerMuestrasPorCodigoLaboratorio,
   obtenerDetalleMuestra,
   registrarEvidenciaMuestra,
+  anularEvidenciaMuestra,
   obtenerEvidenciasMuestra,
 };
