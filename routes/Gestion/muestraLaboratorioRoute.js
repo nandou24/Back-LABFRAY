@@ -47,7 +47,12 @@ router.put("/:muestraLaboratorioId/aceptar", validarJWT, aceptarMuestra);
 
 // ====== Registrar rechazo ======
 
-router.put("/:muestraLaboratorioId/rechazar", validarJWT, rechazarMuestra);
+router.put(
+  "/:muestraLaboratorioId/rechazar",
+  validarJWT,
+  cargarEvidenciaMuestra,
+  rechazarMuestra,
+);
 
 // ====== Anular muestra ======
 

@@ -1812,6 +1812,9 @@ const aceptarMuestra = async (req, res = response) => {
 // ====== Registrar rechazo de muestra ======
 
 const rechazarMuestra = async (req, res = response) => {
+  let archivoSubido = null;
+  let evidenciaPersistida = false;
+
   const session = await mongoose.startSession();
 
   session.startTransaction();
@@ -1839,6 +1842,28 @@ const rechazarMuestra = async (req, res = response) => {
 
     if (!motivoNormalizado) {
       throw new Error("Debe indicar el motivo de rechazo de la muestra");
+    }
+
+    // ====== Validar fotografía obligatoria ======
+
+    if (!req.file) {
+      throw new Error("Debe registrar una fotografía para rechazar la muestra");
+    }
+
+    const mimeTypesPermitidos = new Set([
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+    ]);
+
+    if (!mimeTypesPermitidos.has(req.file.mimetype)) {
+      throw new Error(
+        "Formato de imagen no permitido. Solo se admite JPEG, PNG o WebP",
+      );
+    }
+
+    if (!Buffer.isBuffer(req.file.buffer) || req.file.buffer.length === 0) {
+      throw new Error("La fotografía recibida no contiene datos válidos");
     }
 
     // ====== Obtener muestra ======
@@ -1890,6 +1915,23 @@ const rechazarMuestra = async (req, res = response) => {
       );
     }
 
+    // ====== Subir evidencia obligatoria ======
+
+    const keyPrefix =
+      `laboratorio/muestras/` + `${muestra._id.toString()}/` + `evidencias`;
+
+    archivoSubido = await subirArchivoStorage({
+      keyPrefix,
+      buffer: req.file.buffer,
+      mimeType: req.file.mimetype,
+    });
+
+    if (!archivoSubido?.archivoId || !archivoSubido?.key) {
+      throw new Error(
+        "El almacenamiento no devolvió una referencia válida de la fotografía",
+      );
+    }
+
     const ahora = new Date();
 
     // ====== Registrar rechazo ======
@@ -1903,6 +1945,40 @@ const rechazarMuestra = async (req, res = response) => {
     muestra.fechaRechazo = ahora;
 
     muestra.motivoRechazo = motivoNormalizado;
+
+    // ====== Registrar evidencia de rechazo ======
+
+    muestra.evidenciasFotograficas.push({
+      archivoId: archivoSubido.archivoId,
+
+      storageKey: archivoSubido.key,
+
+      versionId: archivoSubido.versionId ?? null,
+
+      etag: archivoSubido.etag ?? null,
+
+      nombreArchivo:
+        typeof req.file.originalname === "string"
+          ? req.file.originalname.trim()
+          : "",
+
+      mimeType: req.file.mimetype,
+
+      tamanoBytes: req.file.size,
+
+      etapa: "RECHAZO",
+
+      observacion: motivoNormalizado,
+
+      registradoPor: uid,
+
+      usuarioRegistro: nombreUsuario ?? null,
+
+      fechaRegistro: ahora,
+    });
+
+    const evidencia =
+      muestra.evidenciasFotograficas[muestra.evidenciasFotograficas.length - 1];
 
     // ====== Auditoría ======
 
@@ -1920,6 +1996,8 @@ const rechazarMuestra = async (req, res = response) => {
 
     await session.commitTransaction();
 
+    evidenciaPersistida = true;
+
     return res.status(200).json({
       ok: true,
 
@@ -1929,11 +2007,46 @@ const rechazarMuestra = async (req, res = response) => {
 
       requiereNuevaMuestra: true,
 
+      evidencia: {
+        _id: evidencia._id,
+        archivoId: evidencia.archivoId,
+        nombreArchivo: evidencia.nombreArchivo,
+        mimeType: evidencia.mimeType,
+        tamanoBytes: evidencia.tamanoBytes,
+        etapa: evidencia.etapa,
+        observacion: evidencia.observacion,
+        estadoEvidencia: evidencia.estadoEvidencia ?? "ACTIVA",
+        registradoPor: evidencia.registradoPor,
+        usuarioRegistro: evidencia.usuarioRegistro ?? null,
+        fechaRegistro: evidencia.fechaRegistro,
+        anuladaPor: evidencia.anuladaPor ?? null,
+        usuarioAnulacion: evidencia.usuarioAnulacion ?? null,
+        fechaAnulacion: evidencia.fechaAnulacion ?? null,
+        motivoAnulacion: evidencia.motivoAnulacion ?? null,
+        urlTemporal: null,
+      },
+
       muestra,
     });
   } catch (error) {
     if (session.inTransaction()) {
       await session.abortTransaction();
+    }
+
+    // ====== Compensar archivo S3 ======
+
+    if (archivoSubido?.key && !evidenciaPersistida) {
+      try {
+        await eliminarArchivo(
+          archivoSubido.key,
+          archivoSubido.versionId ?? undefined,
+        );
+      } catch (errorEliminacion) {
+        console.error(
+          "No se pudo eliminar de S3 la evidencia huérfana del rechazo:",
+          errorEliminacion,
+        );
+      }
     }
 
     console.error("Error al registrar rechazo de muestra:", error);
@@ -3188,6 +3301,32 @@ const anularEvidenciaMuestra = async (req, res = response) => {
 
     if (estadoActual === "ANULADA") {
       throw new Error("La evidencia fotográfica ya se encuentra anulada");
+    }
+
+    // ====== Proteger evidencia obligatoria de rechazo ======
+
+    if (
+      muestra.estadoMuestra === "RECHAZADA" &&
+      String(evidencia.etapa ?? "")
+        .trim()
+        .toUpperCase() === "RECHAZO"
+    ) {
+      const evidenciasRechazoActivas = muestra.evidenciasFotograficas.filter(
+        (item) => {
+          const etapa = String(item.etapa ?? "")
+            .trim()
+            .toUpperCase();
+          const estado = item.estadoEvidencia ?? "ACTIVA";
+
+          return etapa === "RECHAZO" && estado !== "ANULADA";
+        },
+      );
+
+      if (evidenciasRechazoActivas.length <= 1) {
+        throw new Error(
+          "Debe registrar una nueva evidencia de rechazo antes de anular la fotografía actual",
+        );
+      }
     }
 
     // ====== Validar solicitud ======
