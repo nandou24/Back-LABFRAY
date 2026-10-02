@@ -1663,6 +1663,1432 @@ const recibirMuestra = async (req, res = response) => {
   }
 };
 
+
+// ====== Obtener muestras disponibles para recepción masiva ======
+
+const obtenerMuestrasRecepcionMasiva = async (req, res = response) => {
+  try {
+    const { fechaInicio, fechaFin, terminoBusqueda, origenAtencion } = req.query;
+
+    // ====== Validar fechas ======
+
+    if (!fechaInicio || !fechaFin) {
+      throw new Error("Debe indicar la fecha de inicio y la fecha fin");
+    }
+
+    const inicio = new Date(fechaInicio);
+
+    const fin = new Date(fechaFin);
+
+    if (Number.isNaN(inicio.getTime()) || Number.isNaN(fin.getTime())) {
+      throw new Error("El rango de fechas no es válido");
+    }
+
+    if (inicio.getTime() > fin.getTime()) {
+      throw new Error("La fecha de inicio no puede ser mayor que la fecha fin");
+    }
+
+    // ====== Validar origen ======
+
+    const origenNormalizado = String(origenAtencion ?? "")
+      .trim()
+      .toUpperCase();
+
+    if (
+      origenNormalizado &&
+      !["PARTICULAR", "EMPRESA"].includes(origenNormalizado)
+    ) {
+      throw new Error("El origen de atención no es válido");
+    }
+
+    // ====== Obtener solicitudes candidatas ======
+
+    const filtroSolicitud = {
+      tipo: "Laboratorio",
+
+      estado: {
+        $ne: "ANULADO",
+      },
+
+      fechaEmision: {
+        $gte: inicio,
+        $lte: fin,
+      },
+    };
+
+    if (origenNormalizado) {
+      filtroSolicitud.origenAtencion = origenNormalizado;
+    }
+
+    const solicitudes = await SolicitudAtencion.find(filtroSolicitud)
+      .select(
+        [
+          "_id",
+          "codSolicitud",
+          "codigoLaboratorio",
+          "origenAtencion",
+          "programacionEmpresaId",
+          "codProgramacion",
+          "empresaId",
+          "razonSocialEmpresa",
+          "tipo",
+          "estado",
+          "fechaEmision",
+          "hc",
+          "tipoDoc",
+          "nroDoc",
+          "clienteId",
+          "nombreCliente",
+          "apePatCliente",
+          "apeMatCliente",
+        ].join(" "),
+      )
+      .populate({
+        path: "programacionEmpresaId",
+
+        select: [
+          "_id",
+          "codProgramacion",
+          "empresaId",
+          "rucEmpresa",
+          "razonSocialEmpresa",
+          "pacienteId",
+          "hc",
+          "tipoDoc",
+          "nroDoc",
+          "nombreCliente",
+          "apePatCliente",
+          "apeMatCliente",
+          "sede",
+        ].join(" "),
+      })
+      .sort({
+        fechaEmision: -1,
+        codSolicitud: -1,
+      })
+      .lean();
+
+    const solicitudIds = solicitudes.map((solicitud) => solicitud._id);
+
+    // ====== Obtener muestras recolectadas en bloque ======
+
+    const muestras =
+      solicitudIds.length > 0
+        ? await MuestraLaboratorio.find({
+            solicitudAtencionId: {
+              $in: solicitudIds,
+            },
+
+            estadoMuestra: "RECOLECTADA",
+          })
+            .select(
+              [
+                "_id",
+                "solicitudAtencionId",
+                "codSolicitud",
+                "codigoLaboratorio",
+                "codMuestra",
+                "codigoEtiqueta",
+                "numeroRecipiente",
+                "numeroIntento",
+                "estadoMuestra",
+                "tipoMuestraId",
+                "tipoMuestra",
+                "tuboEnvaseId",
+                "tuboEnvase",
+                "volumenRecolectado",
+                "unidadVolumenRecolectado",
+                "recolectadoPor",
+                "usuarioRecoleccion",
+                "fechaRecoleccion",
+              ].join(" "),
+            )
+            .sort({
+              fechaRecoleccion: 1,
+              codigoEtiqueta: 1,
+            })
+            .lean()
+        : [];
+
+    // ====== Mapear solicitudes ======
+
+    const solicitudesPorId = new Map(
+      solicitudes.map((solicitud) => [
+        solicitud._id.toString(),
+        solicitud,
+      ]),
+    );
+
+    const terminoNormalizado = String(terminoBusqueda ?? "").trim();
+
+    const regexBusqueda = terminoNormalizado
+      ? new RegExp(escaparRegex(terminoNormalizado), "i")
+      : null;
+
+    // ====== Construir filas operativas ======
+
+    const filas = muestras
+      .map((muestra) => {
+        const solicitud = solicitudesPorId.get(
+          muestra.solicitudAtencionId.toString(),
+        );
+
+        if (!solicitud) {
+          return null;
+        }
+
+        const esEmpresa = solicitud.origenAtencion === "EMPRESA";
+
+        const programacion =
+          esEmpresa &&
+          solicitud.programacionEmpresaId &&
+          typeof solicitud.programacionEmpresaId === "object"
+            ? solicitud.programacionEmpresaId
+            : null;
+
+        const pacienteOrigen = esEmpresa && programacion
+          ? programacion
+          : solicitud;
+
+        const fila = {
+          _id: muestra._id,
+
+          solicitudAtencionId: solicitud._id,
+
+          codSolicitud: solicitud.codSolicitud,
+
+          codigoLaboratorio: solicitud.codigoLaboratorio ?? null,
+
+          origenAtencion: solicitud.origenAtencion,
+
+          fechaEmision: solicitud.fechaEmision,
+
+          codigoEtiqueta: muestra.codigoEtiqueta,
+
+          codMuestra: muestra.codMuestra,
+
+          numeroRecipiente: muestra.numeroRecipiente,
+
+          numeroIntento: muestra.numeroIntento,
+
+          estadoMuestra: muestra.estadoMuestra,
+
+          tipoMuestraId: muestra.tipoMuestraId,
+
+          tipoMuestra: muestra.tipoMuestra ?? null,
+
+          tuboEnvaseId: muestra.tuboEnvaseId,
+
+          tuboEnvase: muestra.tuboEnvase ?? null,
+
+          volumenRecolectado: muestra.volumenRecolectado ?? null,
+
+          unidadVolumenRecolectado:
+            muestra.unidadVolumenRecolectado ?? null,
+
+          recolectadoPor: muestra.recolectadoPor ?? null,
+
+          usuarioRecoleccion: muestra.usuarioRecoleccion ?? null,
+
+          fechaRecoleccion: muestra.fechaRecoleccion ?? null,
+
+          paciente: {
+            hc: pacienteOrigen.hc ?? solicitud.hc ?? null,
+
+            clienteId:
+              obtenerId(solicitud.clienteId) ??
+              obtenerId(programacion?.pacienteId) ??
+              null,
+
+            tipoDoc: pacienteOrigen.tipoDoc ?? solicitud.tipoDoc ?? null,
+
+            nroDoc: pacienteOrigen.nroDoc ?? solicitud.nroDoc ?? null,
+
+            nombreCliente:
+              pacienteOrigen.nombreCliente ?? solicitud.nombreCliente ?? "",
+
+            apePatCliente:
+              pacienteOrigen.apePatCliente ?? solicitud.apePatCliente ?? "",
+
+            apeMatCliente:
+              pacienteOrigen.apeMatCliente ?? solicitud.apeMatCliente ?? "",
+          },
+
+          empresa: esEmpresa
+            ? {
+                programacionEmpresaId: obtenerId(
+                  solicitud.programacionEmpresaId,
+                ),
+
+                codProgramacion:
+                  programacion?.codProgramacion ??
+                  solicitud.codProgramacion ??
+                  null,
+
+                empresaId:
+                  obtenerId(programacion?.empresaId) ??
+                  obtenerId(solicitud.empresaId) ??
+                  null,
+
+                rucEmpresa: programacion?.rucEmpresa ?? null,
+
+                razonSocialEmpresa:
+                  programacion?.razonSocialEmpresa ??
+                  solicitud.razonSocialEmpresa ??
+                  "",
+
+                sede: programacion?.sede ?? null,
+              }
+            : null,
+        };
+
+        if (!regexBusqueda) {
+          return fila;
+        }
+
+        const textoBusqueda = [
+          fila.codigoEtiqueta,
+          fila.codMuestra,
+          fila.codigoLaboratorio,
+          fila.codSolicitud,
+          fila.paciente.hc,
+          fila.paciente.tipoDoc,
+          fila.paciente.nroDoc,
+          fila.paciente.nombreCliente,
+          fila.paciente.apePatCliente,
+          fila.paciente.apeMatCliente,
+          fila.empresa?.codProgramacion,
+          fila.empresa?.rucEmpresa,
+          fila.empresa?.razonSocialEmpresa,
+          fila.empresa?.sede,
+          fila.tipoMuestra?.nombreTipoMuestra,
+        ]
+          .filter(Boolean)
+          .join(" ");
+
+        return regexBusqueda.test(textoBusqueda) ? fila : null;
+      })
+      .filter(Boolean);
+
+    // ====== Resumen ======
+
+    const resumen = {
+      totalDisponibles: filas.length,
+
+      particulares: filas.filter(
+        (fila) => fila.origenAtencion === "PARTICULAR",
+      ).length,
+
+      empresas: filas.filter(
+        (fila) => fila.origenAtencion === "EMPRESA",
+      ).length,
+    };
+
+    return res.status(200).json({
+      ok: true,
+
+      msg:
+        filas.length > 0
+          ? "Muestras disponibles para recepción masiva obtenidas correctamente"
+          : "No existen muestras recolectadas disponibles para recepción",
+
+      resumen,
+
+      muestras: filas,
+    });
+  } catch (error) {
+    console.error(
+      "Error al obtener muestras para recepción masiva:",
+      error,
+    );
+
+    return res.status(400).json({
+      ok: false,
+
+      msg:
+        error.message ||
+        "No se pudieron obtener las muestras para recepción masiva",
+    });
+  }
+};
+
+// ====== Registrar recepción masiva ======
+
+const recibirMuestrasMasivamente = async (req, res = response) => {
+  try {
+    const { uid, nombreUsuario } = req.user;
+
+    const { muestraLaboratorioIds, observacionRecepcion } = req.body;
+
+    // ====== Validar lista ======
+
+    if (!Array.isArray(muestraLaboratorioIds)) {
+      throw new Error("Debe enviar las muestras que desea recepcionar");
+    }
+
+    const idsSolicitados = [
+      ...new Set(
+        muestraLaboratorioIds
+          .map((id) => String(id ?? "").trim())
+          .filter(Boolean),
+      ),
+    ];
+
+    if (idsSolicitados.length === 0) {
+      throw new Error("Debe seleccionar al menos una muestra");
+    }
+
+    if (idsSolicitados.length > 500) {
+      throw new Error(
+        "No se pueden procesar más de 500 muestras en una sola recepción masiva",
+      );
+    }
+
+    // ====== Validar observación común ======
+
+    if (
+      observacionRecepcion !== undefined &&
+      observacionRecepcion !== null &&
+      typeof observacionRecepcion !== "string"
+    ) {
+      throw new Error("La observación de recepción debe ser un texto");
+    }
+
+    const observacionNormalizada =
+      typeof observacionRecepcion === "string"
+        ? observacionRecepcion.trim()
+        : "";
+
+    const noProcesadas = [];
+
+    const idsValidos = [];
+
+    idsSolicitados.forEach((id) => {
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        noProcesadas.push({
+          muestraLaboratorioId: id,
+          codigoEtiqueta: null,
+          motivo: "El id de la muestra de laboratorio no es válido",
+        });
+
+        return;
+      }
+
+      idsValidos.push(id);
+    });
+
+    // ====== Obtener muestras en bloque ======
+
+    const muestras =
+      idsValidos.length > 0
+        ? await MuestraLaboratorio.find({
+            _id: {
+              $in: idsValidos,
+            },
+          })
+            .select(
+              [
+                "_id",
+                "solicitudAtencionId",
+                "codigoEtiqueta",
+                "codMuestra",
+                "estadoMuestra",
+                "recolectadoPor",
+                "fechaRecoleccion",
+                "tipoMuestraId",
+                "tuboEnvaseId",
+              ].join(" "),
+            )
+            .lean()
+        : [];
+
+    const muestrasPorId = new Map(
+      muestras.map((muestra) => [
+        muestra._id.toString(),
+        muestra,
+      ]),
+    );
+
+    // ====== Obtener solicitudes en bloque ======
+
+    const solicitudIds = [
+      ...new Set(
+        muestras
+          .map((muestra) => muestra.solicitudAtencionId?.toString())
+          .filter(Boolean),
+      ),
+    ];
+
+    const solicitudes =
+      solicitudIds.length > 0
+        ? await SolicitudAtencion.find({
+            _id: {
+              $in: solicitudIds,
+            },
+          })
+            .select("_id tipo estado")
+            .lean()
+        : [];
+
+    const solicitudesPorId = new Map(
+      solicitudes.map((solicitud) => [
+        solicitud._id.toString(),
+        solicitud,
+      ]),
+    );
+
+    // ====== Validar muestras candidatas ======
+
+    const candidatas = [];
+
+    idsValidos.forEach((id) => {
+      const muestra = muestrasPorId.get(id);
+
+      if (!muestra) {
+        noProcesadas.push({
+          muestraLaboratorioId: id,
+          codigoEtiqueta: null,
+          motivo: "La muestra de laboratorio no existe",
+        });
+
+        return;
+      }
+
+      if (muestra.estadoMuestra !== "RECOLECTADA") {
+        noProcesadas.push({
+          muestraLaboratorioId: id,
+          codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
+          motivo: `La muestra se encuentra en estado ${muestra.estadoMuestra}`,
+        });
+
+        return;
+      }
+
+      if (!muestra.recolectadoPor || !muestra.fechaRecoleccion) {
+        noProcesadas.push({
+          muestraLaboratorioId: id,
+          codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
+          motivo: "La muestra no posee trazabilidad válida de recolección",
+        });
+
+        return;
+      }
+
+      if (!muestra.tipoMuestraId || !muestra.tuboEnvaseId) {
+        noProcesadas.push({
+          muestraLaboratorioId: id,
+          codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
+          motivo:
+            "La muestra recolectada no posee tipo de muestra o recipiente registrado",
+        });
+
+        return;
+      }
+
+      const solicitud = solicitudesPorId.get(
+        muestra.solicitudAtencionId.toString(),
+      );
+
+      if (!solicitud) {
+        noProcesadas.push({
+          muestraLaboratorioId: id,
+          codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
+          motivo: "La solicitud de atención asociada no existe",
+        });
+
+        return;
+      }
+
+      if (solicitud.tipo !== "Laboratorio") {
+        noProcesadas.push({
+          muestraLaboratorioId: id,
+          codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
+          motivo: "La solicitud asociada no corresponde a Laboratorio",
+        });
+
+        return;
+      }
+
+      if (solicitud.estado === "ANULADO") {
+        noProcesadas.push({
+          muestraLaboratorioId: id,
+          codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
+          motivo: "La solicitud asociada se encuentra anulada",
+        });
+
+        return;
+      }
+
+      candidatas.push(muestra);
+    });
+
+    // ====== Registrar recepción en bloque ======
+
+    const ahora = new Date();
+
+    if (candidatas.length > 0) {
+      await MuestraLaboratorio.bulkWrite(
+        candidatas.map((muestra) => ({
+          updateOne: {
+            filter: {
+              _id: muestra._id,
+              estadoMuestra: "RECOLECTADA",
+            },
+
+            update: {
+              $set: {
+                estadoMuestra: "RECEPCIONADA",
+
+                recibidoPor: uid,
+
+                usuarioRecepcion: nombreUsuario ?? null,
+
+                fechaRecepcion: ahora,
+
+                observacionRecepcion: observacionNormalizada,
+
+                updatedBy: uid,
+
+                usuarioActualizacion: nombreUsuario ?? null,
+
+                fechaActualizacion: ahora,
+              },
+            },
+          },
+        })),
+        {
+          ordered: false,
+        },
+      );
+    }
+
+    // ====== Resolver actualizaciones exitosas ======
+
+    const candidatasIds = candidatas.map((muestra) => muestra._id);
+
+    const recepcionadas =
+      candidatasIds.length > 0
+        ? await MuestraLaboratorio.find({
+            _id: {
+              $in: candidatasIds,
+            },
+
+            estadoMuestra: "RECEPCIONADA",
+
+            recibidoPor: uid,
+
+            fechaRecepcion: ahora,
+          })
+            .select(
+              "_id codigoEtiqueta codMuestra estadoMuestra fechaRecepcion usuarioRecepcion",
+            )
+            .lean()
+        : [];
+
+    const idsRecepcionados = new Set(
+      recepcionadas.map((muestra) => muestra._id.toString()),
+    );
+
+    // ====== Detectar cambios concurrentes ======
+
+    const idsNoConfirmados = candidatas
+      .filter(
+        (muestra) => !idsRecepcionados.has(muestra._id.toString()),
+      )
+      .map((muestra) => muestra._id);
+
+    if (idsNoConfirmados.length > 0) {
+      const estadosActuales = await MuestraLaboratorio.find({
+        _id: {
+          $in: idsNoConfirmados,
+        },
+      })
+        .select("_id codigoEtiqueta codMuestra estadoMuestra")
+        .lean();
+
+      estadosActuales.forEach((muestra) => {
+        noProcesadas.push({
+          muestraLaboratorioId: muestra._id,
+          codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
+          motivo:
+            `La muestra cambió durante el procesamiento y ahora se encuentra en estado ${muestra.estadoMuestra}`,
+        });
+      });
+    }
+
+    // ====== Respuesta ======
+
+    const resumen = {
+      solicitadas: idsSolicitados.length,
+
+      recepcionadas: recepcionadas.length,
+
+      noProcesadas: noProcesadas.length,
+    };
+
+    const msg =
+      resumen.recepcionadas === resumen.solicitadas
+        ? "Todas las muestras fueron recepcionadas correctamente"
+        : resumen.recepcionadas > 0
+          ? "La recepción masiva finalizó con algunas muestras no procesadas"
+          : "No se pudo recepcionar ninguna de las muestras seleccionadas";
+
+    return res.status(200).json({
+      ok: true,
+
+      msg,
+
+      resumen,
+
+      recepcionadas: recepcionadas.map((muestra) => ({
+        muestraLaboratorioId: muestra._id,
+
+        codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
+
+        estadoMuestra: muestra.estadoMuestra,
+
+        usuarioRecepcion: muestra.usuarioRecepcion ?? null,
+
+        fechaRecepcion: muestra.fechaRecepcion,
+      })),
+
+      noProcesadas,
+    });
+  } catch (error) {
+    console.error("Error al registrar recepción masiva:", error);
+
+    return res.status(400).json({
+      ok: false,
+
+      msg: error.message || "No se pudo registrar la recepción masiva",
+    });
+  }
+};
+
+
+// ====== Obtener muestras disponibles para aceptación masiva ======
+
+const obtenerMuestrasAceptacionMasiva = async (req, res = response) => {
+  try {
+    const { fechaInicio, fechaFin, terminoBusqueda, origenAtencion } = req.query;
+
+    // ====== Validar fechas ======
+
+    if (!fechaInicio || !fechaFin) {
+      throw new Error("Debe indicar la fecha de inicio y la fecha fin");
+    }
+
+    const inicio = new Date(fechaInicio);
+
+    const fin = new Date(fechaFin);
+
+    if (Number.isNaN(inicio.getTime()) || Number.isNaN(fin.getTime())) {
+      throw new Error("El rango de fechas no es válido");
+    }
+
+    if (inicio.getTime() > fin.getTime()) {
+      throw new Error("La fecha de inicio no puede ser mayor que la fecha fin");
+    }
+
+    // ====== Validar origen ======
+
+    const origenNormalizado = String(origenAtencion ?? "")
+      .trim()
+      .toUpperCase();
+
+    if (
+      origenNormalizado &&
+      !["PARTICULAR", "EMPRESA"].includes(origenNormalizado)
+    ) {
+      throw new Error("El origen de atención no es válido");
+    }
+
+    // ====== Obtener solicitudes candidatas ======
+
+    const filtroSolicitud = {
+      tipo: "Laboratorio",
+
+      estado: {
+        $ne: "ANULADO",
+      },
+
+      fechaEmision: {
+        $gte: inicio,
+        $lte: fin,
+      },
+    };
+
+    if (origenNormalizado) {
+      filtroSolicitud.origenAtencion = origenNormalizado;
+    }
+
+    const solicitudes = await SolicitudAtencion.find(filtroSolicitud)
+      .select(
+        [
+          "_id",
+          "codSolicitud",
+          "codigoLaboratorio",
+          "origenAtencion",
+          "programacionEmpresaId",
+          "codProgramacion",
+          "empresaId",
+          "razonSocialEmpresa",
+          "tipo",
+          "estado",
+          "fechaEmision",
+          "hc",
+          "tipoDoc",
+          "nroDoc",
+          "clienteId",
+          "nombreCliente",
+          "apePatCliente",
+          "apeMatCliente",
+        ].join(" "),
+      )
+      .populate({
+        path: "programacionEmpresaId",
+
+        select: [
+          "_id",
+          "codProgramacion",
+          "empresaId",
+          "rucEmpresa",
+          "razonSocialEmpresa",
+          "pacienteId",
+          "hc",
+          "tipoDoc",
+          "nroDoc",
+          "nombreCliente",
+          "apePatCliente",
+          "apeMatCliente",
+          "sede",
+        ].join(" "),
+      })
+      .sort({
+        fechaEmision: -1,
+        codSolicitud: -1,
+      })
+      .lean();
+
+    const solicitudIds = solicitudes.map((solicitud) => solicitud._id);
+
+    // ====== Obtener muestras recepcionadas en bloque ======
+
+    const muestras =
+      solicitudIds.length > 0
+        ? await MuestraLaboratorio.find({
+            solicitudAtencionId: {
+              $in: solicitudIds,
+            },
+
+            estadoMuestra: "RECEPCIONADA",
+          })
+            .select(
+              [
+                "_id",
+                "solicitudAtencionId",
+                "codSolicitud",
+                "codigoLaboratorio",
+                "codMuestra",
+                "codigoEtiqueta",
+                "numeroRecipiente",
+                "numeroIntento",
+                "estadoMuestra",
+                "tipoMuestraId",
+                "tipoMuestra",
+                "tuboEnvaseId",
+                "tuboEnvase",
+                "volumenRecolectado",
+                "unidadVolumenRecolectado",
+                "recolectadoPor",
+                "usuarioRecoleccion",
+                "fechaRecoleccion",
+                "recibidoPor",
+                "usuarioRecepcion",
+                "fechaRecepcion",
+              ].join(" "),
+            )
+            .sort({
+              fechaRecepcion: 1,
+              codigoEtiqueta: 1,
+            })
+            .lean()
+        : [];
+
+    // ====== Mapear solicitudes ======
+
+    const solicitudesPorId = new Map(
+      solicitudes.map((solicitud) => [
+        solicitud._id.toString(),
+        solicitud,
+      ]),
+    );
+
+    const terminoNormalizado = String(terminoBusqueda ?? "").trim();
+
+    const regexBusqueda = terminoNormalizado
+      ? new RegExp(escaparRegex(terminoNormalizado), "i")
+      : null;
+
+    // ====== Construir filas operativas ======
+
+    const filas = muestras
+      .map((muestra) => {
+        const solicitud = solicitudesPorId.get(
+          muestra.solicitudAtencionId.toString(),
+        );
+
+        if (!solicitud) {
+          return null;
+        }
+
+        const esEmpresa = solicitud.origenAtencion === "EMPRESA";
+
+        const programacion =
+          esEmpresa &&
+          solicitud.programacionEmpresaId &&
+          typeof solicitud.programacionEmpresaId === "object"
+            ? solicitud.programacionEmpresaId
+            : null;
+
+        const pacienteOrigen = esEmpresa && programacion
+          ? programacion
+          : solicitud;
+
+        const fila = {
+          _id: muestra._id,
+
+          solicitudAtencionId: solicitud._id,
+
+          codSolicitud: solicitud.codSolicitud,
+
+          codigoLaboratorio: solicitud.codigoLaboratorio ?? null,
+
+          origenAtencion: solicitud.origenAtencion,
+
+          fechaEmision: solicitud.fechaEmision,
+
+          codigoEtiqueta: muestra.codigoEtiqueta,
+
+          codMuestra: muestra.codMuestra,
+
+          numeroRecipiente: muestra.numeroRecipiente,
+
+          numeroIntento: muestra.numeroIntento,
+
+          estadoMuestra: muestra.estadoMuestra,
+
+          tipoMuestraId: muestra.tipoMuestraId,
+
+          tipoMuestra: muestra.tipoMuestra ?? null,
+
+          tuboEnvaseId: muestra.tuboEnvaseId,
+
+          tuboEnvase: muestra.tuboEnvase ?? null,
+
+          volumenRecolectado: muestra.volumenRecolectado ?? null,
+
+          unidadVolumenRecolectado:
+            muestra.unidadVolumenRecolectado ?? null,
+
+          recolectadoPor: muestra.recolectadoPor ?? null,
+
+          usuarioRecoleccion: muestra.usuarioRecoleccion ?? null,
+
+          fechaRecoleccion: muestra.fechaRecoleccion ?? null,
+
+          recibidoPor: muestra.recibidoPor ?? null,
+
+          usuarioRecepcion: muestra.usuarioRecepcion ?? null,
+
+          fechaRecepcion: muestra.fechaRecepcion ?? null,
+
+          paciente: {
+            hc: pacienteOrigen.hc ?? solicitud.hc ?? null,
+
+            clienteId:
+              obtenerId(solicitud.clienteId) ??
+              obtenerId(programacion?.pacienteId) ??
+              null,
+
+            tipoDoc: pacienteOrigen.tipoDoc ?? solicitud.tipoDoc ?? null,
+
+            nroDoc: pacienteOrigen.nroDoc ?? solicitud.nroDoc ?? null,
+
+            nombreCliente:
+              pacienteOrigen.nombreCliente ?? solicitud.nombreCliente ?? "",
+
+            apePatCliente:
+              pacienteOrigen.apePatCliente ?? solicitud.apePatCliente ?? "",
+
+            apeMatCliente:
+              pacienteOrigen.apeMatCliente ?? solicitud.apeMatCliente ?? "",
+          },
+
+          empresa: esEmpresa
+            ? {
+                programacionEmpresaId: obtenerId(
+                  solicitud.programacionEmpresaId,
+                ),
+
+                codProgramacion:
+                  programacion?.codProgramacion ??
+                  solicitud.codProgramacion ??
+                  null,
+
+                empresaId:
+                  obtenerId(programacion?.empresaId) ??
+                  obtenerId(solicitud.empresaId) ??
+                  null,
+
+                rucEmpresa: programacion?.rucEmpresa ?? null,
+
+                razonSocialEmpresa:
+                  programacion?.razonSocialEmpresa ??
+                  solicitud.razonSocialEmpresa ??
+                  "",
+
+                sede: programacion?.sede ?? null,
+              }
+            : null,
+        };
+
+        if (!regexBusqueda) {
+          return fila;
+        }
+
+        const textoBusqueda = [
+          fila.codigoEtiqueta,
+          fila.codMuestra,
+          fila.codigoLaboratorio,
+          fila.codSolicitud,
+          fila.paciente.hc,
+          fila.paciente.tipoDoc,
+          fila.paciente.nroDoc,
+          fila.paciente.nombreCliente,
+          fila.paciente.apePatCliente,
+          fila.paciente.apeMatCliente,
+          fila.empresa?.codProgramacion,
+          fila.empresa?.rucEmpresa,
+          fila.empresa?.razonSocialEmpresa,
+          fila.empresa?.sede,
+          fila.tipoMuestra?.nombreTipoMuestra,
+          fila.tuboEnvase?.nombreTuboEnvase,
+        ]
+          .filter(Boolean)
+          .join(" ");
+
+        return regexBusqueda.test(textoBusqueda) ? fila : null;
+      })
+      .filter(Boolean);
+
+    // ====== Resumen ======
+
+    const resumen = {
+      totalDisponibles: filas.length,
+
+      particulares: filas.filter(
+        (fila) => fila.origenAtencion === "PARTICULAR",
+      ).length,
+
+      empresas: filas.filter(
+        (fila) => fila.origenAtencion === "EMPRESA",
+      ).length,
+    };
+
+    return res.status(200).json({
+      ok: true,
+
+      msg:
+        filas.length > 0
+          ? "Muestras disponibles para aceptación masiva obtenidas correctamente"
+          : "No existen muestras recepcionadas disponibles para aceptación",
+
+      resumen,
+
+      muestras: filas,
+    });
+  } catch (error) {
+    console.error(
+      "Error al obtener muestras para aceptación masiva:",
+      error,
+    );
+
+    return res.status(400).json({
+      ok: false,
+
+      msg:
+        error.message ||
+        "No se pudieron obtener las muestras para aceptación masiva",
+    });
+  }
+};
+
+// ====== Registrar aceptación masiva ======
+
+const aceptarMuestrasMasivamente = async (req, res = response) => {
+  try {
+    const { uid, nombreUsuario } = req.user;
+
+    const { muestraLaboratorioIds, observacionAceptacion } = req.body;
+
+    // ====== Validar lista ======
+
+    if (!Array.isArray(muestraLaboratorioIds)) {
+      throw new Error("Debe enviar las muestras que desea aceptar");
+    }
+
+    const idsSolicitados = [
+      ...new Set(
+        muestraLaboratorioIds
+          .map((id) => String(id ?? "").trim())
+          .filter(Boolean),
+      ),
+    ];
+
+    if (idsSolicitados.length === 0) {
+      throw new Error("Debe seleccionar al menos una muestra");
+    }
+
+    if (idsSolicitados.length > 500) {
+      throw new Error(
+        "No se pueden procesar más de 500 muestras en una sola aceptación masiva",
+      );
+    }
+
+    // ====== Validar observación común ======
+
+    if (
+      observacionAceptacion !== undefined &&
+      observacionAceptacion !== null &&
+      typeof observacionAceptacion !== "string"
+    ) {
+      throw new Error("La observación de aceptación debe ser un texto");
+    }
+
+    const observacionNormalizada =
+      typeof observacionAceptacion === "string"
+        ? observacionAceptacion.trim()
+        : "";
+
+    const noProcesadas = [];
+
+    const idsValidos = [];
+
+    idsSolicitados.forEach((id) => {
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        noProcesadas.push({
+          muestraLaboratorioId: id,
+          codigoEtiqueta: null,
+          motivo: "El id de la muestra de laboratorio no es válido",
+        });
+
+        return;
+      }
+
+      idsValidos.push(id);
+    });
+
+    // ====== Obtener muestras en bloque ======
+
+    const muestras =
+      idsValidos.length > 0
+        ? await MuestraLaboratorio.find({
+            _id: {
+              $in: idsValidos,
+            },
+          })
+            .select(
+              [
+                "_id",
+                "solicitudAtencionId",
+                "codigoEtiqueta",
+                "codMuestra",
+                "estadoMuestra",
+                "recolectadoPor",
+                "fechaRecoleccion",
+                "recibidoPor",
+                "fechaRecepcion",
+                "tipoMuestraId",
+                "tuboEnvaseId",
+              ].join(" "),
+            )
+            .lean()
+        : [];
+
+    const muestrasPorId = new Map(
+      muestras.map((muestra) => [
+        muestra._id.toString(),
+        muestra,
+      ]),
+    );
+
+    // ====== Obtener solicitudes en bloque ======
+
+    const solicitudIds = [
+      ...new Set(
+        muestras
+          .map((muestra) => muestra.solicitudAtencionId?.toString())
+          .filter(Boolean),
+      ),
+    ];
+
+    const solicitudes =
+      solicitudIds.length > 0
+        ? await SolicitudAtencion.find({
+            _id: {
+              $in: solicitudIds,
+            },
+          })
+            .select("_id tipo estado")
+            .lean()
+        : [];
+
+    const solicitudesPorId = new Map(
+      solicitudes.map((solicitud) => [
+        solicitud._id.toString(),
+        solicitud,
+      ]),
+    );
+
+    // ====== Validar muestras candidatas ======
+
+    const candidatas = [];
+
+    idsValidos.forEach((id) => {
+      const muestra = muestrasPorId.get(id);
+
+      if (!muestra) {
+        noProcesadas.push({
+          muestraLaboratorioId: id,
+          codigoEtiqueta: null,
+          motivo: "La muestra de laboratorio no existe",
+        });
+
+        return;
+      }
+
+      if (muestra.estadoMuestra !== "RECEPCIONADA") {
+        noProcesadas.push({
+          muestraLaboratorioId: id,
+          codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
+          motivo: `La muestra se encuentra en estado ${muestra.estadoMuestra}`,
+        });
+
+        return;
+      }
+
+      if (!muestra.recolectadoPor || !muestra.fechaRecoleccion) {
+        noProcesadas.push({
+          muestraLaboratorioId: id,
+          codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
+          motivo: "La muestra no posee trazabilidad válida de recolección",
+        });
+
+        return;
+      }
+
+      if (!muestra.recibidoPor || !muestra.fechaRecepcion) {
+        noProcesadas.push({
+          muestraLaboratorioId: id,
+          codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
+          motivo: "La muestra no posee trazabilidad válida de recepción",
+        });
+
+        return;
+      }
+
+      if (!muestra.tipoMuestraId || !muestra.tuboEnvaseId) {
+        noProcesadas.push({
+          muestraLaboratorioId: id,
+          codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
+          motivo:
+            "La muestra no posee tipo de muestra o recipiente registrado",
+        });
+
+        return;
+      }
+
+      const solicitud = solicitudesPorId.get(
+        muestra.solicitudAtencionId.toString(),
+      );
+
+      if (!solicitud) {
+        noProcesadas.push({
+          muestraLaboratorioId: id,
+          codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
+          motivo: "La solicitud de atención asociada no existe",
+        });
+
+        return;
+      }
+
+      if (solicitud.tipo !== "Laboratorio") {
+        noProcesadas.push({
+          muestraLaboratorioId: id,
+          codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
+          motivo: "La solicitud asociada no corresponde a Laboratorio",
+        });
+
+        return;
+      }
+
+      if (solicitud.estado === "ANULADO") {
+        noProcesadas.push({
+          muestraLaboratorioId: id,
+          codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
+          motivo: "La solicitud asociada se encuentra anulada",
+        });
+
+        return;
+      }
+
+      candidatas.push(muestra);
+    });
+
+    // ====== Registrar aceptación en bloque ======
+
+    const ahora = new Date();
+
+    if (candidatas.length > 0) {
+      await MuestraLaboratorio.bulkWrite(
+        candidatas.map((muestra) => ({
+          updateOne: {
+            filter: {
+              _id: muestra._id,
+              estadoMuestra: "RECEPCIONADA",
+            },
+
+            update: {
+              $set: {
+                estadoMuestra: "ACEPTADA",
+
+                aceptadoPor: uid,
+
+                usuarioAceptacion: nombreUsuario ?? null,
+
+                fechaAceptacion: ahora,
+
+                observacionAceptacion: observacionNormalizada,
+
+                updatedBy: uid,
+
+                usuarioActualizacion: nombreUsuario ?? null,
+
+                fechaActualizacion: ahora,
+              },
+            },
+          },
+        })),
+        {
+          ordered: false,
+        },
+      );
+    }
+
+    // ====== Resolver actualizaciones exitosas ======
+
+    const candidatasIds = candidatas.map((muestra) => muestra._id);
+
+    const aceptadas =
+      candidatasIds.length > 0
+        ? await MuestraLaboratorio.find({
+            _id: {
+              $in: candidatasIds,
+            },
+
+            estadoMuestra: "ACEPTADA",
+
+            aceptadoPor: uid,
+
+            fechaAceptacion: ahora,
+          })
+            .select(
+              "_id codigoEtiqueta codMuestra estadoMuestra fechaAceptacion usuarioAceptacion",
+            )
+            .lean()
+        : [];
+
+    const idsAceptados = new Set(
+      aceptadas.map((muestra) => muestra._id.toString()),
+    );
+
+    // ====== Detectar cambios concurrentes ======
+
+    const idsNoConfirmados = candidatas
+      .filter(
+        (muestra) => !idsAceptados.has(muestra._id.toString()),
+      )
+      .map((muestra) => muestra._id);
+
+    if (idsNoConfirmados.length > 0) {
+      const estadosActuales = await MuestraLaboratorio.find({
+        _id: {
+          $in: idsNoConfirmados,
+        },
+      })
+        .select("_id codigoEtiqueta codMuestra estadoMuestra")
+        .lean();
+
+      estadosActuales.forEach((muestra) => {
+        noProcesadas.push({
+          muestraLaboratorioId: muestra._id,
+          codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
+          motivo:
+            `La muestra cambió durante el procesamiento y ahora se encuentra en estado ${muestra.estadoMuestra}`,
+        });
+      });
+    }
+
+    // ====== Respuesta ======
+
+    const resumen = {
+      solicitadas: idsSolicitados.length,
+
+      aceptadas: aceptadas.length,
+
+      noProcesadas: noProcesadas.length,
+    };
+
+    const msg =
+      resumen.aceptadas === resumen.solicitadas
+        ? "Todas las muestras fueron aceptadas correctamente"
+        : resumen.aceptadas > 0
+          ? "La aceptación masiva finalizó con algunas muestras no procesadas"
+          : "No se pudo aceptar ninguna de las muestras seleccionadas";
+
+    return res.status(200).json({
+      ok: true,
+
+      msg,
+
+      resumen,
+
+      aceptadas: aceptadas.map((muestra) => ({
+        muestraLaboratorioId: muestra._id,
+
+        codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
+
+        estadoMuestra: muestra.estadoMuestra,
+
+        usuarioAceptacion: muestra.usuarioAceptacion ?? null,
+
+        fechaAceptacion: muestra.fechaAceptacion,
+      })),
+
+      noProcesadas,
+    });
+  } catch (error) {
+    console.error("Error al registrar aceptación masiva:", error);
+
+    return res.status(400).json({
+      ok: false,
+
+      msg: error.message || "No se pudo registrar la aceptación masiva",
+    });
+  }
+};
+
 // ====== Registrar aceptación de muestra ======
 
 const aceptarMuestra = async (req, res = response) => {
@@ -3603,6 +5029,10 @@ module.exports = {
   inicializarMuestrasSolicitud,
   recolectarMuestra,
   recibirMuestra,
+  obtenerMuestrasRecepcionMasiva,
+  recibirMuestrasMasivamente,
+  obtenerMuestrasAceptacionMasiva,
+  aceptarMuestrasMasivamente,
   aceptarMuestra,
   rechazarMuestra,
   anularMuestra,

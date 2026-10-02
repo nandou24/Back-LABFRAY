@@ -4,6 +4,10 @@ const {
   inicializarMuestrasSolicitud,
   recolectarMuestra,
   recibirMuestra,
+  obtenerMuestrasRecepcionMasiva,
+  recibirMuestrasMasivamente,
+  obtenerMuestrasAceptacionMasiva,
+  aceptarMuestrasMasivamente,
   aceptarMuestra,
   rechazarMuestra,
   anularMuestra,
@@ -31,6 +35,34 @@ router.post(
   "/inicializar/:solicitudAtencionId",
   validarJWT,
   inicializarMuestrasSolicitud,
+);
+
+// ====== Recepción masiva ======
+
+router.get(
+  "/masiva/recepcion",
+  validarJWT,
+  obtenerMuestrasRecepcionMasiva,
+);
+
+router.put(
+  "/masiva/recibir",
+  validarJWT,
+  recibirMuestrasMasivamente,
+);
+
+// ====== Aceptación masiva ======
+
+router.get(
+  "/masiva/aceptacion",
+  validarJWT,
+  obtenerMuestrasAceptacionMasiva,
+);
+
+router.put(
+  "/masiva/aceptar",
+  validarJWT,
+  aceptarMuestrasMasivamente,
 );
 
 // ====== Registrar recolección ======
