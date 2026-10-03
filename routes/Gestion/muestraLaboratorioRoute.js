@@ -3,6 +3,8 @@ const { Router } = require("express");
 const {
   inicializarMuestrasSolicitud,
   recolectarMuestra,
+  obtenerMuestrasRecoleccionMasiva,
+  recolectarMuestrasMasivamente,
   recibirMuestra,
   obtenerMuestrasRecepcionMasiva,
   recibirMuestrasMasivamente,
@@ -35,6 +37,20 @@ router.post(
   "/inicializar/:solicitudAtencionId",
   validarJWT,
   inicializarMuestrasSolicitud,
+);
+
+// ====== Recolección masiva ======
+
+router.get(
+  "/masiva/recoleccion",
+  validarJWT,
+  obtenerMuestrasRecoleccionMasiva,
+);
+
+router.put(
+  "/masiva/recolectar",
+  validarJWT,
+  recolectarMuestrasMasivamente,
 );
 
 // ====== Recepción masiva ======
