@@ -9,6 +9,9 @@ const {
   resolverEstadoOperativoSolicitud,
   sincronizarEstadosSolicitudLaboratorio,
 } = require("../../utils/Gestion/estadoOperativoSolicitud");
+const {
+  registrarEventoHistorialResultado,
+} = require("../../utils/Gestion/historialResultadoLaboratorio");
 
 
 // ====== Escapar búsqueda regex ======
@@ -457,6 +460,7 @@ const construirResultadoDesdeUnidad = ({
   const snapshot = unidad.snapshotClinico;
 
   const resultadosItems = construirResultadosItemsDesdeUnidad(unidad);
+  const ahora = new Date();
 
   return {
     // ====== Orden ======
@@ -487,13 +491,30 @@ const construirResultadoDesdeUnidad = ({
 
     estadoResultado: "PENDIENTE",
 
+    // ====== Versionado e historial ======
+
+    versionResultado: 1,
+
+    historialEventos: [
+      {
+        tipoEvento: "INICIALIZACION",
+        versionResultado: 1,
+        estadoAnterior: null,
+        estadoNuevo: "PENDIENTE",
+        ejecutadoPor: uid,
+        usuarioEjecucion: nombreUsuario ?? null,
+        fechaEvento: ahora,
+        detalle: "Resultado inicializado desde el snapshot clínico de la solicitud",
+      },
+    ],
+
     // ====== Auditoría ======
 
     createdBy: uid,
 
     usuarioRegistro: nombreUsuario ?? null,
 
-    fechaRegistro: new Date(),
+    fechaRegistro: ahora,
   };
 };
 
@@ -1518,6 +1539,8 @@ const registrarEditarResultadoItem = async (req, res = response) => {
     });
 
     const ahora = new Date();
+    const estadoAnteriorResultado = resultadoLaboratorio.estadoResultado;
+    const valorAnterior = resultadoItem.valor;
 
     const primeraCaptura = !resultadoItem.fechaRegistroResultado;
 
@@ -1582,6 +1605,25 @@ const registrarEditarResultadoItem = async (req, res = response) => {
 
     resultadoLaboratorio.fechaActualizacion = ahora;
 
+    registrarEventoHistorialResultado(resultadoLaboratorio, {
+      tipoEvento: primeraCaptura ? "REGISTRO" : "MODIFICACION",
+      estadoAnterior: estadoAnteriorResultado,
+      estadoNuevo: resultadoLaboratorio.estadoResultado,
+      uid,
+      nombreUsuario,
+      fecha: ahora,
+      detalle: primeraCaptura
+        ? `Registro del Item ${resultadoItem.nombreInforme}`
+        : `Modificación del Item ${resultadoItem.nombreInforme}`,
+      metadatos: {
+        itemResultadoId: resultadoItem._id,
+        codItemLab: resultadoItem.codItemLab,
+        nombreInforme: resultadoItem.nombreInforme,
+        valorAnterior,
+        valorNuevo: resultadoItem.valor,
+      },
+    });
+
     // ====== Guardar resultado ======
 
     await resultadoLaboratorio.save({
@@ -1621,6 +1663,10 @@ const registrarEditarResultadoItem = async (req, res = response) => {
       habilitacionMuestra,
 
       item: resultadoItem,
+
+      versionResultado: resultadoLaboratorio.versionResultado,
+
+      historialEventos: resultadoLaboratorio.historialEventos,
     });
   } catch (error) {
     if (session.inTransaction()) {
@@ -1756,8 +1802,10 @@ const registrarResultadosMasivos = async (req, res = response) => {
     });
 
     const ahora = new Date();
+    const estadoAnteriorResultado = resultadoLaboratorio.estadoResultado;
 
     const itemsActualizados = [];
+    const trazabilidadItems = [];
 
     // ====== Procesar Items ======
 
@@ -1806,6 +1854,7 @@ const registrarResultadosMasivos = async (req, res = response) => {
       });
 
       const primeraCaptura = !resultadoItem.fechaRegistroResultado;
+      const valorAnterior = resultadoItem.valor;
 
       // ====== Registrar valor ======
 
@@ -1854,6 +1903,14 @@ const registrarResultadosMasivos = async (req, res = response) => {
       });
 
       itemsActualizados.push(resultadoItem);
+      trazabilidadItems.push({
+        itemResultadoId: resultadoItem._id,
+        codItemLab: resultadoItem.codItemLab,
+        nombreInforme: resultadoItem.nombreInforme,
+        primeraCaptura,
+        valorAnterior,
+        valorNuevo: resultadoItem.valor,
+      });
     }
 
     // ====== Recalcular estado general ======
@@ -1868,6 +1925,19 @@ const registrarResultadosMasivos = async (req, res = response) => {
     resultadoLaboratorio.usuarioActualizacion = nombreUsuario ?? null;
 
     resultadoLaboratorio.fechaActualizacion = ahora;
+
+    registrarEventoHistorialResultado(resultadoLaboratorio, {
+      tipoEvento: trazabilidadItems.every((item) => item.primeraCaptura)
+        ? "REGISTRO"
+        : "MODIFICACION",
+      estadoAnterior: estadoAnteriorResultado,
+      estadoNuevo: resultadoLaboratorio.estadoResultado,
+      uid,
+      nombreUsuario,
+      fecha: ahora,
+      detalle: `Actualización de ${itemsActualizados.length} Item(s) de la prueba`,
+      metadatos: { items: trazabilidadItems },
+    });
 
     // ====== Guardar una sola vez ======
 
@@ -1911,6 +1981,10 @@ const registrarResultadosMasivos = async (req, res = response) => {
       itemsActualizados: itemsActualizados.length,
 
       items: itemsActualizados,
+
+      versionResultado: resultadoLaboratorio.versionResultado,
+
+      historialEventos: resultadoLaboratorio.historialEventos,
     });
   } catch (error) {
     if (session.inTransaction()) {
@@ -1934,6 +2008,401 @@ const registrarResultadosMasivos = async (req, res = response) => {
       ...(error.habilitacionMuestra
         ? { habilitacionMuestra: error.habilitacionMuestra }
         : {}),
+    });
+  } finally {
+    await session.endSession();
+  }
+};
+
+// ====== Revisar Items antes de validación ======
+
+const revisarResultadoAntesValidacion = async (req, res = response) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { resultadoLaboratorioId } = req.params;
+    const { uid, nombreUsuario } = req.user;
+    const { items } = req.body ?? {};
+
+    if (!mongoose.Types.ObjectId.isValid(resultadoLaboratorioId)) {
+      throw new Error("El id del resultado de laboratorio no es válido");
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new Error("Debe enviar al menos un Item para revisar");
+    }
+
+    const resultadoLaboratorio = await ResultadoLaboratorio.findById(
+      resultadoLaboratorioId,
+    ).session(session);
+
+    if (!resultadoLaboratorio) {
+      throw new Error("El resultado de laboratorio no existe");
+    }
+
+    if (resultadoLaboratorio.estadoResultado !== "COMPLETO") {
+      throw new Error(
+        `Solo se puede modificar el informe durante la validación cuando el resultado está COMPLETO. Estado actual: ${resultadoLaboratorio.estadoResultado}`,
+      );
+    }
+
+    const solicitud = await SolicitudAtencion.findById(
+      resultadoLaboratorio.solicitudAtencionId,
+    ).session(session);
+
+    if (!solicitud || solicitud.tipo !== "Laboratorio") {
+      throw new Error("La solicitud de laboratorio asociada no existe");
+    }
+
+    if (solicitud.estado === "ANULADO") {
+      throw new Error("No se puede revisar un resultado de una solicitud anulada");
+    }
+
+    const habilitacionMuestra = await validarCapturaResultadoHabilitada({
+      solicitud,
+      resultadoLaboratorio,
+      session,
+    });
+
+    const ahora = new Date();
+    const trazabilidadItems = [];
+    const itemsActualizados = [];
+    const idsRecibidos = new Set();
+
+    for (const itemRecibido of items) {
+      const itemResultadoId = itemRecibido?.itemResultadoId;
+
+      if (!mongoose.Types.ObjectId.isValid(itemResultadoId)) {
+        throw new Error(`El id del Item no es válido: ${itemResultadoId}`);
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(itemRecibido, "valor")) {
+        throw new Error(`Debe enviar el valor del Item ${itemResultadoId}`);
+      }
+
+      if (idsRecibidos.has(String(itemResultadoId))) {
+        throw new Error(`El Item ${itemResultadoId} se encuentra repetido`);
+      }
+      idsRecibidos.add(String(itemResultadoId));
+
+      const resultadoItem = resultadoLaboratorio.resultadosItems.id(
+        itemResultadoId,
+      );
+
+      if (!resultadoItem) {
+        throw new Error(`El Item ${itemResultadoId} no existe`);
+      }
+
+      if (resultadoItem.estado !== "REGISTRADO") {
+        throw new Error(
+          `El Item ${resultadoItem.nombreInforme} no se encuentra REGISTRADO`,
+        );
+      }
+
+      const { snapshotItem } = obtenerItemSnapshotResultado({
+        solicitud,
+        resultadoLaboratorio,
+        resultadoItem,
+      });
+
+      const valorAnterior = resultadoItem.valor;
+      const valorNormalizado = normalizarValorResultado({
+        valor: itemRecibido.valor,
+        tipoResultado: resultadoItem.tipoResultado,
+        snapshotItem,
+      });
+
+      resultadoItem.valor = valorNormalizado;
+      if (Object.prototype.hasOwnProperty.call(itemRecibido, "observacion")) {
+        resultadoItem.observacion =
+          typeof itemRecibido.observacion === "string"
+            ? itemRecibido.observacion.trim()
+            : "";
+      }
+
+      resultadoItem.actualizadoPor = uid;
+      resultadoItem.usuarioActualizacionResultado = nombreUsuario ?? null;
+      resultadoItem.fechaActualizacionResultado = ahora;
+      resultadoItem.evaluacionReferencia = evaluarReferenciaResultado({
+        solicitud,
+        snapshotItem,
+        valor: valorNormalizado,
+      });
+      resultadoItem.alertasDetectadas = detectarAlertasResultado({
+        solicitud,
+        snapshotItem,
+        valor: valorNormalizado,
+        fechaDeteccion: ahora,
+      });
+
+      trazabilidadItems.push({
+        itemResultadoId: resultadoItem._id,
+        codItemLab: resultadoItem.codItemLab,
+        nombreInforme: resultadoItem.nombreInforme,
+        valorAnterior,
+        valorNuevo: resultadoItem.valor,
+      });
+      itemsActualizados.push(resultadoItem);
+    }
+
+    resultadoLaboratorio.updatedBy = uid;
+    resultadoLaboratorio.usuarioActualizacion = nombreUsuario ?? null;
+    resultadoLaboratorio.fechaActualizacion = ahora;
+
+    registrarEventoHistorialResultado(resultadoLaboratorio, {
+      tipoEvento: "REVISION_VALIDACION",
+      estadoAnterior: "COMPLETO",
+      estadoNuevo: "COMPLETO",
+      uid,
+      nombreUsuario,
+      fecha: ahora,
+      detalle: `Revisión previa a validación de ${itemsActualizados.length} Item(s)`,
+      metadatos: { items: trazabilidadItems },
+    });
+
+    await resultadoLaboratorio.save({ session });
+
+    const estadoOperativo = await sincronizarEstadosSolicitudLaboratorio({
+      solicitud,
+      uid,
+      nombreUsuario,
+      session,
+    });
+
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      ok: true,
+      msg: "Informe actualizado durante la revisión de validación",
+      estadoResultado: resultadoLaboratorio.estadoResultado,
+      estadoUnidadLaboratorio:
+        obtenerUnidadLaboratorio({
+          solicitud,
+          claveUnidad: resultadoLaboratorio.claveUnidad,
+        })?.estado ?? null,
+      estadoSolicitud: solicitud.estado,
+      estadoOperativo,
+      habilitacionMuestra,
+      itemsActualizados: itemsActualizados.length,
+      items: itemsActualizados,
+      versionResultado: resultadoLaboratorio.versionResultado,
+      historialEventos: resultadoLaboratorio.historialEventos,
+    });
+  } catch (error) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    console.error("Error al revisar resultado antes de validar:", error);
+
+    return res.status(error.statusCode ?? 400).json({
+      ok: false,
+      msg: error.message || "No se pudo actualizar el informe durante la validación",
+      ...(error.codigo ? { codigo: error.codigo } : {}),
+      ...(error.habilitacionMuestra
+        ? { habilitacionMuestra: error.habilitacionMuestra }
+        : {}),
+    });
+  } finally {
+    await session.endSession();
+  }
+};
+
+// ====== Validar varios resultados completos ======
+
+const validarResultadosMasivamente = async (req, res = response) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { uid, nombreUsuario } = req.user;
+    const {
+      resultadoIds,
+      observacionValidacion,
+      confirmarAlertasCriticas,
+    } = req.body ?? {};
+
+    if (!Array.isArray(resultadoIds) || resultadoIds.length === 0) {
+      throw new Error("Debe indicar al menos un resultado para validar");
+    }
+
+    const ids = [...new Set(resultadoIds.map((id) => String(id ?? "")))];
+
+    if (ids.some((id) => !mongoose.Types.ObjectId.isValid(id))) {
+      throw new Error("Existe un id de resultado no válido");
+    }
+
+    if (
+      observacionValidacion !== undefined &&
+      typeof observacionValidacion !== "string"
+    ) {
+      throw new Error("La observación de validación debe ser un texto");
+    }
+
+    const resultados = await ResultadoLaboratorio.find({
+      _id: { $in: ids },
+    }).session(session);
+
+    if (resultados.length !== ids.length) {
+      throw new Error("No se encontraron todos los resultados solicitados");
+    }
+
+    const solicitudIds = new Set(
+      resultados.map((resultado) => String(resultado.solicitudAtencionId)),
+    );
+
+    if (solicitudIds.size !== 1) {
+      throw new Error("La validación masiva solo admite resultados de una misma solicitud");
+    }
+
+    const solicitud = await SolicitudAtencion.findById(
+      resultados[0].solicitudAtencionId,
+    ).session(session);
+
+    if (!solicitud || solicitud.tipo !== "Laboratorio") {
+      throw new Error("La solicitud de laboratorio asociada no existe");
+    }
+
+    if (solicitud.estado === "ANULADO") {
+      throw new Error("No se pueden validar resultados de una solicitud anulada");
+    }
+
+    const alertas = [];
+
+    for (const resultado of resultados) {
+      if (resultado.estadoResultado !== "COMPLETO") {
+        throw new Error(
+          `${resultado.codPruebaLab} - ${resultado.nombrePruebaLab} no se encuentra COMPLETO`,
+        );
+      }
+
+      const items = Array.isArray(resultado.resultadosItems)
+        ? resultado.resultadosItems
+        : [];
+
+      if (items.length === 0 || items.some((item) => item.estado !== "REGISTRADO")) {
+        throw new Error(
+          `${resultado.codPruebaLab} - ${resultado.nombrePruebaLab} posee Items pendientes de registro`,
+        );
+      }
+
+      if (
+        items.some(
+          (item) =>
+            !item.evaluacionReferencia ||
+            item.evaluacionReferencia.estado === "PENDIENTE",
+        )
+      ) {
+        throw new Error(
+          `${resultado.codPruebaLab} - ${resultado.nombrePruebaLab} posee evaluación clínica pendiente`,
+        );
+      }
+
+      for (const item of items) {
+        alertas.push(
+          ...(Array.isArray(item.alertasDetectadas)
+            ? item.alertasDetectadas
+            : []),
+        );
+      }
+    }
+
+    const resumenAlertas = {
+      total: alertas.length,
+      informativas: alertas.filter(
+        (alerta) => alerta.nivelAlerta === "INFORMATIVA",
+      ).length,
+      advertencias: alertas.filter(
+        (alerta) => alerta.nivelAlerta === "ADVERTENCIA",
+      ).length,
+      criticas: alertas.filter((alerta) => alerta.nivelAlerta === "CRITICA")
+        .length,
+    };
+
+    if (resumenAlertas.criticas > 0 && confirmarAlertasCriticas !== true) {
+      const error = new Error(
+        "Debe confirmar explícitamente la revisión de las alertas críticas antes de validar los resultados",
+      );
+      error.statusCode = 409;
+      error.codigo = "CONFIRMACION_ALERTAS_CRITICAS_REQUERIDA";
+      throw error;
+    }
+
+    const ahora = new Date();
+    const observacion =
+      typeof observacionValidacion === "string"
+        ? observacionValidacion.trim()
+        : "";
+
+    for (const resultado of resultados) {
+      for (const item of resultado.resultadosItems ?? []) {
+        item.estado = "VALIDADO";
+      }
+
+      resultado.estadoResultado = "VALIDADO";
+      resultado.validadoPor = uid;
+      resultado.usuarioValidacion = nombreUsuario ?? null;
+      resultado.fechaValidacion = ahora;
+      resultado.observacionValidacion = observacion;
+      resultado.confirmoAlertasCriticasValidacion =
+        resumenAlertas.criticas > 0 && confirmarAlertasCriticas === true;
+      resultado.updatedBy = uid;
+      resultado.usuarioActualizacion = nombreUsuario ?? null;
+      resultado.fechaActualizacion = ahora;
+
+      registrarEventoHistorialResultado(resultado, {
+        tipoEvento: "VALIDACION",
+        estadoAnterior: "COMPLETO",
+        estadoNuevo: "VALIDADO",
+        uid,
+        nombreUsuario,
+        fecha: ahora,
+        detalle: observacion
+          ? `Resultado validado masivamente. Observación: ${observacion}`
+          : "Resultado validado masivamente",
+        metadatos: {
+          validacionMasiva: true,
+          confirmoAlertasCriticas:
+            resultado.confirmoAlertasCriticasValidacion === true,
+        },
+      });
+
+      await resultado.save({ session });
+    }
+
+    const estadoOperativo = await sincronizarEstadosSolicitudLaboratorio({
+      solicitud,
+      uid,
+      nombreUsuario,
+      session,
+    });
+
+    await session.commitTransaction();
+
+    const resultadosOrdenados = ids.map((id) =>
+      resultados.find((resultado) => String(resultado._id) === id),
+    );
+
+    return res.status(200).json({
+      ok: true,
+      msg: `${resultados.length} resultado(s) validado(s) correctamente`,
+      estadoSolicitud: solicitud.estado,
+      estadoOperativo,
+      resumenAlertas,
+      resultados: resultadosOrdenados,
+    });
+  } catch (error) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    console.error("Error al validar resultados masivamente:", error);
+
+    return res.status(error.statusCode ?? 400).json({
+      ok: false,
+      msg: error.message || "No se pudieron validar los resultados",
+      ...(error.codigo ? { codigo: error.codigo } : {}),
     });
   } finally {
     await session.endSession();
@@ -2106,6 +2575,22 @@ const validarResultadoLaboratorio = async (req, res = response) => {
 
     resultadoLaboratorio.confirmoAlertasCriticasValidacion =
       resumenAlertas.criticas > 0 && req.body?.confirmarAlertasCriticas === true;
+
+    registrarEventoHistorialResultado(resultadoLaboratorio, {
+      tipoEvento: "VALIDACION",
+      estadoAnterior: "COMPLETO",
+      estadoNuevo: "VALIDADO",
+      uid,
+      nombreUsuario,
+      fecha: ahora,
+      detalle: resultadoLaboratorio.observacionValidacion
+        ? `Resultado validado. Observación: ${resultadoLaboratorio.observacionValidacion}`
+        : "Resultado validado",
+      metadatos: {
+        confirmoAlertasCriticas:
+          resultadoLaboratorio.confirmoAlertasCriticasValidacion === true,
+      },
+    });
 
     // ====== Guardar ======
 
@@ -2298,6 +2783,20 @@ const liberarResultadoLaboratorio = async (req, res = response) => {
 
     resultadoLaboratorio.confirmoAlertasCriticasLiberacion =
       resumenAlertas.criticas > 0 && req.body?.confirmarAlertasCriticas === true;
+
+    registrarEventoHistorialResultado(resultadoLaboratorio, {
+      tipoEvento: "LIBERACION",
+      estadoAnterior: "VALIDADO",
+      estadoNuevo: "LIBERADO",
+      uid,
+      nombreUsuario,
+      fecha: ahora,
+      detalle: "Resultado liberado para visualización o entrega",
+      metadatos: {
+        confirmoAlertasCriticas:
+          resultadoLaboratorio.confirmoAlertasCriticasLiberacion === true,
+      },
+    });
 
     // ====== Guardar ======
 
@@ -3509,6 +4008,8 @@ module.exports = {
   inicializarResultadosSolicitud,
   registrarEditarResultadoItem,
   registrarResultadosMasivos,
+  revisarResultadoAntesValidacion,
+  validarResultadosMasivamente,
   validarResultadoLaboratorio,
   liberarResultadoLaboratorio,
   anularResultadoLaboratorio,

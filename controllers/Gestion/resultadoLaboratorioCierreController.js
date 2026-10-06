@@ -12,6 +12,10 @@ const {
   PERMISOS_ACCION,
   normalizarPermisosAcciones,
 } = require("../../utils/permisosAccion");
+const {
+  construirSnapshotResultado,
+  registrarEventoHistorialResultado,
+} = require("../../utils/Gestion/historialResultadoLaboratorio");
 
 // ====== Validar segundo usuario para anulación liberada ======
 
@@ -237,6 +241,9 @@ const anularResultadoLaboratorioSeguro = async (req, res = response) => {
     }
 
     const estadoPrevio = resultadoLaboratorio.estadoResultado;
+    const snapshotAntesAnulacion = construirSnapshotResultado(
+      resultadoLaboratorio,
+    );
     const ahora = new Date();
     let autorizador = null;
 
@@ -271,6 +278,26 @@ const anularResultadoLaboratorioSeguro = async (req, res = response) => {
     resultadoLaboratorio.updatedBy = uid;
     resultadoLaboratorio.usuarioActualizacion = nombreUsuario ?? null;
     resultadoLaboratorio.fechaActualizacion = ahora;
+
+    registrarEventoHistorialResultado(resultadoLaboratorio, {
+      tipoEvento: "ANULACION",
+      estadoAnterior: estadoPrevio,
+      estadoNuevo: "ANULADO",
+      uid,
+      nombreUsuario,
+      fecha: ahora,
+      detalle: `Resultado anulado. Motivo: ${resultadoLaboratorio.motivoAnulacion}`,
+      metadatos: autorizador
+        ? {
+            segundoUsuario: {
+              uid: autorizador.uid,
+              nombreUsuario: autorizador.nombreUsuario,
+              nombreRol: autorizador.nombreRol,
+            },
+          }
+        : null,
+      snapshotResultado: snapshotAntesAnulacion,
+    });
 
     await resultadoLaboratorio.save({ session });
 
@@ -328,6 +355,269 @@ const anularResultadoLaboratorioSeguro = async (req, res = response) => {
   }
 };
 
+
+// ====== Reabrir resultado anulado ======
+
+const reabrirResultadoLaboratorio = async (req, res = response) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { resultadoLaboratorioId } = req.params;
+    const { uid, nombreUsuario } = req.user;
+
+    if (!mongoose.Types.ObjectId.isValid(resultadoLaboratorioId)) {
+      throw new Error("El id del resultado de laboratorio no es válido");
+    }
+
+    const resultadoLaboratorio = await ResultadoLaboratorio.findById(
+      resultadoLaboratorioId,
+    ).session(session);
+
+    if (!resultadoLaboratorio) {
+      throw new Error("El resultado de laboratorio no existe");
+    }
+
+    if (resultadoLaboratorio.estadoResultado !== "ANULADO") {
+      throw new Error(
+        `Solo se puede reabrir un resultado ANULADO. Estado actual: ${resultadoLaboratorio.estadoResultado}`,
+      );
+    }
+
+    const solicitud = await SolicitudAtencion.findById(
+      resultadoLaboratorio.solicitudAtencionId,
+    ).session(session);
+
+    if (!solicitud || solicitud.tipo !== "Laboratorio") {
+      throw new Error("La solicitud de laboratorio asociada no existe");
+    }
+
+    const unidad = (solicitud.unidadesLaboratorio ?? []).find(
+      (item) =>
+        String(item.claveUnidad ?? "") ===
+        String(resultadoLaboratorio.claveUnidad ?? ""),
+    );
+
+    if (!unidad) {
+      throw new Error("No se encontró la unidad clínica asociada al resultado");
+    }
+
+    const ahora = new Date();
+    const snapshotAnulado = construirSnapshotResultado(resultadoLaboratorio);
+    const estadoAnterior = resultadoLaboratorio.estadoResultado;
+    const versionActual = Number(resultadoLaboratorio.versionResultado ?? 1);
+    const historialActual = Array.isArray(resultadoLaboratorio.historialEventos)
+      ? resultadoLaboratorio.historialEventos
+      : [];
+    const existeEventoVersion = (tipoEvento) =>
+      historialActual.some(
+        (evento) =>
+          evento.tipoEvento === tipoEvento &&
+          Number(evento.versionResultado ?? 1) === versionActual,
+      );
+
+    // ====== Completar historial de documentos creados antes de 10F.1 ======
+
+    if (!existeEventoVersion("REGISTRO")) {
+      for (const item of resultadoLaboratorio.resultadosItems ?? []) {
+        if (!item.fechaRegistroResultado) {
+          continue;
+        }
+
+        registrarEventoHistorialResultado(resultadoLaboratorio, {
+          tipoEvento: "REGISTRO",
+          estadoAnterior: null,
+          estadoNuevo: null,
+          uid: item.registradoPor,
+          nombreUsuario: item.usuarioRegistroResultado,
+          fecha: item.fechaRegistroResultado,
+          detalle: `Registro histórico del Item ${item.nombreInforme}`,
+          metadatos: {
+            itemResultadoId: item._id,
+            codItemLab: item.codItemLab,
+            nombreInforme: item.nombreInforme,
+            valor: item.valor,
+          },
+        });
+      }
+    }
+
+    if (!existeEventoVersion("MODIFICACION")) {
+      for (const item of resultadoLaboratorio.resultadosItems ?? []) {
+        if (!item.fechaActualizacionResultado) {
+          continue;
+        }
+
+        registrarEventoHistorialResultado(resultadoLaboratorio, {
+          tipoEvento: "MODIFICACION",
+          estadoAnterior: null,
+          estadoNuevo: null,
+          uid: item.actualizadoPor,
+          nombreUsuario: item.usuarioActualizacionResultado,
+          fecha: item.fechaActualizacionResultado,
+          detalle: `Modificación histórica del Item ${item.nombreInforme}`,
+          metadatos: {
+            itemResultadoId: item._id,
+            codItemLab: item.codItemLab,
+            nombreInforme: item.nombreInforme,
+            valor: item.valor,
+          },
+        });
+      }
+    }
+
+    if (resultadoLaboratorio.fechaValidacion && !existeEventoVersion("VALIDACION")) {
+      registrarEventoHistorialResultado(resultadoLaboratorio, {
+        tipoEvento: "VALIDACION",
+        estadoAnterior: "COMPLETO",
+        estadoNuevo: "VALIDADO",
+        uid: resultadoLaboratorio.validadoPor,
+        nombreUsuario: resultadoLaboratorio.usuarioValidacion,
+        fecha: resultadoLaboratorio.fechaValidacion,
+        detalle: resultadoLaboratorio.observacionValidacion
+          ? `Resultado validado. Observación: ${resultadoLaboratorio.observacionValidacion}`
+          : "Resultado validado",
+      });
+    }
+
+    if (resultadoLaboratorio.fechaLiberacion && !existeEventoVersion("LIBERACION")) {
+      registrarEventoHistorialResultado(resultadoLaboratorio, {
+        tipoEvento: "LIBERACION",
+        estadoAnterior: "VALIDADO",
+        estadoNuevo: "LIBERADO",
+        uid: resultadoLaboratorio.liberadoPor,
+        nombreUsuario: resultadoLaboratorio.usuarioLiberacion,
+        fecha: resultadoLaboratorio.fechaLiberacion,
+        detalle: "Resultado liberado para visualización o entrega",
+      });
+    }
+
+    if (resultadoLaboratorio.fechaAnulacion && !existeEventoVersion("ANULACION")) {
+      registrarEventoHistorialResultado(resultadoLaboratorio, {
+        tipoEvento: "ANULACION",
+        estadoAnterior: resultadoLaboratorio.estadoPrevioAnulacion,
+        estadoNuevo: "ANULADO",
+        uid: resultadoLaboratorio.anuladoPor,
+        nombreUsuario: resultadoLaboratorio.usuarioAnulacion,
+        fecha: resultadoLaboratorio.fechaAnulacion,
+        detalle: resultadoLaboratorio.motivoAnulacion
+          ? `Resultado anulado. Motivo: ${resultadoLaboratorio.motivoAnulacion}`
+          : "Resultado anulado",
+        snapshotResultado: snapshotAnulado,
+      });
+    }
+
+    resultadoLaboratorio.versionResultado =
+      Number(resultadoLaboratorio.versionResultado ?? 1) + 1;
+    resultadoLaboratorio.estadoResultado = "PENDIENTE";
+    resultadoLaboratorio.observacionGeneral = "";
+
+    for (const item of resultadoLaboratorio.resultadosItems ?? []) {
+      item.valor = null;
+      item.observacion = "";
+      item.estado = "PENDIENTE";
+      item.evaluacionReferencia = {
+        estado: "PENDIENTE",
+        referenciaAplicada: null,
+        mensaje: "",
+      };
+      item.alertasDetectadas = [];
+      item.registradoPor = null;
+      item.usuarioRegistroResultado = null;
+      item.fechaRegistroResultado = null;
+      item.actualizadoPor = null;
+      item.usuarioActualizacionResultado = null;
+      item.fechaActualizacionResultado = null;
+    }
+
+    resultadoLaboratorio.validadoPor = null;
+    resultadoLaboratorio.usuarioValidacion = null;
+    resultadoLaboratorio.fechaValidacion = null;
+    resultadoLaboratorio.observacionValidacion = "";
+    resultadoLaboratorio.confirmoAlertasCriticasValidacion = false;
+
+    resultadoLaboratorio.liberadoPor = null;
+    resultadoLaboratorio.usuarioLiberacion = null;
+    resultadoLaboratorio.fechaLiberacion = null;
+    resultadoLaboratorio.confirmoAlertasCriticasLiberacion = false;
+
+    resultadoLaboratorio.estadoPrevioAnulacion = null;
+    resultadoLaboratorio.anuladoPor = null;
+    resultadoLaboratorio.usuarioAnulacion = null;
+    resultadoLaboratorio.fechaAnulacion = null;
+    resultadoLaboratorio.motivoAnulacion = null;
+    resultadoLaboratorio.autorizacionAnulacionPor = null;
+    resultadoLaboratorio.usuarioAutorizacionAnulacion = null;
+    resultadoLaboratorio.rolAutorizacionAnulacion = null;
+    resultadoLaboratorio.fechaAutorizacionAnulacion = null;
+
+    resultadoLaboratorio.updatedBy = uid;
+    resultadoLaboratorio.usuarioActualizacion = nombreUsuario ?? null;
+    resultadoLaboratorio.fechaActualizacion = ahora;
+
+    registrarEventoHistorialResultado(resultadoLaboratorio, {
+      tipoEvento: "REAPERTURA",
+      estadoAnterior,
+      estadoNuevo: "PENDIENTE",
+      uid,
+      nombreUsuario,
+      fecha: ahora,
+      detalle:
+        "Resultado reabierto para un nuevo ciclo de registro sin modificar la muestra asociada",
+      metadatos: {
+        versionAnterior: versionActual,
+      },
+    });
+
+    unidad.estado = "PENDIENTE";
+    if (typeof solicitud.markModified === "function") {
+      solicitud.markModified("unidadesLaboratorio");
+    }
+
+    solicitud.estado = "EN PROCESO";
+    solicitud.fechaAtencionArea = null;
+    solicitud.atendidoPor = null;
+    solicitud.usuarioAtencion = null;
+    solicitud.updatedBy = uid;
+    solicitud.usuarioActualizacion = nombreUsuario ?? null;
+    solicitud.fechaActualizacion = ahora;
+
+    await resultadoLaboratorio.save({ session });
+    await solicitud.save({ session });
+
+    const estadoOperativo = await resolverEstadoOperativoSolicitud({
+      solicitud,
+      session,
+    });
+
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      ok: true,
+      msg: "Resultado reabierto correctamente. Puede registrarse un nuevo informe con la muestra vigente si continúa apta.",
+      estadoResultado: resultadoLaboratorio.estadoResultado,
+      estadoUnidadLaboratorio: unidad.estado,
+      estadoSolicitud: solicitud.estado,
+      estadoOperativo,
+      resultado: resultadoLaboratorio,
+    });
+  } catch (error) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    console.error("Error al reabrir resultado de laboratorio:", error);
+
+    return res.status(error.statusCode ?? 400).json({
+      ok: false,
+      msg: error.message || "No se pudo reabrir el resultado de laboratorio",
+    });
+  } finally {
+    await session.endSession();
+  }
+};
+
 module.exports = {
   anularResultadoLaboratorioSeguro,
+  reabrirResultadoLaboratorio,
 };

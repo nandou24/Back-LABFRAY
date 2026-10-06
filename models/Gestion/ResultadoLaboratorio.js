@@ -301,6 +301,79 @@ const ResultadoItemSchema = new Schema(
   },
 );
 
+
+// ====== Evento histórico del resultado ======
+
+const HistorialEventoResultadoSchema = new Schema(
+  {
+    tipoEvento: {
+      type: String,
+      enum: [
+        "INICIALIZACION",
+        "REGISTRO",
+        "MODIFICACION",
+        "REVISION_VALIDACION",
+        "VALIDACION",
+        "LIBERACION",
+        "ANULACION",
+        "REAPERTURA",
+      ],
+      required: true,
+    },
+
+    versionResultado: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
+
+    estadoAnterior: {
+      type: String,
+      default: null,
+    },
+
+    estadoNuevo: {
+      type: String,
+      default: null,
+    },
+
+    ejecutadoPor: {
+      type: String,
+      default: null,
+    },
+
+    usuarioEjecucion: {
+      type: String,
+      default: null,
+    },
+
+    fechaEvento: {
+      type: Date,
+      default: Date.now,
+      required: true,
+    },
+
+    detalle: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    metadatos: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+
+    snapshotResultado: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+  },
+  {
+    _id: true,
+  },
+);
+
 // ====== Resultado de laboratorio ======
 
 const ResultadoLaboratorioSchema = new Schema(
@@ -489,6 +562,20 @@ const ResultadoLaboratorioSchema = new Schema(
     fechaAutorizacionAnulacion: {
       type: Date,
       default: null,
+    },
+
+
+    // ====== Versionado e historial ======
+
+    versionResultado: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
+
+    historialEventos: {
+      type: [HistorialEventoResultadoSchema],
+      default: [],
     },
 
     // ====== Auditoría ======

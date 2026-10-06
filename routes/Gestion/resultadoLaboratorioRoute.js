@@ -5,6 +5,8 @@ const {
   inicializarResultadosSolicitud,
   registrarEditarResultadoItem,
   registrarResultadosMasivos,
+  revisarResultadoAntesValidacion,
+  validarResultadosMasivamente,
   validarResultadoLaboratorio,
   liberarResultadoLaboratorio,
   obtenerResultadosPorSolicitud,
@@ -13,6 +15,7 @@ const {
 } = require("../../controllers/Gestion/resultadoLaboratorioController");
 const {
   anularResultadoLaboratorioSeguro,
+  reabrirResultadoLaboratorio,
 } = require("../../controllers/Gestion/resultadoLaboratorioCierreController");
 
 const { validarJWT } = require("../../middlewares/validar-token");
@@ -76,6 +79,24 @@ router.put(
   registrarResultadosMasivos,
 );
 
+// ====== Revisar informe antes de validar ======
+
+router.put(
+  "/:resultadoLaboratorioId/revision-items",
+  validarJWT,
+  validarPermisoAccion(PERMISOS_ACCION.RESULTADOS_VALIDAR),
+  revisarResultadoAntesValidacion,
+);
+
+// ====== Validar resultados masivamente ======
+
+router.put(
+  "/validar-masivo",
+  validarJWT,
+  validarPermisoAccion(PERMISOS_ACCION.RESULTADOS_VALIDAR),
+  validarResultadosMasivamente,
+);
+
 // ====== Validar resultado ======
 
 router.put(
@@ -103,6 +124,15 @@ router.put(
   validarJWT,
   validarPermisoAccion(PERMISOS_ACCION.RESULTADOS_ANULAR),
   anularResultadoLaboratorioSeguro,
+);
+
+// ====== Reabrir resultado anulado ======
+
+router.put(
+  "/:resultadoLaboratorioId/reabrir",
+  validarJWT,
+  validarPermisoAccion(PERMISOS_ACCION.RESULTADOS_ANULAR),
+  reabrirResultadoLaboratorio,
 );
 
 module.exports = router;
