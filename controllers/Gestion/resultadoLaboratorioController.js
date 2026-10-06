@@ -1151,7 +1151,7 @@ const evaluarReferenciaResultado = ({ solicitud, snapshotItem, valor }) => {
       referenciaAplicada: construirReferenciaAplicada(referencia),
 
       mensaje: referencia.descripcion
-        ? `Resultado clasificado en referencia: ${referencia.descripcion}`
+        ? `Resultado clasificado como: ${referencia.descripcion}`
         : "Resultado dentro de la referencia clínica",
     };
   }
