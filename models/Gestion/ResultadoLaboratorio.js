@@ -408,6 +408,11 @@ const ResultadoLaboratorioSchema = new Schema(
       default: "",
     },
 
+    confirmoAlertasCriticasValidacion: {
+      type: Boolean,
+      default: false,
+    },
+
     // ====== Liberación ======
 
     liberadoPor: {
@@ -423,6 +428,11 @@ const ResultadoLaboratorioSchema = new Schema(
     fechaLiberacion: {
       type: Date,
       default: null,
+    },
+
+    confirmoAlertasCriticasLiberacion: {
+      type: Boolean,
+      default: false,
     },
 
     // ====== Anulación ======
@@ -461,7 +471,25 @@ const ResultadoLaboratorioSchema = new Schema(
       trim: true,
     },
 
-    // ====== Auditoría ======
+    autorizacionAnulacionPor: {
+      type: String,
+      default: null,
+    },
+
+    usuarioAutorizacionAnulacion: {
+      type: String,
+      default: null,
+    },
+
+    rolAutorizacionAnulacion: {
+      type: String,
+      default: null,
+    },
+
+    fechaAutorizacionAnulacion: {
+      type: Date,
+      default: null,
+    },
 
     // ====== Auditoría ======
 

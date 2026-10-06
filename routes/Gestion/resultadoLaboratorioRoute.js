@@ -7,13 +7,22 @@ const {
   registrarResultadosMasivos,
   validarResultadoLaboratorio,
   liberarResultadoLaboratorio,
-  anularResultadoLaboratorio,
   obtenerResultadosPorSolicitud,
   obtenerResultadoPorId,
   obtenerResultadosLiberadosPorSolicitud,
 } = require("../../controllers/Gestion/resultadoLaboratorioController");
+const {
+  anularResultadoLaboratorioSeguro,
+} = require("../../controllers/Gestion/resultadoLaboratorioCierreController");
 
 const { validarJWT } = require("../../middlewares/validar-token");
+const {
+  validarPermisoAccion,
+} = require("../../middlewares/validar-permiso-accion");
+const {
+  validarConfirmacionAlertasCriticasResultado,
+} = require("../../middlewares/validar-alertas-criticas-resultado");
+const { PERMISOS_ACCION } = require("../../utils/permisosAccion");
 
 const router = Router();
 
@@ -54,6 +63,7 @@ router.get("/:resultadoLaboratorioId", validarJWT, obtenerResultadoPorId);
 router.put(
   "/:resultadoLaboratorioId/items/:itemResultadoId",
   validarJWT,
+  validarPermisoAccion(PERMISOS_ACCION.RESULTADOS_REGISTRAR),
   registrarEditarResultadoItem,
 );
 
@@ -62,6 +72,7 @@ router.put(
 router.put(
   "/:resultadoLaboratorioId/items",
   validarJWT,
+  validarPermisoAccion(PERMISOS_ACCION.RESULTADOS_REGISTRAR),
   registrarResultadosMasivos,
 );
 
@@ -70,13 +81,18 @@ router.put(
 router.put(
   "/:resultadoLaboratorioId/validar",
   validarJWT,
+  validarPermisoAccion(PERMISOS_ACCION.RESULTADOS_VALIDAR),
+  validarConfirmacionAlertasCriticasResultado,
   validarResultadoLaboratorio,
 );
+
 // ====== Liberar resultado ======
 
 router.put(
   "/:resultadoLaboratorioId/liberar",
   validarJWT,
+  validarPermisoAccion(PERMISOS_ACCION.RESULTADOS_LIBERAR),
+  validarConfirmacionAlertasCriticasResultado,
   liberarResultadoLaboratorio,
 );
 
@@ -85,7 +101,8 @@ router.put(
 router.put(
   "/:resultadoLaboratorioId/anular",
   validarJWT,
-  anularResultadoLaboratorio,
+  validarPermisoAccion(PERMISOS_ACCION.RESULTADOS_ANULAR),
+  anularResultadoLaboratorioSeguro,
 );
 
 module.exports = router;

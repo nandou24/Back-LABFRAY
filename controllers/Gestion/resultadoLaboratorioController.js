@@ -2104,6 +2104,9 @@ const validarResultadoLaboratorio = async (req, res = response) => {
       ).length,
     };
 
+    resultadoLaboratorio.confirmoAlertasCriticasValidacion =
+      resumenAlertas.criticas > 0 && req.body?.confirmarAlertasCriticas === true;
+
     // ====== Guardar ======
 
     await resultadoLaboratorio.save({
@@ -2292,6 +2295,9 @@ const liberarResultadoLaboratorio = async (req, res = response) => {
         (alerta) => alerta.nivelAlerta === "CRITICA",
       ).length,
     };
+
+    resultadoLaboratorio.confirmoAlertasCriticasLiberacion =
+      resumenAlertas.criticas > 0 && req.body?.confirmarAlertasCriticas === true;
 
     // ====== Guardar ======
 

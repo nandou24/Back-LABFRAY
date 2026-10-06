@@ -3,16 +3,12 @@ const Usuario = require("../models/Usuario");
 const bcrypt = require("bcryptjs");
 const { generarJWT } = require("../helpers/jwt");
 const RecurHumano = require("../models/Mantenimiento/RecHumano");
+const { normalizarPermisosAcciones } = require("../utils/permisosAccion");
 
 const crearUsuario = async (req, res = response) => {
-  // console.log(req.body)
   const { name, email, password, rol } = req.body;
-  // console.log(name, email, password, rol, "holaaa");
 
   try {
-    //   console.log(name, email, password, rol, "holaaa");
-
-    // verificar el email si es que existe
     const usuario = await Usuario.findOne({ email });
 
     if (usuario) {
@@ -22,23 +18,18 @@ const crearUsuario = async (req, res = response) => {
       });
     }
 
-    //Crear usuario con el modelo
-    const dbUser = new Usuario(req.body); //name, email, password
-
-    //Hashear la contraseña mediante un hash
+    const dbUser = new Usuario(req.body);
     const numAletorio = bcrypt.genSaltSync();
     dbUser.password = bcrypt.hashSync(password, numAletorio);
 
-    //Generar el JWT
     const token = await generarJWT(dbUser.id, dbUser.name, dbUser.rol);
-    //Crear usuario de base de datos
+
     await dbUser.save();
-    // console.log(dbUser, "pasoo registro");
-    //Generar respuesta exitosa
+
     return res.status(201).json({
       ok: true,
       uid: dbUser.id,
-      token: token,
+      token,
     });
   } catch (error) {
     return res.status(500).json({
@@ -49,9 +40,8 @@ const crearUsuario = async (req, res = response) => {
 };
 
 const loginUsuario = async (req, res) => {
-  const { nombreUsuario, password } = req.body; //! DESTRUCTURACIÓN
-  //* const email = req.body.email
-  //* const password = req.body.password
+  const { nombreUsuario, password } = req.body;
+
   try {
     const usuario = await RecurHumano.findOne({
       "datosLogueo.nombreUsuario": nombreUsuario,
@@ -62,51 +52,60 @@ const loginUsuario = async (req, res) => {
       },
     });
 
-    const esValido = bcrypt.compareSync(
-      password,
-      usuario.datosLogueo.passwordHash
-    );
-
-    if (!esValido || !usuario) {
+    if (!usuario?.datosLogueo?.passwordHash) {
       return res
         .status(400)
         .json({ ok: false, msg: "Credenciales incorrectas" });
     }
 
-    if (!usuario.datosLogueo || !usuario.datosLogueo.estado) {
+    const esValido = bcrypt.compareSync(
+      password,
+      usuario.datosLogueo.passwordHash,
+    );
+
+    if (!esValido) {
+      return res
+        .status(400)
+        .json({ ok: false, msg: "Credenciales incorrectas" });
+    }
+
+    if (!usuario.datosLogueo.estado) {
       return res.status(400).json({ ok: false, msg: "Acceso no autorizado" });
     }
 
-    const rutasPermitidas = usuario.datosLogueo.rol.rutasPermitidas.map(
-      (r) => ({
-        codRuta: r.codRuta,
-        nombreRuta: r.nombreRuta,
-        urlRuta: r.urlRuta,
-        iconoRuta: r.iconoRuta,
-      })
+    if (!usuario.datosLogueo.rol || usuario.datosLogueo.rol.estado === false) {
+      return res.status(400).json({ ok: false, msg: "Rol no habilitado" });
+    }
+
+    const rutasPermitidas = usuario.datosLogueo.rol.rutasPermitidas.map((r) => ({
+      codRuta: r.codRuta,
+      nombreRuta: r.nombreRuta,
+      urlRuta: r.urlRuta,
+      iconoRuta: r.iconoRuta,
+    }));
+
+    const permisosAcciones = normalizarPermisosAcciones(
+      usuario.datosLogueo.rol.permisosAcciones,
     );
 
-    //Generar el jwt
     const token = await generarJWT(
       usuario.codRecHumano,
       usuario.datosLogueo.nombreUsuario,
       usuario.datosLogueo.rol.nombreRol,
-      rutasPermitidas
+      rutasPermitidas,
+      permisosAcciones,
     );
-    // console.log('IDUSUARIO'+dbUser.id);
-    //Respuesta del servicio
+
     return res.json({
       ok: true,
-      token, //! token : token
+      token,
       user: {
         nombreUsuario: usuario.datosLogueo.nombreUsuario,
-        // puedes incluir más campos si deseas
       },
     });
   } catch (error) {
     console.log(error);
     return res.status(500).json({
-      //! 500: FALLAS EN EL SERVIDOR
       ok: false,
       msg: "Hable con el administrador",
     });

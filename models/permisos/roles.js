@@ -13,16 +13,18 @@ const Roleschema = Schema(
     rutasPermitidas: [
       {
         type: Schema.Types.ObjectId,
-        ref: "rutaCollection", // Referencia a la colección de rutas
+        ref: "rutaCollection",
       },
     ],
+    permisosAcciones: {
+      type: [String],
+      default: [],
+    },
     estado: { type: Boolean, required: true },
   },
-
   {
     timestamps: true,
-  }
+  },
 );
 
-//aquí se define o elige la colección/tabla en la que queremos que se guarde
 module.exports = mongoose.model("rolCollection", Roleschema);
