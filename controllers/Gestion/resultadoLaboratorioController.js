@@ -2,7 +2,360 @@ const mongoose = require("mongoose");
 const { response } = require("express");
 
 const SolicitudAtencion = require("../../models/Gestion/SolicitudAtencion");
+const MuestraLaboratorio = require("../../models/Gestion/MuestraLaboratorio");
 const ResultadoLaboratorio = require("../../models/Gestion/ResultadoLaboratorio");
+const {
+  construirEstadoOperativoLaboratorio,
+  resolverEstadoOperativoSolicitud,
+  sincronizarEstadosSolicitudLaboratorio,
+} = require("../../utils/Gestion/estadoOperativoSolicitud");
+
+
+// ====== Escapar búsqueda regex ======
+
+const escaparRegex = (valor = "") =>
+  String(valor).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// ====== Obtener id normalizado ======
+
+const obtenerId = (valor) => {
+  if (!valor) {
+    return null;
+  }
+
+  return valor._id ?? valor;
+};
+
+// ====== Obtener unidad clínica ======
+
+const obtenerUnidadLaboratorio = ({ solicitud, claveUnidad }) => {
+  const unidades = Array.isArray(solicitud.unidadesLaboratorio)
+    ? solicitud.unidadesLaboratorio
+    : [];
+
+  return (
+    unidades.find(
+      (unidad) => String(unidad.claveUnidad ?? "") === String(claveUnidad ?? ""),
+    ) ?? null
+  );
+};
+
+// ====== Resolver intento vigente por recipiente ======
+
+const construirEstadoRecipientesUnidad = (muestras = []) => {
+  const grupos = new Map();
+
+  for (const muestra of muestras) {
+    const clavePlan = String(
+      muestra.claveMuestraPlan ?? muestra._id?.toString() ?? "",
+    );
+
+    if (!clavePlan) {
+      continue;
+    }
+
+    if (!grupos.has(clavePlan)) {
+      grupos.set(clavePlan, []);
+    }
+
+    grupos.get(clavePlan).push(muestra);
+  }
+
+  const recipientes = [];
+
+  for (const [claveMuestraPlan, intentos] of grupos.entries()) {
+    const intentosOrdenados = [...intentos].sort((a, b) => {
+      const intentoA = Number(a.numeroIntento ?? 1);
+      const intentoB = Number(b.numeroIntento ?? 1);
+
+      if (intentoA !== intentoB) {
+        return intentoA - intentoB;
+      }
+
+      return (
+        new Date(a.createdAt ?? 0).getTime() -
+        new Date(b.createdAt ?? 0).getTime()
+      );
+    });
+
+    const ultimoIntento = intentosOrdenados[intentosOrdenados.length - 1] ?? null;
+
+    const intentoVigente =
+      ultimoIntento && ultimoIntento.estadoMuestra !== "ANULADA"
+        ? ultimoIntento
+        : null;
+
+    const muestraReferencia = intentoVigente ?? ultimoIntento;
+
+    recipientes.push({
+      claveMuestraPlan,
+      numeroRecipiente: muestraReferencia?.numeroRecipiente ?? null,
+      totalIntentos: intentosOrdenados.length,
+      muestraVigenteId: intentoVigente?._id ?? null,
+      codMuestra: muestraReferencia?.codMuestra ?? null,
+      codigoEtiqueta: muestraReferencia?.codigoEtiqueta ?? null,
+      numeroIntento: muestraReferencia?.numeroIntento ?? null,
+      estadoMuestra: muestraReferencia?.estadoMuestra ?? null,
+      esVigente: Boolean(intentoVigente),
+      aceptada: intentoVigente?.estadoMuestra === "ACEPTADA",
+    });
+  }
+
+  recipientes.sort((a, b) => {
+    const recipienteA = Number(a.numeroRecipiente ?? 0);
+    const recipienteB = Number(b.numeroRecipiente ?? 0);
+
+    if (recipienteA !== recipienteB) {
+      return recipienteA - recipienteB;
+    }
+
+    return String(a.claveMuestraPlan).localeCompare(String(b.claveMuestraPlan));
+  });
+
+  return recipientes;
+};
+
+// ====== Resolver habilitación Muestra ↔ Resultado ======
+
+const resolverHabilitacionMuestraUnidad = async ({
+  solicitud,
+  claveUnidad,
+  session = null,
+  muestrasSolicitud = null,
+}) => {
+  const unidad = obtenerUnidadLaboratorio({
+    solicitud,
+    claveUnidad,
+  });
+
+  if (!unidad) {
+    throw new Error(
+      `La unidad clínica ${claveUnidad} asociada al resultado no existe en la solicitud`,
+    );
+  }
+
+  if (unidad.estado === "ANULADO") {
+    return {
+      habilitada: false,
+      codigo: "UNIDAD_ANULADA",
+      requiereMuestra: unidad.snapshotClinico?.requiereMuestra !== false,
+      claveUnidad,
+      mensaje: "La unidad clínica se encuentra ANULADA",
+      resumen: {
+        totalRecipientes: 0,
+        aceptados: 0,
+        pendientes: 0,
+      },
+      muestras: [],
+    };
+  }
+
+  const requiereMuestra = unidad.snapshotClinico?.requiereMuestra !== false;
+
+  if (!requiereMuestra) {
+    return {
+      habilitada: true,
+      codigo: "NO_REQUIERE_MUESTRA",
+      requiereMuestra: false,
+      claveUnidad,
+      mensaje: "La unidad no requiere muestra física para registrar resultados",
+      resumen: {
+        totalRecipientes: 0,
+        aceptados: 0,
+        pendientes: 0,
+      },
+      muestras: [],
+    };
+  }
+
+  let muestrasUnidad;
+
+  if (Array.isArray(muestrasSolicitud)) {
+    muestrasUnidad = muestrasSolicitud.filter((muestra) =>
+      Array.isArray(muestra.coberturas)
+        ? muestra.coberturas.some(
+            (cobertura) =>
+              String(cobertura?.claveUnidad ?? "") === String(claveUnidad),
+          )
+        : false,
+    );
+  } else {
+    let consulta = MuestraLaboratorio.find({
+      solicitudAtencionId: solicitud._id,
+      "coberturas.claveUnidad": claveUnidad,
+    }).select(
+      [
+        "_id",
+        "claveMuestraPlan",
+        "numeroRecipiente",
+        "numeroIntento",
+        "muestraAnteriorId",
+        "estadoMuestra",
+        "codigoEtiqueta",
+        "codMuestra",
+        "createdAt",
+        "coberturas.claveUnidad",
+      ].join(" "),
+    );
+
+    if (session) {
+      consulta = consulta.session(session);
+    }
+
+    muestrasUnidad = await consulta.lean();
+  }
+
+  const recipientes = construirEstadoRecipientesUnidad(muestrasUnidad);
+
+  if (recipientes.length === 0) {
+    return {
+      habilitada: false,
+      codigo: "SIN_MUESTRAS",
+      requiereMuestra: true,
+      claveUnidad,
+      mensaje: "La unidad aún no posee muestras físicas inicializadas",
+      resumen: {
+        totalRecipientes: 0,
+        aceptados: 0,
+        pendientes: 0,
+      },
+      muestras: [],
+    };
+  }
+
+  const aceptados = recipientes.filter((recipiente) => recipiente.aceptada).length;
+  const pendientes = recipientes.length - aceptados;
+  const habilitada = pendientes === 0;
+
+  const detallePendiente = recipientes
+    .filter((recipiente) => !recipiente.aceptada)
+    .map((recipiente) => {
+      const numero = recipiente.numeroRecipiente ?? "-";
+      const estado = recipiente.estadoMuestra ?? "SIN INTENTO VIGENTE";
+
+      return `Recipiente ${numero}: ${estado}`;
+    })
+    .join(", ");
+
+  return {
+    habilitada,
+    codigo: habilitada ? "MUESTRAS_ACEPTADAS" : "MUESTRAS_NO_APTAS",
+    requiereMuestra: true,
+    claveUnidad,
+    mensaje: habilitada
+      ? "Todas las muestras requeridas se encuentran ACEPTADAS"
+      : `No se pueden registrar resultados hasta que todas las muestras requeridas estén ACEPTADAS. ${detallePendiente}`,
+    resumen: {
+      totalRecipientes: recipientes.length,
+      aceptados,
+      pendientes,
+    },
+    muestras: recipientes,
+  };
+};
+
+// ====== Cargar muestras mínimas de una solicitud ======
+
+const obtenerMuestrasSolicitudParaResultados = async ({
+  solicitudAtencionId,
+  session = null,
+}) => {
+  let consulta = MuestraLaboratorio.find({
+    solicitudAtencionId,
+  }).select(
+    [
+      "_id",
+      "claveMuestraPlan",
+      "numeroRecipiente",
+      "numeroIntento",
+      "muestraAnteriorId",
+      "estadoMuestra",
+      "codigoEtiqueta",
+      "codMuestra",
+      "createdAt",
+      "coberturas.claveUnidad",
+    ].join(" "),
+  );
+
+  if (session) {
+    consulta = consulta.session(session);
+  }
+
+  return consulta.lean();
+};
+
+// ====== Adjuntar habilitación dinámica ======
+
+const adjuntarHabilitacionMuestraResultados = async ({
+  solicitud,
+  resultados,
+  session = null,
+  muestrasSolicitud = null,
+}) => {
+  const muestrasFinales = Array.isArray(muestrasSolicitud)
+    ? muestrasSolicitud
+    : await obtenerMuestrasSolicitudParaResultados({
+        solicitudAtencionId: solicitud._id,
+        session,
+      });
+
+  const salida = [];
+
+  for (const resultado of resultados) {
+    const resultadoPlano =
+      typeof resultado?.toObject === "function" ? resultado.toObject() : resultado;
+
+    const resultadoConConfiguracion = adjuntarConfiguracionClinicaResultado({
+      solicitud,
+      resultado: resultadoPlano,
+    });
+
+    const habilitacionMuestra = await resolverHabilitacionMuestraUnidad({
+      solicitud,
+      claveUnidad: resultadoPlano.claveUnidad,
+      session,
+      muestrasSolicitud: muestrasFinales,
+    });
+
+    const unidadLaboratorio = obtenerUnidadLaboratorio({
+      solicitud,
+      claveUnidad: resultadoPlano.claveUnidad,
+    });
+
+    salida.push({
+      ...resultadoConConfiguracion,
+      estadoUnidadLaboratorio: unidadLaboratorio?.estado ?? null,
+      habilitacionMuestra,
+    });
+  }
+
+  return salida;
+};
+
+// ====== Validar captura habilitada ======
+
+const validarCapturaResultadoHabilitada = async ({
+  solicitud,
+  resultadoLaboratorio,
+  session = null,
+}) => {
+  const habilitacionMuestra = await resolverHabilitacionMuestraUnidad({
+    solicitud,
+    claveUnidad: resultadoLaboratorio.claveUnidad,
+    session,
+  });
+
+  if (!habilitacionMuestra.habilitada) {
+    const error = new Error(habilitacionMuestra.mensaje);
+
+    error.codigo = "RESULTADO_BLOQUEADO_POR_MUESTRA";
+    error.habilitacionMuestra = habilitacionMuestra;
+
+    throw error;
+  }
+
+  return habilitacionMuestra;
+};
 
 // ====== Construir Items desde snapshot ======
 
@@ -311,6 +664,74 @@ const obtenerItemSnapshotResultado = ({
   }
 
   return itemSnapshot;
+};
+
+// ====== Adjuntar configuración clínica histórica ======
+
+const adjuntarConfiguracionClinicaResultado = ({ solicitud, resultado }) => {
+  const resultadoPlano =
+    typeof resultado?.toObject === "function" ? resultado.toObject() : resultado;
+
+  const items = Array.isArray(resultadoPlano?.resultadosItems)
+    ? resultadoPlano.resultadosItems
+    : [];
+
+  return {
+    ...resultadoPlano,
+    resultadosItems: items.map((item) => {
+      const itemSnapshot = obtenerItemSnapshotResultado({
+        solicitud,
+        resultadoLaboratorio: resultadoPlano,
+        resultadoItem: item,
+      });
+
+      const snapshotItem = itemSnapshot.snapshotItem;
+
+      return {
+        ...item,
+        configuracionClinica: {
+          tipoResultado: snapshotItem.tipoResultado ?? item.tipoResultado,
+          opcionesResultado: Array.isArray(snapshotItem.opcionesResultado)
+            ? [...snapshotItem.opcionesResultado]
+            : [],
+          permiteValorNoListado: snapshotItem.permiteValorNoListado === true,
+          referenciasResultado: Array.isArray(snapshotItem.referenciasResultado)
+            ? snapshotItem.referenciasResultado.map((referencia) => ({
+                descripcion: referencia.descripcion ?? "",
+                sexo: referencia.sexo ?? "TODOS",
+                edadMin: referencia.edadMin ?? null,
+                edadMax: referencia.edadMax ?? null,
+                unidadEdad: referencia.unidadEdad ?? "ANIOS",
+                tipoReferencia: referencia.tipoReferencia,
+                valorMin: referencia.valorMin ?? null,
+                valorMax: referencia.valorMax ?? null,
+                valorLimite: referencia.valorLimite ?? null,
+                valoresPermitidos: Array.isArray(referencia.valoresPermitidos)
+                  ? [...referencia.valoresPermitidos]
+                  : [],
+                textoReferencia: referencia.textoReferencia ?? "",
+                activo: referencia.activo !== false,
+              }))
+            : [],
+          reglasAlerta: Array.isArray(snapshotItem.reglasAlerta)
+            ? snapshotItem.reglasAlerta.map((regla) => ({
+                descripcion: regla.descripcion ?? "",
+                sexo: regla.sexo ?? "TODOS",
+                edadMin: regla.edadMin ?? null,
+                edadMax: regla.edadMax ?? null,
+                unidadEdad: regla.unidadEdad ?? "ANIOS",
+                condicion: regla.condicion,
+                valor1: regla.valor1 ?? null,
+                valor2: regla.valor2 ?? null,
+                nivelAlerta: regla.nivelAlerta ?? "ADVERTENCIA",
+                mensaje: regla.mensaje ?? "",
+                activo: regla.activo !== false,
+              }))
+            : [],
+        },
+      };
+    }),
+  };
 };
 
 // ====== Normalizar sexo clínico ======
@@ -1062,6 +1483,14 @@ const registrarEditarResultadoItem = async (req, res = response) => {
       );
     }
 
+    // ====== Validar muestra habilitada ======
+
+    const habilitacionMuestra = await validarCapturaResultadoHabilitada({
+      solicitud,
+      resultadoLaboratorio,
+      session,
+    });
+
     // ====== Resolver configuración histórica ======
 
     const itemSnapshot = obtenerItemSnapshotResultado({
@@ -1159,6 +1588,15 @@ const registrarEditarResultadoItem = async (req, res = response) => {
       session,
     });
 
+    // ====== Sincronizar estados de solicitud ======
+
+    const estadoOperativo = await sincronizarEstadosSolicitudLaboratorio({
+      solicitud,
+      uid,
+      nombreUsuario,
+      session,
+    });
+
     await session.commitTransaction();
 
     return res.status(200).json({
@@ -1169,6 +1607,18 @@ const registrarEditarResultadoItem = async (req, res = response) => {
         : "Resultado del Item actualizado correctamente",
 
       estadoResultado: resultadoLaboratorio.estadoResultado,
+
+      estadoUnidadLaboratorio:
+        obtenerUnidadLaboratorio({
+          solicitud,
+          claveUnidad: resultadoLaboratorio.claveUnidad,
+        })?.estado ?? null,
+
+      estadoSolicitud: solicitud.estado,
+
+      estadoOperativo,
+
+      habilitacionMuestra,
 
       item: resultadoItem,
     });
@@ -1183,6 +1633,12 @@ const registrarEditarResultadoItem = async (req, res = response) => {
       ok: false,
 
       msg: error.message || "No se pudo registrar el resultado del Item",
+
+      ...(error.codigo ? { codigo: error.codigo } : {}),
+
+      ...(error.habilitacionMuestra
+        ? { habilitacionMuestra: error.habilitacionMuestra }
+        : {}),
     });
   } finally {
     await session.endSession();
@@ -1290,6 +1746,14 @@ const registrarResultadosMasivos = async (req, res = response) => {
         "No se pueden registrar resultados de una solicitud anulada",
       );
     }
+
+    // ====== Validar muestra habilitada ======
+
+    const habilitacionMuestra = await validarCapturaResultadoHabilitada({
+      solicitud,
+      resultadoLaboratorio,
+      session,
+    });
 
     const ahora = new Date();
 
@@ -1411,6 +1875,15 @@ const registrarResultadosMasivos = async (req, res = response) => {
       session,
     });
 
+    // ====== Sincronizar estados de solicitud ======
+
+    const estadoOperativo = await sincronizarEstadosSolicitudLaboratorio({
+      solicitud,
+      uid,
+      nombreUsuario,
+      session,
+    });
+
     await session.commitTransaction();
 
     return res.status(200).json({
@@ -1422,6 +1895,18 @@ const registrarResultadosMasivos = async (req, res = response) => {
           : "Resultados registrados correctamente",
 
       estadoResultado: resultadoLaboratorio.estadoResultado,
+
+      estadoUnidadLaboratorio:
+        obtenerUnidadLaboratorio({
+          solicitud,
+          claveUnidad: resultadoLaboratorio.claveUnidad,
+        })?.estado ?? null,
+
+      estadoSolicitud: solicitud.estado,
+
+      estadoOperativo,
+
+      habilitacionMuestra,
 
       itemsActualizados: itemsActualizados.length,
 
@@ -1443,6 +1928,12 @@ const registrarResultadosMasivos = async (req, res = response) => {
       msg:
         error.message ||
         "No se pudieron registrar los resultados de laboratorio",
+
+      ...(error.codigo ? { codigo: error.codigo } : {}),
+
+      ...(error.habilitacionMuestra
+        ? { habilitacionMuestra: error.habilitacionMuestra }
+        : {}),
     });
   } finally {
     await session.endSession();
@@ -1619,6 +2110,15 @@ const validarResultadoLaboratorio = async (req, res = response) => {
       session,
     });
 
+    // ====== Sincronizar estados de solicitud ======
+
+    const estadoOperativo = await sincronizarEstadosSolicitudLaboratorio({
+      solicitud,
+      uid,
+      nombreUsuario,
+      session,
+    });
+
     await session.commitTransaction();
 
     return res.status(200).json({
@@ -1630,6 +2130,16 @@ const validarResultadoLaboratorio = async (req, res = response) => {
           : "Resultado de laboratorio validado correctamente",
 
       estadoResultado: resultadoLaboratorio.estadoResultado,
+
+      estadoUnidadLaboratorio:
+        obtenerUnidadLaboratorio({
+          solicitud,
+          claveUnidad: resultadoLaboratorio.claveUnidad,
+        })?.estado ?? null,
+
+      estadoSolicitud: solicitud.estado,
+
+      estadoOperativo,
 
       resumenAlertas,
 
@@ -1789,6 +2299,15 @@ const liberarResultadoLaboratorio = async (req, res = response) => {
       session,
     });
 
+    // ====== Sincronizar estados de solicitud ======
+
+    const estadoOperativo = await sincronizarEstadosSolicitudLaboratorio({
+      solicitud,
+      uid,
+      nombreUsuario,
+      session,
+    });
+
     await session.commitTransaction();
 
     return res.status(200).json({
@@ -1800,6 +2319,16 @@ const liberarResultadoLaboratorio = async (req, res = response) => {
           : "Resultado de laboratorio liberado correctamente",
 
       estadoResultado: resultadoLaboratorio.estadoResultado,
+
+      estadoUnidadLaboratorio:
+        obtenerUnidadLaboratorio({
+          solicitud,
+          claveUnidad: resultadoLaboratorio.claveUnidad,
+        })?.estado ?? null,
+
+      estadoSolicitud: solicitud.estado,
+
+      estadoOperativo,
 
       resumenAlertas,
 
@@ -1957,6 +2486,427 @@ const anularResultadoLaboratorio = async (req, res = response) => {
   }
 };
 
+
+// ====== Obtener bandeja de Gestión de Resultados ======
+
+const obtenerBandejaResultadosLaboratorio = async (req, res = response) => {
+  try {
+    const { fechaInicio, fechaFin, terminoBusqueda } = req.query;
+    const { uid, nombreUsuario } = req.user;
+
+    // ====== Validar fechas ======
+
+    if (!fechaInicio || !fechaFin) {
+      throw new Error("Debe indicar la fecha de inicio y la fecha fin");
+    }
+
+    const inicio = new Date(fechaInicio);
+    const fin = new Date(fechaFin);
+
+    if (Number.isNaN(inicio.getTime()) || Number.isNaN(fin.getTime())) {
+      throw new Error("El rango de fechas no es válido");
+    }
+
+    if (inicio.getTime() > fin.getTime()) {
+      throw new Error("La fecha de inicio no puede ser mayor que la fecha fin");
+    }
+
+    // ====== Construir filtro ======
+
+    const filtroSolicitud = {
+      tipo: "Laboratorio",
+      fechaEmision: {
+        $gte: inicio,
+        $lte: fin,
+      },
+    };
+
+    const terminoNormalizado = String(terminoBusqueda ?? "").trim();
+
+    if (terminoNormalizado) {
+      const regex = new RegExp(escaparRegex(terminoNormalizado), "i");
+
+      filtroSolicitud.$or = [
+        { codigoLaboratorio: regex },
+        { codSolicitud: regex },
+        { hc: regex },
+        { tipoDoc: regex },
+        { nroDoc: regex },
+        { nombreCliente: regex },
+        { apePatCliente: regex },
+        { apeMatCliente: regex },
+        { codProgramacion: regex },
+        { razonSocialEmpresa: regex },
+        { codProtocolo: regex },
+        { nombreProtocolo: regex },
+      ];
+    }
+
+    // ====== Obtener solicitudes ======
+
+    const solicitudes = await SolicitudAtencion.find(filtroSolicitud)
+      .select(
+        [
+          "_id",
+          "codSolicitud",
+          "codigoLaboratorio",
+          "origenAtencion",
+          "tipo",
+          "estado",
+          "fechaEmision",
+          "hc",
+          "clienteId",
+          "tipoDoc",
+          "nroDoc",
+          "nombreCliente",
+          "apePatCliente",
+          "apeMatCliente",
+          "sexoPaciente",
+          "fechaNacimientoPaciente",
+          "programacionEmpresaId",
+          "codProgramacion",
+          "empresaId",
+          "razonSocialEmpresa",
+          "protocoloId",
+          "codProtocolo",
+          "nombreProtocolo",
+          "unidadesLaboratorio",
+        ].join(" "),
+      )
+      .populate({
+        path: "programacionEmpresaId",
+        select: [
+          "_id",
+          "codProgramacion",
+          "empresaId",
+          "rucEmpresa",
+          "razonSocialEmpresa",
+          "pacienteId",
+          "hc",
+          "tipoDoc",
+          "nroDoc",
+          "nombreCliente",
+          "apePatCliente",
+          "apeMatCliente",
+          "sede",
+          "prioridad",
+          "tipoEvaluacion",
+          "tipoAtencion",
+          "estadoProgramacion",
+        ].join(" "),
+      })
+      .sort({
+        fechaEmision: -1,
+        codSolicitud: -1,
+      })
+      .lean();
+
+    const solicitudIds = solicitudes.map((solicitud) => solicitud._id);
+
+    // ====== Cargar muestras y claves de resultados ======
+
+    const [muestras, resultadosExistentes] =
+      solicitudIds.length > 0
+        ? await Promise.all([
+            MuestraLaboratorio.find({
+              solicitudAtencionId: {
+                $in: solicitudIds,
+              },
+            })
+              .select(
+                [
+                  "_id",
+                  "solicitudAtencionId",
+                  "claveMuestraPlan",
+                  "numeroRecipiente",
+                  "numeroIntento",
+                  "muestraAnteriorId",
+                  "estadoMuestra",
+                  "codMuestra",
+                  "codigoEtiqueta",
+                  "createdAt",
+                  "coberturas.claveUnidad",
+                ].join(" "),
+              )
+              .lean(),
+            ResultadoLaboratorio.find({
+              solicitudAtencionId: {
+                $in: solicitudIds,
+              },
+            })
+              .select("_id solicitudAtencionId claveUnidad")
+              .lean(),
+          ])
+        : [[], []];
+
+    // ====== Inicializar resultados faltantes en bloque ======
+
+    const clavesResultado = new Set(
+      resultadosExistentes.map(
+        (resultado) =>
+          `${resultado.solicitudAtencionId.toString()}:${resultado.claveUnidad}`,
+      ),
+    );
+
+    const operacionesInicializacion = [];
+
+    for (const solicitud of solicitudes) {
+      if (solicitud.estado === "ANULADO") {
+        continue;
+      }
+
+      const unidades = Array.isArray(solicitud.unidadesLaboratorio)
+        ? solicitud.unidadesLaboratorio
+        : [];
+
+      for (const unidad of unidades) {
+        if (unidad.estado === "ANULADO" || !unidad.snapshotClinico) {
+          continue;
+        }
+
+        const claveResultado =
+          `${solicitud._id.toString()}:` + `${unidad.claveUnidad}`;
+
+        if (clavesResultado.has(claveResultado)) {
+          continue;
+        }
+
+        const datosResultado = construirResultadoDesdeUnidad({
+          solicitud,
+          unidad,
+          uid,
+          nombreUsuario,
+        });
+
+        const documento = new ResultadoLaboratorio(datosResultado);
+        const errorValidacion = documento.validateSync();
+
+        if (errorValidacion) {
+          throw errorValidacion;
+        }
+
+        operacionesInicializacion.push({
+          updateOne: {
+            filter: {
+              solicitudAtencionId: solicitud._id,
+              claveUnidad: unidad.claveUnidad,
+            },
+            update: {
+              $setOnInsert: documento.toObject({
+                depopulate: true,
+                versionKey: false,
+              }),
+            },
+            upsert: true,
+          },
+        });
+
+        clavesResultado.add(claveResultado);
+      }
+    }
+
+    if (operacionesInicializacion.length > 0) {
+      try {
+        await ResultadoLaboratorio.bulkWrite(operacionesInicializacion, {
+          ordered: false,
+        });
+      } catch (error) {
+        // ====== Tolerar carrera de inicialización ======
+
+        if (error?.code !== 11000) {
+          throw error;
+        }
+      }
+    }
+
+    // ====== Cargar detalle completo una sola vez ======
+
+    const resultados =
+      solicitudIds.length > 0
+        ? await ResultadoLaboratorio.find({
+            solicitudAtencionId: {
+              $in: solicitudIds,
+            },
+          })
+            .sort({
+              solicitudAtencionId: 1,
+              numeroInstancia: 1,
+              createdAt: 1,
+            })
+            .lean()
+        : [];
+
+    // ====== Agrupar datos por solicitud ======
+
+    const muestrasPorSolicitud = new Map();
+    const resultadosPorSolicitud = new Map();
+
+    muestras.forEach((muestra) => {
+      const clave = muestra.solicitudAtencionId.toString();
+
+      if (!muestrasPorSolicitud.has(clave)) {
+        muestrasPorSolicitud.set(clave, []);
+      }
+
+      muestrasPorSolicitud.get(clave).push(muestra);
+    });
+
+    resultados.forEach((resultado) => {
+      const clave = resultado.solicitudAtencionId.toString();
+
+      if (!resultadosPorSolicitud.has(clave)) {
+        resultadosPorSolicitud.set(clave, []);
+      }
+
+      resultadosPorSolicitud.get(clave).push(resultado);
+    });
+
+    // ====== Construir bandeja con detalle precargado ======
+
+    const bandeja = [];
+
+    for (const solicitud of solicitudes) {
+      const claveSolicitud = solicitud._id.toString();
+      const muestrasSolicitud = muestrasPorSolicitud.get(claveSolicitud) ?? [];
+      const resultadosSolicitud =
+        resultadosPorSolicitud.get(claveSolicitud) ?? [];
+
+      const estadoOperativo = construirEstadoOperativoLaboratorio({
+        solicitud,
+        muestras: muestrasSolicitud,
+        resultados: resultadosSolicitud,
+      });
+
+      const resultadosConHabilitacion =
+        await adjuntarHabilitacionMuestraResultados({
+          solicitud,
+          resultados: resultadosSolicitud,
+          muestrasSolicitud,
+        });
+
+      const unidadesActivas = Array.isArray(solicitud.unidadesLaboratorio)
+        ? solicitud.unidadesLaboratorio.filter(
+            (unidad) => unidad.estado !== "ANULADO",
+          )
+        : [];
+
+      const clavesResultadosSolicitud = new Set(
+        resultadosSolicitud.map((resultado) => resultado.claveUnidad),
+      );
+
+      const inicializados = unidadesActivas.every((unidad) =>
+        clavesResultadosSolicitud.has(unidad.claveUnidad),
+      );
+
+      const esEmpresa = solicitud.origenAtencion === "EMPRESA";
+      const programacion =
+        esEmpresa &&
+        solicitud.programacionEmpresaId &&
+        typeof solicitud.programacionEmpresaId === "object"
+          ? solicitud.programacionEmpresaId
+          : null;
+      const pacienteOrigen = esEmpresa && programacion ? programacion : solicitud;
+
+      bandeja.push({
+        solicitud: {
+          _id: solicitud._id,
+          codSolicitud: solicitud.codSolicitud,
+          codigoLaboratorio: solicitud.codigoLaboratorio ?? null,
+          origenAtencion: solicitud.origenAtencion,
+          tipo: solicitud.tipo,
+          estado: solicitud.estado,
+          estadoOperativo,
+          fechaEmision: solicitud.fechaEmision,
+          paciente: {
+            hc: pacienteOrigen.hc ?? solicitud.hc ?? null,
+            clienteId:
+              obtenerId(solicitud.clienteId) ??
+              obtenerId(programacion?.pacienteId) ??
+              null,
+            tipoDoc: pacienteOrigen.tipoDoc ?? solicitud.tipoDoc ?? null,
+            nroDoc: pacienteOrigen.nroDoc ?? solicitud.nroDoc ?? null,
+            nombreCliente:
+              pacienteOrigen.nombreCliente ?? solicitud.nombreCliente ?? "",
+            apePatCliente:
+              pacienteOrigen.apePatCliente ?? solicitud.apePatCliente ?? "",
+            apeMatCliente:
+              pacienteOrigen.apeMatCliente ?? solicitud.apeMatCliente ?? "",
+            sexoPaciente: solicitud.sexoPaciente ?? null,
+            fechaNacimientoPaciente: solicitud.fechaNacimientoPaciente ?? null,
+          },
+          empresa: esEmpresa
+            ? {
+                programacionEmpresaId: obtenerId(solicitud.programacionEmpresaId),
+                codProgramacion:
+                  programacion?.codProgramacion ??
+                  solicitud.codProgramacion ??
+                  null,
+                empresaId:
+                  obtenerId(programacion?.empresaId) ??
+                  obtenerId(solicitud.empresaId) ??
+                  null,
+                rucEmpresa: programacion?.rucEmpresa ?? null,
+                razonSocialEmpresa:
+                  programacion?.razonSocialEmpresa ??
+                  solicitud.razonSocialEmpresa ??
+                  "",
+                sede: programacion?.sede ?? null,
+                prioridad: programacion?.prioridad ?? null,
+                tipoEvaluacion: programacion?.tipoEvaluacion ?? null,
+                tipoAtencion: programacion?.tipoAtencion ?? null,
+                estadoProgramacion: programacion?.estadoProgramacion ?? null,
+              }
+            : null,
+        },
+        resultados: {
+          inicializados,
+          totalDocumentos: resultadosSolicitud.length,
+          resumen: estadoOperativo.resumen?.resultados ?? null,
+          detalle: resultadosConHabilitacion,
+        },
+      });
+    }
+
+    const resumen = {
+      totalSolicitudes: bandeja.length,
+      particulares: bandeja.filter(
+        (item) => item.solicitud.origenAtencion === "PARTICULAR",
+      ).length,
+      empresas: bandeja.filter(
+        (item) => item.solicitud.origenAtencion === "EMPRESA",
+      ).length,
+      pendientesMuestras: bandeja.filter(
+        (item) => item.solicitud.estadoOperativo.codigo === "PENDIENTE_MUESTRAS",
+      ).length,
+      resultadosDisponiblesParcialmente: bandeja.filter(
+        (item) =>
+          item.solicitud.estadoOperativo.codigo ===
+          "RESULTADOS_DISPONIBLES_PARCIALMENTE",
+      ).length,
+      atendidos: bandeja.filter(
+        (item) => item.solicitud.estado === "ATENDIDO",
+      ).length,
+      resultadosInicializadosEnBandeja: operacionesInicializacion.length,
+    };
+
+    return res.status(200).json({
+      ok: true,
+      msg: "Bandeja de Gestión de Resultados obtenida correctamente",
+      resumen,
+      solicitudes: bandeja,
+    });
+  } catch (error) {
+    console.error("Error al obtener bandeja de Gestión de Resultados:", error);
+
+    return res.status(400).json({
+      ok: false,
+      msg:
+        error.message ||
+        "No se pudo obtener la bandeja de Gestión de Resultados",
+    });
+  }
+};
+
 // ====== Obtener resultados por solicitud ======
 
 const obtenerResultadosPorSolicitud = async (req, res = response) => {
@@ -1972,7 +2922,15 @@ const obtenerResultadosPorSolicitud = async (req, res = response) => {
     // ====== Obtener solicitud ======
 
     const solicitud = await SolicitudAtencion.findById(solicitudAtencionId)
-      .select("_id codSolicitud tipo estado")
+      .select(
+        [
+          "_id",
+          "codSolicitud",
+          "tipo",
+          "estado",
+          "unidadesLaboratorio",
+        ].join(" "),
+      )
       .lean();
 
     if (!solicitud) {
@@ -1993,6 +2951,29 @@ const obtenerResultadosPorSolicitud = async (req, res = response) => {
         createdAt: 1,
       })
       .lean();
+
+    // ====== Cargar muestras operativas ======
+
+    const muestrasSolicitud = await obtenerMuestrasSolicitudParaResultados({
+      solicitudAtencionId: solicitud._id,
+    });
+
+    // ====== Adjuntar habilitación de muestras ======
+
+    const resultadosConHabilitacion =
+      await adjuntarHabilitacionMuestraResultados({
+        solicitud,
+        resultados,
+        muestrasSolicitud,
+      });
+
+    // ====== Resolver estado operativo ======
+
+    const estadoOperativo = await resolverEstadoOperativoSolicitud({
+      solicitud,
+      muestras: muestrasSolicitud,
+      resultados,
+    });
 
     // ====== Construir resumen ======
 
@@ -2022,6 +3003,14 @@ const obtenerResultadosPorSolicitud = async (req, res = response) => {
       anulados: resultados.filter(
         (resultado) => resultado.estadoResultado === "ANULADO",
       ).length,
+
+      habilitadosPorMuestra: resultadosConHabilitacion.filter(
+        (resultado) => resultado.habilitacionMuestra?.habilitada === true,
+      ).length,
+
+      bloqueadosPorMuestra: resultadosConHabilitacion.filter(
+        (resultado) => resultado.habilitacionMuestra?.habilitada === false,
+      ).length,
     };
 
     // ====== Respuesta ======
@@ -2040,9 +3029,11 @@ const obtenerResultadosPorSolicitud = async (req, res = response) => {
 
       estadoSolicitud: solicitud.estado,
 
+      estadoOperativo,
+
       resumen,
 
-      resultados,
+      resultados: resultadosConHabilitacion,
     });
   } catch (error) {
     console.error(
@@ -2081,6 +3072,37 @@ const obtenerResultadoPorId = async (req, res = response) => {
       throw new Error("El resultado de laboratorio no existe");
     }
 
+    // ====== Obtener solicitud para habilitación ======
+
+    const solicitud = await SolicitudAtencion.findById(
+      resultado.solicitudAtencionId,
+    )
+      .select(
+        [
+          "_id",
+          "codSolicitud",
+          "tipo",
+          "estado",
+          "unidadesLaboratorio",
+        ].join(" "),
+      )
+      .lean();
+
+    if (!solicitud) {
+      throw new Error("La solicitud de atención asociada no existe");
+    }
+
+    const habilitacionMuestra = await resolverHabilitacionMuestraUnidad({
+      solicitud,
+      claveUnidad: resultado.claveUnidad,
+    });
+
+    // ====== Resolver estado operativo ======
+
+    const estadoOperativo = await resolverEstadoOperativoSolicitud({
+      solicitud,
+    });
+
     // ====== Resumen de alertas ======
 
     const items = Array.isArray(resultado.resultadosItems)
@@ -2109,14 +3131,31 @@ const obtenerResultadoPorId = async (req, res = response) => {
 
     // ====== Respuesta ======
 
+    const resultadoConConfiguracion = adjuntarConfiguracionClinicaResultado({
+      solicitud,
+      resultado,
+    });
+
     return res.status(200).json({
       ok: true,
 
       msg: "Resultado de laboratorio obtenido correctamente",
 
+      estadoSolicitud: solicitud.estado,
+
+      estadoOperativo,
+
       resumenAlertas,
 
-      resultado,
+      resultado: {
+        ...resultadoConConfiguracion,
+        estadoUnidadLaboratorio:
+          obtenerUnidadLaboratorio({
+            solicitud,
+            claveUnidad: resultado.claveUnidad,
+          })?.estado ?? null,
+        habilitacionMuestra,
+      },
     });
   } catch (error) {
     console.error("Error al obtener resultado de laboratorio:", error);
@@ -2160,6 +3199,7 @@ const obtenerResultadosLiberadosPorSolicitud = async (req, res = response) => {
           "apeMatCliente",
           "sexoPaciente",
           "fechaNacimientoPaciente",
+          "unidadesLaboratorio",
         ].join(" "),
       )
       .lean();
@@ -2183,6 +3223,12 @@ const obtenerResultadosLiberadosPorSolicitud = async (req, res = response) => {
         createdAt: 1,
       })
       .lean();
+
+    // ====== Resolver estado operativo ======
+
+    const estadoOperativo = await resolverEstadoOperativoSolicitud({
+      solicitud,
+    });
 
     // ====== Construir resumen ======
 
@@ -2229,6 +3275,8 @@ const obtenerResultadosLiberadosPorSolicitud = async (req, res = response) => {
         codSolicitud: solicitud.codSolicitud,
 
         estado: solicitud.estado,
+
+        estadoOperativo,
 
         fechaEmision: solicitud.fechaEmision,
 
@@ -2318,9 +3366,17 @@ const inicializarResultadosSolicitud = async (req, res = response) => {
       throw new Error("La solicitud no contiene unidades de laboratorio");
     }
 
-    // ====== Validar snapshots ======
+    // ====== Considerar solo unidades activas ======
 
-    const unidadSinSnapshot = unidades.find(
+    const unidadesActivas = unidades.filter(
+      (unidad) => unidad.estado !== "ANULADO",
+    );
+
+    const unidadesAnuladas = unidades.length - unidadesActivas.length;
+
+    // ====== Validar snapshots activos ======
+
+    const unidadSinSnapshot = unidadesActivas.find(
       (unidad) => !unidad.snapshotClinico,
     );
 
@@ -2346,7 +3402,7 @@ const inicializarResultadosSolicitud = async (req, res = response) => {
 
     const resultadosNuevos = [];
 
-    for (const unidad of unidades) {
+    for (const unidad of unidadesActivas) {
       if (clavesExistentes.has(unidad.claveUnidad)) {
         continue;
       }
@@ -2367,16 +3423,33 @@ const inicializarResultadosSolicitud = async (req, res = response) => {
       resultadosNuevos.push(resultado);
     }
 
+    // ====== Sincronizar estados de solicitud ======
+
+    const estadoOperativo = await sincronizarEstadosSolicitudLaboratorio({
+      solicitud,
+      uid,
+      nombreUsuario,
+      session,
+    });
+
     await session.commitTransaction();
 
     // ====== Obtener estado final ======
 
     const resultadosFinales = await ResultadoLaboratorio.find({
       solicitudAtencionId: solicitud._id,
-    }).sort({
-      numeroInstancia: 1,
-      createdAt: 1,
-    });
+    })
+      .sort({
+        numeroInstancia: 1,
+        createdAt: 1,
+      })
+      .lean();
+
+    const resultadosConHabilitacion =
+      await adjuntarHabilitacionMuestraResultados({
+        solicitud,
+        resultados: resultadosFinales,
+      });
 
     return res.status(200).json({
       ok: true,
@@ -2384,17 +3457,27 @@ const inicializarResultadosSolicitud = async (req, res = response) => {
       msg:
         resultadosNuevos.length > 0
           ? "Resultados de laboratorio inicializados correctamente"
-          : "Los resultados de laboratorio ya estaban inicializados",
+          : unidadesActivas.length === 0
+            ? "La solicitud no posee unidades de laboratorio activas para inicializar"
+            : "Los resultados de laboratorio ya estaban inicializados",
+
+      estadoSolicitud: solicitud.estado,
+
+      estadoOperativo,
 
       resumen: {
         unidadesLaboratorio: unidades.length,
+
+        unidadesActivas: unidadesActivas.length,
+
+        unidadesAnuladas,
 
         resultadosCreados: resultadosNuevos.length,
 
         resultadosExistentes: resultadosFinales.length,
       },
 
-      resultados: resultadosFinales,
+      resultados: resultadosConHabilitacion,
     });
   } catch (error) {
     if (session.inTransaction()) {
@@ -2416,6 +3499,7 @@ const inicializarResultadosSolicitud = async (req, res = response) => {
 };
 
 module.exports = {
+  obtenerBandejaResultadosLaboratorio,
   inicializarResultadosSolicitud,
   registrarEditarResultadoItem,
   registrarResultadosMasivos,

@@ -370,6 +370,78 @@ const EvidenciaFotograficaMuestraSchema = new Schema(
   },
 );
 
+// ====== Corrección de evaluación ======
+
+const CorreccionEvaluacionMuestraSchema = new Schema(
+  {
+    estadoAnterior: {
+      type: String,
+      enum: ["ACEPTADA", "RECHAZADA"],
+      required: true,
+    },
+
+    estadoNuevo: {
+      type: String,
+      enum: ["ACEPTADA", "RECHAZADA"],
+      required: true,
+    },
+
+    motivoCorreccion: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    ejecutadoPor: {
+      type: String,
+      required: true,
+    },
+
+    usuarioEjecucion: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    autorizadoPor: {
+      type: String,
+      required: true,
+    },
+
+    usuarioAutorizacion: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    rolAutorizacionId: {
+      type: Schema.Types.ObjectId,
+      ref: "rolCollection",
+      default: null,
+    },
+
+    rolAutorizacion: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    fechaCorreccion: {
+      type: Date,
+      default: Date.now,
+      required: true,
+    },
+
+    evidenciaRechazoId: {
+      type: Schema.Types.ObjectId,
+      default: null,
+    },
+  },
+  {
+    _id: true,
+  },
+);
+
 // ====== Muestra física ======
 
 const MuestraLaboratorioSchema = new Schema(
@@ -516,6 +588,13 @@ const MuestraLaboratorioSchema = new Schema(
 
     evidenciasFotograficas: {
       type: [EvidenciaFotograficaMuestraSchema],
+      default: [],
+    },
+
+    // ====== Correcciones de evaluación ======
+
+    correccionesEvaluacion: {
+      type: [CorreccionEvaluacionMuestraSchema],
       default: [],
     },
 

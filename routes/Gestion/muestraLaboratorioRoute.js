@@ -12,6 +12,7 @@ const {
   aceptarMuestrasMasivamente,
   aceptarMuestra,
   rechazarMuestra,
+  corregirEvaluacionMuestra,
   anularMuestra,
   generarReintentoMuestra,
   obtenerBandejaTomaMuestras,
@@ -64,6 +65,7 @@ router.get(
 router.put(
   "/masiva/recibir",
   validarJWT,
+  cargarEvidenciaMuestra,
   recibirMuestrasMasivamente,
 );
 
@@ -78,6 +80,7 @@ router.get(
 router.put(
   "/masiva/aceptar",
   validarJWT,
+  cargarEvidenciaMuestra,
   aceptarMuestrasMasivamente,
 );
 
@@ -100,6 +103,15 @@ router.put(
   validarJWT,
   cargarEvidenciaMuestra,
   rechazarMuestra,
+);
+
+// ====== Corregir evaluación ======
+
+router.put(
+  "/:muestraLaboratorioId/corregir-evaluacion",
+  validarJWT,
+  cargarEvidenciaMuestra,
+  corregirEvaluacionMuestra,
 );
 
 // ====== Anular muestra ======

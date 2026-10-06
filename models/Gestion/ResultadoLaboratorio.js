@@ -429,7 +429,14 @@ const ResultadoLaboratorioSchema = new Schema(
 
     estadoPrevioAnulacion: {
       type: String,
-      enum: ["PENDIENTE", "EN PROCESO", "COMPLETO", "VALIDADO", "LIBERADO"],
+      enum: [
+        null,
+        "PENDIENTE",
+        "EN PROCESO",
+        "COMPLETO",
+        "VALIDADO",
+        "LIBERADO",
+      ],
       default: null,
     },
 

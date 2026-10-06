@@ -1,10 +1,18 @@
 const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
 const { response } = require("express");
 
 const SolicitudAtencion = require("../../models/Gestion/SolicitudAtencion");
+const RecurHumano = require("../../models/Mantenimiento/RecHumano");
+const ResultadoLaboratorio = require("../../models/Gestion/ResultadoLaboratorio");
 
 const MuestraLaboratorio = require("../../models/Gestion/MuestraLaboratorio");
+const {
+  construirEstadoOperativoLaboratorio,
+  resolverEstadoOperativoSolicitud,
+  sincronizarEstadosSolicitudLaboratorio,
+} = require("../../utils/Gestion/estadoOperativoSolicitud");
 const {
   subirArchivoStorage,
   generarUrlTemporal,
@@ -19,6 +27,132 @@ const obtenerId = (valor) => {
   }
 
   return valor._id ?? valor;
+};
+
+// ====== Normalizar ruta de permiso ======
+
+const normalizarRutaPermiso = (valor) =>
+  String(valor ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^\/+|\/+$/g, "");
+
+// ====== Validar permiso de corrección de muestra ======
+
+const rolPuedeAutorizarCorreccionMuestra = (rol) => {
+  if (!rol || rol.estado === false) {
+    return false;
+  }
+
+  const rutasPermitidas = Array.isArray(rol.rutasPermitidas)
+    ? rol.rutasPermitidas
+    : [];
+
+  return rutasPermitidas.some((ruta) => {
+    if (!ruta || ruta.estado === false) {
+      return false;
+    }
+
+    const urlRuta = normalizarRutaPermiso(ruta.urlRuta);
+
+    return (
+      urlRuta === "solicitudatencion-laboratorio" ||
+      urlRuta === "pages/solicitudatencion-laboratorio" ||
+      urlRuta.endsWith("/solicitudatencion-laboratorio")
+    );
+  });
+};
+
+// ====== Validar usuario autorizador ======
+
+const obtenerUsuarioAutorizadorCorreccion = async ({
+  nombreUsuarioAutorizador,
+  passwordAutorizador,
+  uidEjecutor,
+  nombreUsuarioEjecutor,
+  session,
+}) => {
+  if (
+    typeof nombreUsuarioAutorizador !== "string" ||
+    !nombreUsuarioAutorizador.trim()
+  ) {
+    throw new Error("Debe indicar el usuario que autoriza la corrección");
+  }
+
+  if (typeof passwordAutorizador !== "string" || !passwordAutorizador) {
+    throw new Error("Debe indicar la contraseña del usuario autorizador");
+  }
+
+  const nombreNormalizado = nombreUsuarioAutorizador.trim();
+
+  const usuarioAutorizador = await RecurHumano.findOne({
+    "datosLogueo.nombreUsuario": nombreNormalizado,
+  })
+    .populate({
+      path: "datosLogueo.rol",
+      populate: {
+        path: "rutasPermitidas",
+      },
+    })
+    .session(session);
+
+  if (
+    !usuarioAutorizador ||
+    !usuarioAutorizador.datosLogueo ||
+    usuarioAutorizador.datosLogueo.estado !== true
+  ) {
+    const error = new Error(
+      "El usuario autorizador no existe o no se encuentra habilitado",
+    );
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const credencialValida = bcrypt.compareSync(
+    passwordAutorizador,
+    usuarioAutorizador.datosLogueo.passwordHash ?? "",
+  );
+
+  if (!credencialValida) {
+    const error = new Error("Credenciales de autorización incorrectas");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const codAutorizador = String(usuarioAutorizador.codRecHumano ?? "").trim();
+  const usuarioAutorizadorNombre = String(
+    usuarioAutorizador.datosLogueo.nombreUsuario ?? "",
+  ).trim();
+
+  if (
+    (uidEjecutor && codAutorizador === String(uidEjecutor).trim()) ||
+    (nombreUsuarioEjecutor &&
+      usuarioAutorizadorNombre.toLowerCase() ===
+        String(nombreUsuarioEjecutor).trim().toLowerCase())
+  ) {
+    const error = new Error(
+      "La autorización debe ser realizada por un usuario distinto al que ejecuta la corrección",
+    );
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const rol = usuarioAutorizador.datosLogueo.rol;
+
+  if (!rolPuedeAutorizarCorreccionMuestra(rol)) {
+    const error = new Error(
+      "El usuario autorizador no posee permisos para autorizar correcciones de Toma de Muestras",
+    );
+    error.statusCode = 403;
+    throw error;
+  }
+
+  return {
+    codRecHumano: codAutorizador,
+    nombreUsuario: usuarioAutorizadorNombre,
+    rolId: rol?._id ?? null,
+    nombreRol: rol?.nombreRol ?? null,
+  };
 };
 
 // ====== Construir clave de opción ======
@@ -1367,6 +1501,15 @@ const inicializarMuestrasSolicitud = async (req, res = response) => {
       muestrasNuevas.push(muestra);
     }
 
+    // ====== Sincronizar estados de solicitud ======
+
+    const estadoOperativo = await sincronizarEstadosSolicitudLaboratorio({
+      solicitud,
+      uid,
+      nombreUsuario,
+      session,
+    });
+
     await session.commitTransaction();
 
     // ====== Obtener estado final ======
@@ -1388,6 +1531,10 @@ const inicializarMuestrasSolicitud = async (req, res = response) => {
           : muestrasNuevas.length > 0
             ? "Muestras de laboratorio inicializadas correctamente"
             : "Las muestras de laboratorio ya estaban inicializadas",
+
+      estadoSolicitud: solicitud.estado,
+
+      estadoOperativo,
 
       resumen: {
         unidadesLaboratorio: unidades.length,
@@ -2899,10 +3046,22 @@ const obtenerMuestrasRecepcionMasiva = async (req, res = response) => {
 // ====== Registrar recepción masiva ======
 
 const recibirMuestrasMasivamente = async (req, res = response) => {
+  let archivoEvidenciaGrupal = null;
+
   try {
     const { uid, nombreUsuario } = req.user;
 
-    const { muestraLaboratorioIds, observacionRecepcion } = req.body;
+    let { muestraLaboratorioIds, observacionRecepcion } = req.body ?? {};
+
+    // ====== Normalizar lista multipart ======
+
+    if (typeof muestraLaboratorioIds === "string") {
+      try {
+        muestraLaboratorioIds = JSON.parse(muestraLaboratorioIds);
+      } catch (error) {
+        throw new Error("La lista de muestras enviada no posee un formato válido");
+      }
+    }
 
     // ====== Validar lista ======
 
@@ -3010,7 +3169,7 @@ const recibirMuestrasMasivamente = async (req, res = response) => {
               $in: solicitudIds,
             },
           })
-            .select("_id tipo estado")
+            .select("_id tipo estado origenAtencion")
             .lean()
         : [];
 
@@ -3103,8 +3262,39 @@ const recibirMuestrasMasivamente = async (req, res = response) => {
         return;
       }
 
-      candidatas.push(muestra);
+      candidatas.push({
+        muestra,
+        solicitud,
+      });
     });
+
+    // ====== Registrar evidencia grupal opcional ======
+
+    const candidatasEmpresa = candidatas.filter(
+      (candidata) => candidata.solicitud?.origenAtencion === "EMPRESA",
+    );
+
+    if (req.file && candidatasEmpresa.length > 0) {
+      if (!Buffer.isBuffer(req.file.buffer) || req.file.buffer.length === 0) {
+        throw new Error("La fotografía grupal recibida no contiene datos válidos");
+      }
+
+      archivoEvidenciaGrupal = await subirArchivoStorage({
+        keyPrefix: "laboratorio/muestras/evidencias-grupales/recepcion",
+        buffer: req.file.buffer,
+        mimeType: req.file.mimetype,
+      });
+
+      if (!archivoEvidenciaGrupal?.archivoId || !archivoEvidenciaGrupal?.key) {
+        throw new Error(
+          "El almacenamiento no devolvió una referencia válida de la fotografía grupal",
+        );
+      }
+    } else if (req.file && candidatas.length > 0) {
+      throw new Error(
+        "La evidencia fotográfica grupal solo aplica a la recepción masiva de Empresa",
+      );
+    }
 
     // ====== Registrar recepción en bloque ======
 
@@ -3112,34 +3302,57 @@ const recibirMuestrasMasivamente = async (req, res = response) => {
 
     if (candidatas.length > 0) {
       await MuestraLaboratorio.bulkWrite(
-        candidatas.map((muestra) => ({
-          updateOne: {
-            filter: {
-              _id: muestra._id,
-              estadoMuestra: "RECOLECTADA",
+        candidatas.map((candidata) => {
+          const update = {
+            $set: {
+              estadoMuestra: "RECEPCIONADA",
+              recibidoPor: uid,
+              usuarioRecepcion: nombreUsuario ?? null,
+              fechaRecepcion: ahora,
+              observacionRecepcion: observacionNormalizada,
+              updatedBy: uid,
+              usuarioActualizacion: nombreUsuario ?? null,
+              fechaActualizacion: ahora,
             },
+          };
 
-            update: {
-              $set: {
-                estadoMuestra: "RECEPCIONADA",
-
-                recibidoPor: uid,
-
-                usuarioRecepcion: nombreUsuario ?? null,
-
-                fechaRecepcion: ahora,
-
-                observacionRecepcion: observacionNormalizada,
-
-                updatedBy: uid,
-
-                usuarioActualizacion: nombreUsuario ?? null,
-
-                fechaActualizacion: ahora,
+          if (
+            candidata.solicitud?.origenAtencion === "EMPRESA" &&
+            archivoEvidenciaGrupal
+          ) {
+            update.$push = {
+              evidenciasFotograficas: {
+                _id: new mongoose.Types.ObjectId(),
+                archivoId: archivoEvidenciaGrupal.archivoId,
+                storageKey: archivoEvidenciaGrupal.key,
+                versionId: archivoEvidenciaGrupal.versionId ?? null,
+                etag: archivoEvidenciaGrupal.etag ?? null,
+                nombreArchivo:
+                  typeof req.file?.originalname === "string"
+                    ? req.file.originalname.trim()
+                    : "",
+                mimeType: req.file?.mimetype ?? "",
+                tamanoBytes: req.file?.size ?? null,
+                etapa: "RECEPCION",
+                observacion: observacionNormalizada,
+                registradoPor: uid,
+                usuarioRegistro: nombreUsuario ?? null,
+                fechaRegistro: ahora,
+                estadoEvidencia: "ACTIVA",
               },
+            };
+          }
+
+          return {
+            updateOne: {
+              filter: {
+                _id: candidata.muestra._id,
+                estadoMuestra: "RECOLECTADA",
+              },
+              update,
             },
-          },
-        })),
+          };
+        }),
         {
           ordered: false,
         },
@@ -3148,7 +3361,7 @@ const recibirMuestrasMasivamente = async (req, res = response) => {
 
     // ====== Resolver actualizaciones exitosas ======
 
-    const candidatasIds = candidatas.map((muestra) => muestra._id);
+    const candidatasIds = candidatas.map((candidata) => candidata.muestra._id);
 
     const recepcionadas =
       candidatasIds.length > 0
@@ -3156,11 +3369,8 @@ const recibirMuestrasMasivamente = async (req, res = response) => {
             _id: {
               $in: candidatasIds,
             },
-
             estadoMuestra: "RECEPCIONADA",
-
             recibidoPor: uid,
-
             fechaRecepcion: ahora,
           })
             .select(
@@ -3173,13 +3383,42 @@ const recibirMuestrasMasivamente = async (req, res = response) => {
       recepcionadas.map((muestra) => muestra._id.toString()),
     );
 
+    const idsCandidatasEmpresa = new Set(
+      candidatasEmpresa.map((candidata) => candidata.muestra._id.toString()),
+    );
+
+    const evidenciasAsociadas = archivoEvidenciaGrupal
+      ? recepcionadas.filter((muestra) =>
+          idsCandidatasEmpresa.has(muestra._id.toString()),
+        ).length
+      : 0;
+
+    // ====== Compensar evidencia grupal sin referencias ======
+
+    if (archivoEvidenciaGrupal?.key && evidenciasAsociadas === 0) {
+      try {
+        await eliminarArchivo(
+          archivoEvidenciaGrupal.key,
+          archivoEvidenciaGrupal.versionId ?? undefined,
+        );
+
+        archivoEvidenciaGrupal = null;
+      } catch (errorEliminacion) {
+        console.error(
+          "No se pudo eliminar la evidencia grupal sin referencias de recepción:",
+          errorEliminacion,
+        );
+      }
+    }
+
     // ====== Detectar cambios concurrentes ======
 
     const idsNoConfirmados = candidatas
       .filter(
-        (muestra) => !idsRecepcionados.has(muestra._id.toString()),
+        (candidata) =>
+          !idsRecepcionados.has(candidata.muestra._id.toString()),
       )
-      .map((muestra) => muestra._id);
+      .map((candidata) => candidata.muestra._id);
 
     if (idsNoConfirmados.length > 0) {
       const estadosActuales = await MuestraLaboratorio.find({
@@ -3204,10 +3443,9 @@ const recibirMuestrasMasivamente = async (req, res = response) => {
 
     const resumen = {
       solicitadas: idsSolicitados.length,
-
       recepcionadas: recepcionadas.length,
-
       noProcesadas: noProcesadas.length,
+      evidenciasAsociadas,
     };
 
     const msg =
@@ -3219,36 +3457,62 @@ const recibirMuestrasMasivamente = async (req, res = response) => {
 
     return res.status(200).json({
       ok: true,
-
       msg,
-
       resumen,
-
       recepcionadas: recepcionadas.map((muestra) => ({
         muestraLaboratorioId: muestra._id,
-
         codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
-
         estadoMuestra: muestra.estadoMuestra,
-
         usuarioRecepcion: muestra.usuarioRecepcion ?? null,
-
         fechaRecepcion: muestra.fechaRecepcion,
       })),
-
+      evidenciaGrupal:
+        archivoEvidenciaGrupal && evidenciasAsociadas > 0
+          ? {
+              archivoId: archivoEvidenciaGrupal.archivoId,
+              nombreArchivo:
+                typeof req.file?.originalname === "string"
+                  ? req.file.originalname.trim()
+                  : "",
+              mimeType: req.file?.mimetype ?? "",
+              tamanoBytes: req.file?.size ?? null,
+              etapa: "RECEPCION",
+              muestrasAsociadas: evidenciasAsociadas,
+            }
+          : null,
       noProcesadas,
     });
   } catch (error) {
+    // ====== Compensar evidencia S3 huérfana ======
+
+    if (archivoEvidenciaGrupal?.key) {
+      try {
+        const evidenciaReferenciada = await MuestraLaboratorio.exists({
+          "evidenciasFotograficas.archivoId": archivoEvidenciaGrupal.archivoId,
+        });
+
+        if (!evidenciaReferenciada) {
+          await eliminarArchivo(
+            archivoEvidenciaGrupal.key,
+            archivoEvidenciaGrupal.versionId ?? undefined,
+          );
+        }
+      } catch (errorEliminacion) {
+        console.error(
+          "No se pudo compensar la evidencia grupal de recepción:",
+          errorEliminacion,
+        );
+      }
+    }
+
     console.error("Error al registrar recepción masiva:", error);
 
     return res.status(400).json({
       ok: false,
-
       msg: error.message || "No se pudo registrar la recepción masiva",
     });
   }
 };
-
 
 // ====== Obtener muestras disponibles para aceptación masiva ======
 
@@ -3611,10 +3875,22 @@ const obtenerMuestrasAceptacionMasiva = async (req, res = response) => {
 // ====== Registrar aceptación masiva ======
 
 const aceptarMuestrasMasivamente = async (req, res = response) => {
+  let archivoEvidenciaGrupal = null;
+
   try {
     const { uid, nombreUsuario } = req.user;
 
-    const { muestraLaboratorioIds, observacionAceptacion } = req.body;
+    let { muestraLaboratorioIds, observacionAceptacion } = req.body ?? {};
+
+    // ====== Normalizar lista multipart ======
+
+    if (typeof muestraLaboratorioIds === "string") {
+      try {
+        muestraLaboratorioIds = JSON.parse(muestraLaboratorioIds);
+      } catch (error) {
+        throw new Error("La lista de muestras enviada no posee un formato válido");
+      }
+    }
 
     // ====== Validar lista ======
 
@@ -3724,7 +4000,7 @@ const aceptarMuestrasMasivamente = async (req, res = response) => {
               $in: solicitudIds,
             },
           })
-            .select("_id tipo estado")
+            .select("_id tipo estado origenAtencion")
             .lean()
         : [];
 
@@ -3827,8 +4103,39 @@ const aceptarMuestrasMasivamente = async (req, res = response) => {
         return;
       }
 
-      candidatas.push(muestra);
+      candidatas.push({
+        muestra,
+        solicitud,
+      });
     });
+
+    // ====== Registrar evidencia grupal opcional ======
+
+    const candidatasEmpresa = candidatas.filter(
+      (candidata) => candidata.solicitud?.origenAtencion === "EMPRESA",
+    );
+
+    if (req.file && candidatasEmpresa.length > 0) {
+      if (!Buffer.isBuffer(req.file.buffer) || req.file.buffer.length === 0) {
+        throw new Error("La fotografía grupal recibida no contiene datos válidos");
+      }
+
+      archivoEvidenciaGrupal = await subirArchivoStorage({
+        keyPrefix: "laboratorio/muestras/evidencias-grupales/aceptacion",
+        buffer: req.file.buffer,
+        mimeType: req.file.mimetype,
+      });
+
+      if (!archivoEvidenciaGrupal?.archivoId || !archivoEvidenciaGrupal?.key) {
+        throw new Error(
+          "El almacenamiento no devolvió una referencia válida de la fotografía grupal",
+        );
+      }
+    } else if (req.file && candidatas.length > 0) {
+      throw new Error(
+        "La evidencia fotográfica grupal solo aplica a la aceptación masiva de Empresa",
+      );
+    }
 
     // ====== Registrar aceptación en bloque ======
 
@@ -3836,34 +4143,57 @@ const aceptarMuestrasMasivamente = async (req, res = response) => {
 
     if (candidatas.length > 0) {
       await MuestraLaboratorio.bulkWrite(
-        candidatas.map((muestra) => ({
-          updateOne: {
-            filter: {
-              _id: muestra._id,
-              estadoMuestra: "RECEPCIONADA",
+        candidatas.map((candidata) => {
+          const update = {
+            $set: {
+              estadoMuestra: "ACEPTADA",
+              aceptadoPor: uid,
+              usuarioAceptacion: nombreUsuario ?? null,
+              fechaAceptacion: ahora,
+              observacionAceptacion: observacionNormalizada,
+              updatedBy: uid,
+              usuarioActualizacion: nombreUsuario ?? null,
+              fechaActualizacion: ahora,
             },
+          };
 
-            update: {
-              $set: {
-                estadoMuestra: "ACEPTADA",
-
-                aceptadoPor: uid,
-
-                usuarioAceptacion: nombreUsuario ?? null,
-
-                fechaAceptacion: ahora,
-
-                observacionAceptacion: observacionNormalizada,
-
-                updatedBy: uid,
-
-                usuarioActualizacion: nombreUsuario ?? null,
-
-                fechaActualizacion: ahora,
+          if (
+            candidata.solicitud?.origenAtencion === "EMPRESA" &&
+            archivoEvidenciaGrupal
+          ) {
+            update.$push = {
+              evidenciasFotograficas: {
+                _id: new mongoose.Types.ObjectId(),
+                archivoId: archivoEvidenciaGrupal.archivoId,
+                storageKey: archivoEvidenciaGrupal.key,
+                versionId: archivoEvidenciaGrupal.versionId ?? null,
+                etag: archivoEvidenciaGrupal.etag ?? null,
+                nombreArchivo:
+                  typeof req.file?.originalname === "string"
+                    ? req.file.originalname.trim()
+                    : "",
+                mimeType: req.file?.mimetype ?? "",
+                tamanoBytes: req.file?.size ?? null,
+                etapa: "ACEPTACION",
+                observacion: observacionNormalizada,
+                registradoPor: uid,
+                usuarioRegistro: nombreUsuario ?? null,
+                fechaRegistro: ahora,
+                estadoEvidencia: "ACTIVA",
               },
+            };
+          }
+
+          return {
+            updateOne: {
+              filter: {
+                _id: candidata.muestra._id,
+                estadoMuestra: "RECEPCIONADA",
+              },
+              update,
             },
-          },
-        })),
+          };
+        }),
         {
           ordered: false,
         },
@@ -3872,7 +4202,7 @@ const aceptarMuestrasMasivamente = async (req, res = response) => {
 
     // ====== Resolver actualizaciones exitosas ======
 
-    const candidatasIds = candidatas.map((muestra) => muestra._id);
+    const candidatasIds = candidatas.map((candidata) => candidata.muestra._id);
 
     const aceptadas =
       candidatasIds.length > 0
@@ -3880,11 +4210,8 @@ const aceptarMuestrasMasivamente = async (req, res = response) => {
             _id: {
               $in: candidatasIds,
             },
-
             estadoMuestra: "ACEPTADA",
-
             aceptadoPor: uid,
-
             fechaAceptacion: ahora,
           })
             .select(
@@ -3897,13 +4224,41 @@ const aceptarMuestrasMasivamente = async (req, res = response) => {
       aceptadas.map((muestra) => muestra._id.toString()),
     );
 
+    const idsCandidatasEmpresa = new Set(
+      candidatasEmpresa.map((candidata) => candidata.muestra._id.toString()),
+    );
+
+    const evidenciasAsociadas = archivoEvidenciaGrupal
+      ? aceptadas.filter((muestra) =>
+          idsCandidatasEmpresa.has(muestra._id.toString()),
+        ).length
+      : 0;
+
+    // ====== Compensar evidencia grupal sin referencias ======
+
+    if (archivoEvidenciaGrupal?.key && evidenciasAsociadas === 0) {
+      try {
+        await eliminarArchivo(
+          archivoEvidenciaGrupal.key,
+          archivoEvidenciaGrupal.versionId ?? undefined,
+        );
+
+        archivoEvidenciaGrupal = null;
+      } catch (errorEliminacion) {
+        console.error(
+          "No se pudo eliminar la evidencia grupal sin referencias de aceptación:",
+          errorEliminacion,
+        );
+      }
+    }
+
     // ====== Detectar cambios concurrentes ======
 
     const idsNoConfirmados = candidatas
       .filter(
-        (muestra) => !idsAceptados.has(muestra._id.toString()),
+        (candidata) => !idsAceptados.has(candidata.muestra._id.toString()),
       )
-      .map((muestra) => muestra._id);
+      .map((candidata) => candidata.muestra._id);
 
     if (idsNoConfirmados.length > 0) {
       const estadosActuales = await MuestraLaboratorio.find({
@@ -3928,10 +4283,9 @@ const aceptarMuestrasMasivamente = async (req, res = response) => {
 
     const resumen = {
       solicitadas: idsSolicitados.length,
-
       aceptadas: aceptadas.length,
-
       noProcesadas: noProcesadas.length,
+      evidenciasAsociadas,
     };
 
     const msg =
@@ -3943,31 +4297,58 @@ const aceptarMuestrasMasivamente = async (req, res = response) => {
 
     return res.status(200).json({
       ok: true,
-
       msg,
-
       resumen,
-
       aceptadas: aceptadas.map((muestra) => ({
         muestraLaboratorioId: muestra._id,
-
         codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
-
         estadoMuestra: muestra.estadoMuestra,
-
         usuarioAceptacion: muestra.usuarioAceptacion ?? null,
-
         fechaAceptacion: muestra.fechaAceptacion,
       })),
-
+      evidenciaGrupal:
+        archivoEvidenciaGrupal && evidenciasAsociadas > 0
+          ? {
+              archivoId: archivoEvidenciaGrupal.archivoId,
+              nombreArchivo:
+                typeof req.file?.originalname === "string"
+                  ? req.file.originalname.trim()
+                  : "",
+              mimeType: req.file?.mimetype ?? "",
+              tamanoBytes: req.file?.size ?? null,
+              etapa: "ACEPTACION",
+              muestrasAsociadas: evidenciasAsociadas,
+            }
+          : null,
       noProcesadas,
     });
   } catch (error) {
+    // ====== Compensar evidencia S3 huérfana ======
+
+    if (archivoEvidenciaGrupal?.key) {
+      try {
+        const evidenciaReferenciada = await MuestraLaboratorio.exists({
+          "evidenciasFotograficas.archivoId": archivoEvidenciaGrupal.archivoId,
+        });
+
+        if (!evidenciaReferenciada) {
+          await eliminarArchivo(
+            archivoEvidenciaGrupal.key,
+            archivoEvidenciaGrupal.versionId ?? undefined,
+          );
+        }
+      } catch (errorEliminacion) {
+        console.error(
+          "No se pudo compensar la evidencia grupal de aceptación:",
+          errorEliminacion,
+        );
+      }
+    }
+
     console.error("Error al registrar aceptación masiva:", error);
 
     return res.status(400).json({
       ok: false,
-
       msg: error.message || "No se pudo registrar la aceptación masiva",
     });
   }
@@ -4365,6 +4746,391 @@ const rechazarMuestra = async (req, res = response) => {
       ok: false,
 
       msg: error.message || "No se pudo registrar el rechazo de muestra",
+    });
+  } finally {
+    await session.endSession();
+  }
+};
+
+// ====== Corregir evaluación de muestra ======
+
+const corregirEvaluacionMuestra = async (req, res = response) => {
+  let archivoSubido = null;
+  let evidenciaPersistida = false;
+
+  const session = await mongoose.startSession();
+
+  session.startTransaction();
+
+  try {
+    const { muestraLaboratorioId } = req.params;
+
+    const { uid, nombreUsuario } = req.user;
+
+    const {
+      motivoCorreccion,
+      nombreUsuarioAutorizador,
+      passwordAutorizador,
+    } = req.body ?? {};
+
+    // ====== Validar id ======
+
+    if (!mongoose.Types.ObjectId.isValid(muestraLaboratorioId)) {
+      throw new Error("El id de la muestra de laboratorio no es válido");
+    }
+
+    // ====== Validar motivo ======
+
+    if (typeof motivoCorreccion !== "string" || !motivoCorreccion.trim()) {
+      throw new Error("El motivo de la corrección es obligatorio");
+    }
+
+    const motivoNormalizado = motivoCorreccion.trim();
+
+    // ====== Obtener muestra ======
+
+    const muestra =
+      await MuestraLaboratorio.findById(muestraLaboratorioId).session(session);
+
+    if (!muestra) {
+      throw new Error("La muestra de laboratorio no existe");
+    }
+
+    // ====== Validar estado corregible ======
+
+    if (!["ACEPTADA", "RECHAZADA"].includes(muestra.estadoMuestra)) {
+      throw new Error(
+        `Solo se puede corregir una muestra ACEPTADA o RECHAZADA. Estado actual: ${muestra.estadoMuestra}`,
+      );
+    }
+
+    const estadoAnterior = muestra.estadoMuestra;
+
+    const estadoNuevo =
+      estadoAnterior === "ACEPTADA" ? "RECHAZADA" : "ACEPTADA";
+
+    // ====== Validar solicitud ======
+
+    const solicitud = await SolicitudAtencion.findById(
+      muestra.solicitudAtencionId,
+    ).session(session);
+
+    if (!solicitud) {
+      throw new Error("La solicitud de atención asociada no existe");
+    }
+
+    if (solicitud.tipo !== "Laboratorio") {
+      throw new Error("La solicitud asociada no corresponde a Laboratorio");
+    }
+
+    if (solicitud.estado === "ANULADO") {
+      throw new Error(
+        "No se puede corregir la evaluación de una solicitud anulada",
+      );
+    }
+
+    // ====== Validar trazabilidad preanalítica ======
+
+    if (!muestra.recolectadoPor || !muestra.fechaRecoleccion) {
+      throw new Error("La muestra no posee trazabilidad válida de recolección");
+    }
+
+    if (!muestra.recibidoPor || !muestra.fechaRecepcion) {
+      throw new Error("La muestra no posee trazabilidad válida de recepción");
+    }
+
+    // ====== Validar autorización independiente ======
+
+    const autorizador = await obtenerUsuarioAutorizadorCorreccion({
+      nombreUsuarioAutorizador,
+      passwordAutorizador,
+      uidEjecutor: uid,
+      nombreUsuarioEjecutor: nombreUsuario,
+      session,
+    });
+
+    // ====== Validar reintento existente ======
+
+    if (estadoAnterior === "RECHAZADA") {
+      const reintentoExistente = await MuestraLaboratorio.findOne({
+        muestraAnteriorId: muestra._id,
+      })
+        .select("_id codigoEtiqueta estadoMuestra numeroIntento")
+        .session(session)
+        .lean();
+
+      if (reintentoExistente) {
+        throw new Error(
+          "No se puede corregir la muestra rechazada porque ya existe un reintento posterior",
+        );
+      }
+
+      if (req.file) {
+        throw new Error(
+          "No debe enviar una fotografía al corregir una muestra RECHAZADA a ACEPTADA",
+        );
+      }
+    }
+
+    // ====== Validar resultados ya procesados ======
+
+    if (estadoAnterior === "ACEPTADA") {
+      const clavesUnidad = [
+        ...new Set(
+          (Array.isArray(muestra.coberturas) ? muestra.coberturas : [])
+            .map((cobertura) => String(cobertura?.claveUnidad ?? "").trim())
+            .filter(Boolean),
+        ),
+      ];
+
+      if (clavesUnidad.length > 0) {
+        const resultadoProcesado = await ResultadoLaboratorio.findOne({
+          solicitudAtencionId: muestra.solicitudAtencionId,
+          claveUnidad: {
+            $in: clavesUnidad,
+          },
+          estadoResultado: {
+            $in: ["EN PROCESO", "COMPLETO", "VALIDADO", "LIBERADO"],
+          },
+        })
+          .select(
+            "_id claveUnidad codPruebaLab nombrePruebaLab numeroInstancia etiquetaInstancia estadoResultado",
+          )
+          .session(session)
+          .lean();
+
+        if (resultadoProcesado) {
+          const codigoPrueba =
+            String(resultadoProcesado.codPruebaLab ?? "").trim() || "Prueba";
+
+          const nombrePrueba = String(
+            resultadoProcesado.nombrePruebaLab ?? "",
+          ).trim();
+
+          const descripcionPrueba = nombrePrueba
+            ? `${codigoPrueba} - ${nombrePrueba}`
+            : codigoPrueba;
+
+          const detalleInstancia = resultadoProcesado.etiquetaInstancia
+            ? ` (${resultadoProcesado.etiquetaInstancia})`
+            : Number(resultadoProcesado.numeroInstancia ?? 1) > 1
+              ? ` (instancia ${resultadoProcesado.numeroInstancia})`
+              : "";
+
+          throw new Error(
+            `No se puede corregir la muestra a RECHAZADA porque el resultado de ${descripcionPrueba}${detalleInstancia} se encuentra en estado ${resultadoProcesado.estadoResultado}`,
+          );
+        }
+      }
+    }
+
+    // ====== Validar fotografía para nuevo rechazo ======
+
+    if (estadoNuevo === "RECHAZADA") {
+      if (!req.file) {
+        throw new Error(
+          "Debe registrar una fotografía para corregir la muestra a RECHAZADA",
+        );
+      }
+
+      if (!Buffer.isBuffer(req.file.buffer) || req.file.buffer.length === 0) {
+        throw new Error("La fotografía recibida no contiene datos válidos");
+      }
+
+      // ====== Subir evidencia de rechazo ======
+
+      const keyPrefix =
+        `laboratorio/muestras/` + `${muestra._id.toString()}/` + `evidencias`;
+
+      archivoSubido = await subirArchivoStorage({
+        keyPrefix,
+        buffer: req.file.buffer,
+        mimeType: req.file.mimetype,
+      });
+
+      if (!archivoSubido?.archivoId || !archivoSubido?.key) {
+        throw new Error(
+          "El almacenamiento no devolvió una referencia válida de la fotografía",
+        );
+      }
+    }
+
+    const ahora = new Date();
+
+    let evidencia = null;
+
+    // ====== Aplicar corrección ======
+
+    if (estadoNuevo === "RECHAZADA") {
+      muestra.estadoMuestra = "RECHAZADA";
+
+      muestra.rechazadoPor = uid;
+
+      muestra.usuarioRechazo = nombreUsuario ?? null;
+
+      muestra.fechaRechazo = ahora;
+
+      muestra.motivoRechazo = motivoNormalizado;
+
+      // ====== Registrar evidencia de rechazo ======
+
+      muestra.evidenciasFotograficas.push({
+        archivoId: archivoSubido.archivoId,
+
+        storageKey: archivoSubido.key,
+
+        versionId: archivoSubido.versionId ?? null,
+
+        etag: archivoSubido.etag ?? null,
+
+        nombreArchivo:
+          typeof req.file?.originalname === "string"
+            ? req.file.originalname.trim()
+            : "",
+
+        mimeType: req.file?.mimetype ?? "",
+
+        tamanoBytes: req.file?.size ?? null,
+
+        etapa: "RECHAZO",
+
+        observacion: motivoNormalizado,
+
+        registradoPor: uid,
+
+        usuarioRegistro: nombreUsuario ?? null,
+
+        fechaRegistro: ahora,
+      });
+
+      evidencia =
+        muestra.evidenciasFotograficas[
+          muestra.evidenciasFotograficas.length - 1
+        ];
+    } else {
+      muestra.estadoMuestra = "ACEPTADA";
+
+      muestra.aceptadoPor = uid;
+
+      muestra.usuarioAceptacion = nombreUsuario ?? null;
+
+      muestra.fechaAceptacion = ahora;
+
+      muestra.observacionAceptacion = motivoNormalizado;
+    }
+
+    // ====== Registrar bitácora de corrección ======
+
+    muestra.correccionesEvaluacion.push({
+      estadoAnterior,
+
+      estadoNuevo,
+
+      motivoCorreccion: motivoNormalizado,
+
+      ejecutadoPor: uid,
+
+      usuarioEjecucion: nombreUsuario ?? null,
+
+      autorizadoPor: autorizador.codRecHumano,
+
+      usuarioAutorizacion: autorizador.nombreUsuario,
+
+      rolAutorizacionId: autorizador.rolId,
+
+      rolAutorizacion: autorizador.nombreRol,
+
+      fechaCorreccion: ahora,
+
+      evidenciaRechazoId: evidencia?._id ?? null,
+    });
+
+    // ====== Auditoría ======
+
+    muestra.updatedBy = uid;
+
+    muestra.usuarioActualizacion = nombreUsuario ?? null;
+
+    muestra.fechaActualizacion = ahora;
+
+    // ====== Guardar ======
+
+    await muestra.save({
+      session,
+    });
+
+    await session.commitTransaction();
+
+    evidenciaPersistida = Boolean(evidencia);
+
+    return res.status(200).json({
+      ok: true,
+
+      msg:
+        estadoNuevo === "RECHAZADA"
+          ? "La muestra fue corregida de ACEPTADA a RECHAZADA correctamente"
+          : "La muestra fue corregida de RECHAZADA a ACEPTADA correctamente",
+
+      estadoAnterior,
+
+      estadoMuestra: muestra.estadoMuestra,
+
+      requiereNuevaMuestra: estadoNuevo === "RECHAZADA",
+
+      autorizacion: {
+        autorizadoPor: autorizador.codRecHumano,
+        usuarioAutorizacion: autorizador.nombreUsuario,
+        rolAutorizacion: autorizador.nombreRol,
+        fechaCorreccion: ahora,
+      },
+
+      evidencia:
+        evidencia && estadoNuevo === "RECHAZADA"
+          ? {
+              _id: evidencia._id,
+              archivoId: evidencia.archivoId,
+              nombreArchivo: evidencia.nombreArchivo,
+              mimeType: evidencia.mimeType,
+              tamanoBytes: evidencia.tamanoBytes,
+              etapa: evidencia.etapa,
+              observacion: evidencia.observacion,
+              estadoEvidencia: evidencia.estadoEvidencia ?? "ACTIVA",
+              usuarioRegistro: evidencia.usuarioRegistro ?? null,
+              fechaRegistro: evidencia.fechaRegistro,
+            }
+          : null,
+
+      muestra,
+    });
+  } catch (error) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    // ====== Compensar archivo S3 ======
+
+    if (archivoSubido?.key && !evidenciaPersistida) {
+      try {
+        await eliminarArchivo(
+          archivoSubido.key,
+          archivoSubido.versionId ?? undefined,
+        );
+      } catch (errorEliminacion) {
+        console.error(
+          "No se pudo eliminar de S3 la evidencia huérfana de la corrección:",
+          errorEliminacion,
+        );
+      }
+    }
+
+    console.error("Error al corregir evaluación de muestra:", error);
+
+    return res.status(error.statusCode ?? 400).json({
+      ok: false,
+
+      msg:
+        error.message ||
+        "No se pudo corregir la evaluación de la muestra de laboratorio",
     });
   } finally {
     await session.endSession();
@@ -4915,13 +5681,33 @@ const obtenerBandejaTomaMuestras = async (req, res = response) => {
               $in: solicitudIds,
             },
           })
-            .select("-evidenciasFotograficas -__v")
+            .select("-evidenciasFotograficas -correccionesEvaluacion -__v")
             .sort({
               solicitudAtencionId: 1,
               numeroRecipiente: 1,
               numeroIntento: 1,
               createdAt: 1,
             })
+            .lean()
+        : [];
+
+    // ====== Obtener resultados en bloque ======
+
+    const resultados =
+      solicitudIds.length > 0
+        ? await ResultadoLaboratorio.find({
+            solicitudAtencionId: {
+              $in: solicitudIds,
+            },
+          })
+            .select(
+              [
+                "_id",
+                "solicitudAtencionId",
+                "claveUnidad",
+                "estadoResultado",
+              ].join(" "),
+            )
             .lean()
         : [];
 
@@ -4939,12 +5725,35 @@ const obtenerBandejaTomaMuestras = async (req, res = response) => {
       muestrasPorSolicitud.get(clave).push(muestra);
     });
 
+    // ====== Agrupar resultados por solicitud ======
+
+    const resultadosPorSolicitud = new Map();
+
+    resultados.forEach((resultado) => {
+      const clave = resultado.solicitudAtencionId.toString();
+
+      if (!resultadosPorSolicitud.has(clave)) {
+        resultadosPorSolicitud.set(clave, []);
+      }
+
+      resultadosPorSolicitud.get(clave).push(resultado);
+    });
+
     // ====== Construir bandeja ======
 
     const bandeja = solicitudes.map((solicitud) => {
       const claveSolicitud = solicitud._id.toString();
 
       const muestrasSolicitud = muestrasPorSolicitud.get(claveSolicitud) ?? [];
+
+      const resultadosSolicitud =
+        resultadosPorSolicitud.get(claveSolicitud) ?? [];
+
+      const estadoOperativo = construirEstadoOperativoLaboratorio({
+        solicitud,
+        muestras: muestrasSolicitud,
+        resultados: resultadosSolicitud,
+      });
 
       const planes = construirPlanesConsultaMuestra(muestrasSolicitud);
 
@@ -4972,7 +5781,10 @@ const obtenerBandejaTomaMuestras = async (req, res = response) => {
         planToma.totalRecipientes > 0;
 
       return {
-        solicitud: construirSolicitudBandejaMuestraResponse(solicitud),
+        solicitud: {
+          ...construirSolicitudBandejaMuestraResponse(solicitud),
+          estadoOperativo,
+        },
 
         muestras: {
           requiereMuestra,
@@ -5083,6 +5895,13 @@ const obtenerMuestrasPorSolicitud = async (req, res = response) => {
 
     const resumen = construirResumenOperativoMuestras(muestras, planes);
 
+    // ====== Resolver estado operativo ======
+
+    const estadoOperativo = await resolverEstadoOperativoSolicitud({
+      solicitud,
+      muestras,
+    });
+
     return res.status(200).json({
       ok: true,
 
@@ -5091,7 +5910,10 @@ const obtenerMuestrasPorSolicitud = async (req, res = response) => {
           ? "Historial de muestras de laboratorio obtenido correctamente"
           : "La solicitud no posee muestras de laboratorio inicializadas",
 
-      solicitud: construirSolicitudMuestraResponse(solicitud),
+      solicitud: {
+        ...construirSolicitudMuestraResponse(solicitud),
+        estadoOperativo,
+      },
 
       resumen,
 
@@ -5159,6 +5981,13 @@ const obtenerMuestrasPorCodigoLaboratorio = async (req, res = response) => {
 
     const resumen = construirResumenOperativoMuestras(muestras, planes);
 
+    // ====== Resolver estado operativo ======
+
+    const estadoOperativo = await resolverEstadoOperativoSolicitud({
+      solicitud,
+      muestras,
+    });
+
     return res.status(200).json({
       ok: true,
 
@@ -5167,7 +5996,10 @@ const obtenerMuestrasPorCodigoLaboratorio = async (req, res = response) => {
           ? "Solicitud e historial de muestras de laboratorio obtenidos correctamente"
           : "La solicitud todavía no posee muestras inicializadas",
 
-      solicitud: construirSolicitudMuestraResponse(solicitud),
+      solicitud: {
+        ...construirSolicitudMuestraResponse(solicitud),
+        estadoOperativo,
+      },
 
       resumen,
 
@@ -5231,6 +6063,15 @@ const obtenerDetalleMuestra = async (req, res = response) => {
       })
       .lean();
 
+    const muestrasSolicitud = await MuestraLaboratorio.find({
+      solicitudAtencionId: muestra.solicitudAtencionId,
+    }).lean();
+
+    const estadoOperativo = await resolverEstadoOperativoSolicitud({
+      solicitud,
+      muestras: muestrasSolicitud,
+    });
+
     const indiceActual = intentos.findIndex(
       (intento) => intento._id.toString() === muestra._id.toString(),
     );
@@ -5273,6 +6114,10 @@ const obtenerDetalleMuestra = async (req, res = response) => {
 
       motivoRechazo: intento.motivoRechazo ?? null,
 
+      correccionesEvaluacion: Array.isArray(intento.correccionesEvaluacion)
+        ? intento.correccionesEvaluacion
+        : [],
+
       fechaRecoleccion: intento.fechaRecoleccion ?? null,
 
       fechaRecepcion: intento.fechaRecepcion ?? null,
@@ -5303,7 +6148,10 @@ const obtenerDetalleMuestra = async (req, res = response) => {
 
       msg: "Detalle e historial de la muestra obtenidos correctamente",
 
-      solicitud: construirSolicitudMuestraResponse(solicitud),
+      solicitud: {
+        ...construirSolicitudMuestraResponse(solicitud),
+        estadoOperativo,
+      },
 
       muestra: {
         ...muestra,
@@ -5921,6 +6769,7 @@ module.exports = {
   aceptarMuestrasMasivamente,
   aceptarMuestra,
   rechazarMuestra,
+  corregirEvaluacionMuestra,
   anularMuestra,
   generarReintentoMuestra,
   obtenerBandejaTomaMuestras,

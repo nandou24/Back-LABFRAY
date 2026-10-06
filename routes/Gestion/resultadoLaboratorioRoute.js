@@ -1,6 +1,7 @@
 const { Router } = require("express");
 
 const {
+  obtenerBandejaResultadosLaboratorio,
   inicializarResultadosSolicitud,
   registrarEditarResultadoItem,
   registrarResultadosMasivos,
@@ -15,6 +16,10 @@ const {
 const { validarJWT } = require("../../middlewares/validar-token");
 
 const router = Router();
+
+// ====== Bandeja de Gestión de Resultados ======
+
+router.get("/bandeja", validarJWT, obtenerBandejaResultadosLaboratorio);
 
 // ====== Inicializar resultados ======
 
