@@ -715,6 +715,10 @@ const adjuntarConfiguracionClinicaResultado = ({ solicitud, resultado }) => {
           opcionesResultado: Array.isArray(snapshotItem.opcionesResultado)
             ? [...snapshotItem.opcionesResultado]
             : [],
+          valorPorDefectoResultado:
+            snapshotItem.tipoResultado === "NUMERICO"
+              ? ""
+              : String(snapshotItem.valorPorDefectoResultado ?? "").trim(),
           permiteValorNoListado: snapshotItem.permiteValorNoListado === true,
           referenciasResultado: Array.isArray(snapshotItem.referenciasResultado)
             ? snapshotItem.referenciasResultado.map((referencia) => ({

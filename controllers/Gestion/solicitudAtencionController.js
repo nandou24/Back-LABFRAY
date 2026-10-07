@@ -715,6 +715,11 @@ const construirSnapshotItemLab = (itemMaestro) => {
       ? [...itemMaestro.opcionesResultado]
       : [],
 
+    valorPorDefectoResultado:
+      itemMaestro.tipoResultado === "NUMERICO"
+        ? ""
+        : String(itemMaestro.valorPorDefectoResultado ?? "").trim(),
+
     permiteValorNoListado: itemMaestro.permiteValorNoListado ?? false,
 
     estadoItem: normalizarEstadoItemClinico(itemMaestro.estadoItem),

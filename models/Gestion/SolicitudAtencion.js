@@ -627,6 +627,11 @@ const ItemLabSnapshotSchema = new Schema(
       default: [],
     },
 
+    valorPorDefectoResultado: {
+      type: String,
+      default: "",
+    },
+
     permiteValorNoListado: {
       type: Boolean,
       default: false,

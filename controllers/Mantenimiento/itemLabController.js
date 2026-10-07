@@ -4,6 +4,43 @@ const bcrypt = require("bcryptjs");
 const { generarJWT } = require("../../helpers/jwt");
 const jwt = require("jsonwebtoken");
 
+// ====== Validar valor por defecto de resultado ======
+const validarValorPorDefectoResultado = (datos = {}) => {
+  const tipoResultado = datos.tipoResultado ?? "TEXTO";
+  const valor = String(datos.valorPorDefectoResultado ?? "").trim();
+
+  if (tipoResultado === "NUMERICO") {
+    datos.valorPorDefectoResultado = "";
+    return null;
+  }
+
+  if (!valor) {
+    datos.valorPorDefectoResultado = "";
+    return null;
+  }
+
+  if (tipoResultado === "CATEGORICO") {
+    const opciones = Array.isArray(datos.opcionesResultado)
+      ? datos.opcionesResultado
+      : [];
+
+    const opcionCanonica = opciones.find(
+      (opcion) =>
+        String(opcion ?? "").trim().toUpperCase() === valor.toUpperCase(),
+    );
+
+    if (!opcionCanonica) {
+      return "El valor por defecto debe existir entre las opciones del resultado categórico";
+    }
+
+    datos.valorPorDefectoResultado = String(opcionCanonica).trim();
+    return null;
+  }
+
+  datos.valorPorDefectoResultado = valor;
+  return null;
+};
+
 const crearItemLab = async (req, res = response) => {
   console.log("Datos recibidos:", req.body);
 
@@ -23,6 +60,15 @@ const crearItemLab = async (req, res = response) => {
   const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
 
   try {
+    const errorValorPorDefecto = validarValorPorDefectoResultado(req.body);
+
+    if (errorValorPorDefecto) {
+      return res.status(400).json({
+        ok: false,
+        msg: errorValorPorDefecto,
+      });
+    }
+
     // verificar si el nombre existe
     const itemExistente = await ItemLab.findOne({
       nombreInforme: { $regex: new RegExp(`^${nombreInforme}$`, "i") },
@@ -176,6 +222,32 @@ const actualizarItem = async (req, res = response) => {
         msg: "Item no encontrado con ese código",
       });
     }
+
+    const configuracionResultado = {
+      tipoResultado:
+        datosActualizados.tipoResultado ?? itemActual.tipoResultado ?? "TEXTO",
+      opcionesResultado:
+        datosActualizados.opcionesResultado ?? itemActual.opcionesResultado ?? [],
+      valorPorDefectoResultado: Object.prototype.hasOwnProperty.call(
+        datosActualizados,
+        "valorPorDefectoResultado",
+      )
+        ? datosActualizados.valorPorDefectoResultado
+        : itemActual.valorPorDefectoResultado,
+    };
+
+    const errorValorPorDefecto =
+      validarValorPorDefectoResultado(configuracionResultado);
+
+    if (errorValorPorDefecto) {
+      return res.status(400).json({
+        ok: false,
+        msg: errorValorPorDefecto,
+      });
+    }
+
+    datosActualizados.valorPorDefectoResultado =
+      configuracionResultado.valorPorDefectoResultado;
 
     // Validar que no exista el mismo número de orden de impresión (excluyendo el item actual)
     if (

@@ -215,6 +215,13 @@ const ItemLabSchema = Schema(
       default: [],
     },
 
+    // ====== Valor inicial sugerido para captura ======
+    valorPorDefectoResultado: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
     permiteValorNoListado: {
       type: Boolean,
       default: false,
