@@ -22,6 +22,8 @@ const construirPaciente = (solicitud) => {
     hc: origen.hc || solicitud.hc || "",
     documento: [origen.tipoDoc || solicitud.tipoDoc, origen.nroDoc || solicitud.nroDoc]
       .filter(Boolean).join(" "),
+    sexo: solicitud.sexoPaciente || null,
+    fechaNacimiento: solicitud.fechaNacimientoPaciente || null,
   };
 };
 
@@ -62,7 +64,7 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
       tipo: "Laboratorio",
       fechaEmision: { $gte: desde, $lte: hasta },
     })
-      .select("_id codSolicitud codigoLaboratorio origenAtencion estado fechaEmision unidadesLaboratorio hc clienteId tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente programacionEmpresaId")
+      .select("_id codSolicitud codigoLaboratorio origenAtencion estado fechaEmision unidadesLaboratorio hc clienteId tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sexoPaciente fechaNacimientoPaciente programacionEmpresaId")
       .populate("programacionEmpresaId", "hc pacienteId tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente")
       .sort({ fechaEmision: -1 })
       .limit(500)
@@ -140,7 +142,7 @@ const obtenerInformeEntregable = async (req, res = response) => {
       return res.status(400).json({ ok: false, msg: "Id de solicitud inválido" });
     }
     const solicitud = await SolicitudAtencion.findById(solicitudAtencionId)
-      .select("codSolicitud codigoLaboratorio origenAtencion fechaEmision unidadesLaboratorio hc clienteId tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente programacionEmpresaId tipo")
+      .select("codSolicitud codigoLaboratorio origenAtencion fechaEmision unidadesLaboratorio hc clienteId tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sexoPaciente fechaNacimientoPaciente programacionEmpresaId tipo")
       .populate("programacionEmpresaId", "hc pacienteId tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente")
       .lean();
     if (!solicitud || solicitud.tipo !== "Laboratorio") {
@@ -154,7 +156,7 @@ const obtenerInformeEntregable = async (req, res = response) => {
       solicitudAtencionId,
       estadoResultado: "LIBERADO",
     })
-      .select("_id codPruebaLab nombrePruebaLab numeroInstancia etiquetaInstancia versionResultado fechaLiberacion usuarioLiberacion observacionGeneral resultadosItems")
+      .select("_id codPruebaLab nombrePruebaLab numeroInstancia etiquetaInstancia versionResultado fechaValidacion fechaLiberacion usuarioLiberacion observacionGeneral resultadosItems")
       .sort({ numeroInstancia: 1, createdAt: 1 })
       .lean();
 
@@ -166,6 +168,7 @@ const obtenerInformeEntregable = async (req, res = response) => {
       numeroInstancia: resultado.numeroInstancia,
       etiquetaInstancia: resultado.etiquetaInstancia,
       versionResultado: resultado.versionResultado || 1,
+      fechaValidacion: resultado.fechaValidacion,
       fechaLiberacion: resultado.fechaLiberacion,
       usuarioLiberacion: resultado.usuarioLiberacion,
       observacionGeneral: resultado.observacionGeneral,
@@ -194,6 +197,7 @@ const obtenerInformeEntregable = async (req, res = response) => {
         codSolicitud: solicitud.codSolicitud,
         codigoLaboratorio: solicitud.codigoLaboratorio,
         fechaEmision: solicitud.fechaEmision,
+        fechaAtencion: solicitud.fechaEmision,
         origenAtencion: solicitud.origenAtencion,
         paciente: construirPaciente(solicitud),
       },
