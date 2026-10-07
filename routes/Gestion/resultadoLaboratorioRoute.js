@@ -29,6 +29,9 @@ const { PERMISOS_ACCION } = require("../../utils/permisosAccion");
 
 const router = Router();
 
+// ====== Consulta y entrega independiente para Recepción ======
+router.use("/entrega", require("./entregaResultadoLaboratorioRoute"));
+
 // ====== Bandeja de Gestión de Resultados ======
 
 router.get("/bandeja", validarJWT, obtenerBandejaResultadosLaboratorio);
