@@ -27,6 +27,100 @@ const construirPaciente = (solicitud) => {
   };
 };
 
+
+// ====== Obtener configuración clínica de una unidad ======
+const obtenerUnidadInforme = (solicitud, claveUnidad) =>
+  (solicitud.unidadesLaboratorio || []).find(
+    (unidad) => String(unidad?.claveUnidad || "") === String(claveUnidad || ""),
+  ) || null;
+
+// ====== Serializar referencia configurada ======
+const serializarReferenciaInforme = (referencia) => ({
+  descripcion: referencia?.descripcion || "",
+  sexo: referencia?.sexo || "TODOS",
+  edadMin: referencia?.edadMin ?? null,
+  edadMax: referencia?.edadMax ?? null,
+  unidadEdad: referencia?.unidadEdad || "ANIOS",
+  tipoReferencia: referencia?.tipoReferencia || null,
+  valorMin: referencia?.valorMin ?? null,
+  valorMax: referencia?.valorMax ?? null,
+  valorLimite: referencia?.valorLimite ?? null,
+  valoresPermitidos: Array.isArray(referencia?.valoresPermitidos)
+    ? referencia.valoresPermitidos
+    : [],
+  textoReferencia: referencia?.textoReferencia || "",
+});
+
+// ====== Resolver snapshot histórico del Item ======
+const obtenerSnapshotItemInforme = (unidad, itemResultado) => {
+  const grupos = Array.isArray(unidad?.snapshotClinico?.gruposResultado)
+    ? unidad.snapshotClinico.gruposResultado
+    : [];
+
+  const grupo = grupos[itemResultado?.indiceGrupo];
+  const itemPorIndice = Array.isArray(grupo?.items)
+    ? grupo.items[itemResultado?.indiceItem]
+    : null;
+
+  if (itemPorIndice?.snapshotItem) {
+    return itemPorIndice.snapshotItem;
+  }
+
+  const itemLabId = String(itemResultado?.itemLabId || "");
+  if (!itemLabId) {
+    return null;
+  }
+
+  for (const grupoActual of grupos) {
+    for (const itemActual of grupoActual?.items || []) {
+      if (String(itemActual?.itemLabId || "") === itemLabId) {
+        return itemActual?.snapshotItem || null;
+      }
+    }
+  }
+
+  return null;
+};
+
+// ====== Preparar configuración clínica del informe ======
+const construirConfiguracionInforme = (solicitud, resultado) => {
+  const unidad = obtenerUnidadInforme(solicitud, resultado.claveUnidad);
+  const metodos = new Set();
+
+  const items = (resultado.resultadosItems || []).map((item) => {
+    const snapshotItem = obtenerSnapshotItemInforme(unidad, item);
+    const metodo = String(snapshotItem?.metodoItemLab || "").trim();
+
+    if (metodo) {
+      metodos.add(metodo);
+    }
+
+    const referenciasConfiguradas = Array.isArray(snapshotItem?.referenciasResultado)
+      ? snapshotItem.referenciasResultado
+          .filter((referencia) => referencia?.activo !== false)
+          .map(serializarReferenciaInforme)
+      : [];
+
+    return {
+      nombreInforme: item.nombreInforme,
+      codItemLab: item.codItemLab,
+      valor: item.valor,
+      unidadesRef: item.unidadesRef,
+      observacion: item.observacion,
+      evaluacionReferencia: item.evaluacionReferencia,
+      alertasDetectadas: item.alertasDetectadas,
+      ordenGrupo: item.ordenGrupo,
+      ordenItem: item.ordenItem,
+      referenciasConfiguradas,
+    };
+  });
+
+  return {
+    metodo: metodos.size ? [...metodos].join(" / ") : null,
+    items,
+  };
+};
+
 // ====== Calcular disponibilidad, sin confundirla con entrega ======
 const calcularResumen = (solicitud, resultados) => {
   const activos = resultados.filter((r) => r.estadoResultado !== "ANULADO");
@@ -156,34 +250,29 @@ const obtenerInformeEntregable = async (req, res = response) => {
       solicitudAtencionId,
       estadoResultado: "LIBERADO",
     })
-      .select("_id codPruebaLab nombrePruebaLab numeroInstancia etiquetaInstancia versionResultado fechaValidacion fechaLiberacion usuarioLiberacion observacionGeneral resultadosItems")
+      .select("_id claveUnidad codPruebaLab nombrePruebaLab numeroInstancia etiquetaInstancia versionResultado fechaValidacion fechaLiberacion usuarioLiberacion observacionGeneral resultadosItems")
       .sort({ numeroInstancia: 1, createdAt: 1 })
       .lean();
 
-    // ====== No enviar información interna del laboratorio ======
-    const resultados = liberados.map((resultado) => ({
-      _id: String(resultado._id),
-      codPruebaLab: resultado.codPruebaLab,
-      nombrePruebaLab: resultado.nombrePruebaLab,
-      numeroInstancia: resultado.numeroInstancia,
-      etiquetaInstancia: resultado.etiquetaInstancia,
-      versionResultado: resultado.versionResultado || 1,
-      fechaValidacion: resultado.fechaValidacion,
-      fechaLiberacion: resultado.fechaLiberacion,
-      usuarioLiberacion: resultado.usuarioLiberacion,
-      observacionGeneral: resultado.observacionGeneral,
-      items: (resultado.resultadosItems || []).map((item) => ({
-        nombreInforme: item.nombreInforme,
-        codItemLab: item.codItemLab,
-        valor: item.valor,
-        unidadesRef: item.unidadesRef,
-        observacion: item.observacion,
-        evaluacionReferencia: item.evaluacionReferencia,
-        alertasDetectadas: item.alertasDetectadas,
-        ordenGrupo: item.ordenGrupo,
-        ordenItem: item.ordenItem,
-      })),
-    }));
+    // ====== Preparar informe con snapshot clínico histórico ======
+    const resultados = liberados.map((resultado) => {
+      const configuracion = construirConfiguracionInforme(solicitud, resultado);
+
+      return {
+        _id: String(resultado._id),
+        codPruebaLab: resultado.codPruebaLab,
+        nombrePruebaLab: resultado.nombrePruebaLab,
+        numeroInstancia: resultado.numeroInstancia,
+        etiquetaInstancia: resultado.etiquetaInstancia,
+        versionResultado: resultado.versionResultado || 1,
+        metodo: configuracion.metodo,
+        fechaValidacion: resultado.fechaValidacion,
+        fechaLiberacion: resultado.fechaLiberacion,
+        usuarioLiberacion: resultado.usuarioLiberacion,
+        observacionGeneral: resultado.observacionGeneral,
+        items: configuracion.items,
+      };
+    });
     const entregas = await EntregaResultado.find({ solicitudAtencionId })
       .select("tipoEntrega medio receptorNombre fechaEntrega usuarioEntrega resultados")
       .sort({ fechaEntrega: -1 })
