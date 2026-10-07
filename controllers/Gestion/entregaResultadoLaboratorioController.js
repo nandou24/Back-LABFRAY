@@ -85,16 +85,9 @@ const obtenerSnapshotItemInforme = (unidad, itemResultado) => {
 // ====== Preparar configuración clínica del informe ======
 const construirConfiguracionInforme = (solicitud, resultado) => {
   const unidad = obtenerUnidadInforme(solicitud, resultado.claveUnidad);
-  const metodos = new Set();
 
   const items = (resultado.resultadosItems || []).map((item) => {
     const snapshotItem = obtenerSnapshotItemInforme(unidad, item);
-    const metodo = String(snapshotItem?.metodoItemLab || "").trim();
-
-    if (metodo) {
-      metodos.add(metodo);
-    }
-
     const referenciasConfiguradas = Array.isArray(snapshotItem?.referenciasResultado)
       ? snapshotItem.referenciasResultado
           .filter((referencia) => referencia?.activo !== false)
@@ -104,6 +97,7 @@ const construirConfiguracionInforme = (solicitud, resultado) => {
     return {
       nombreInforme: item.nombreInforme,
       codItemLab: item.codItemLab,
+      metodo: String(snapshotItem?.metodoItemLab || "").trim() || null,
       valor: item.valor,
       unidadesRef: item.unidadesRef,
       observacion: item.observacion,
@@ -115,10 +109,7 @@ const construirConfiguracionInforme = (solicitud, resultado) => {
     };
   });
 
-  return {
-    metodo: metodos.size ? [...metodos].join(" / ") : null,
-    items,
-  };
+  return { items };
 };
 
 // ====== Calcular disponibilidad, sin confundirla con entrega ======
@@ -265,7 +256,6 @@ const obtenerInformeEntregable = async (req, res = response) => {
         numeroInstancia: resultado.numeroInstancia,
         etiquetaInstancia: resultado.etiquetaInstancia,
         versionResultado: resultado.versionResultado || 1,
-        metodo: configuracion.metodo,
         fechaValidacion: resultado.fechaValidacion,
         fechaLiberacion: resultado.fechaLiberacion,
         usuarioLiberacion: resultado.usuarioLiberacion,
