@@ -618,7 +618,7 @@ const ItemLabSnapshotSchema = new Schema(
 
     tipoResultado: {
       type: String,
-      enum: ["NUMERICO", "TEXTO", "CATEGORICO"],
+      enum: ["NUMERICO", "TEXTO", "CATEGORICO", "ESTRUCTURADO"],
       default: "TEXTO",
     },
 
@@ -628,13 +628,70 @@ const ItemLabSnapshotSchema = new Schema(
     },
 
     valorPorDefectoResultado: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+
+    formatosCapturaNumerica: {
+      type: [String],
+      enum: [
+        "VALOR",
+        "RANGO",
+        "MAYOR_QUE",
+        "MAYOR_IGUAL_QUE",
+        "MENOR_QUE",
+        "MENOR_IGUAL_QUE",
+      ],
+      default: ["VALOR"],
+    },
+
+    precisionNumerica: {
       type: String,
-      default: "",
+      enum: ["ENTERO", "DECIMAL"],
+      default: "DECIMAL",
+    },
+
+    formatoCapturaNumericaDefault: {
+      type: String,
+      enum: [
+        "VALOR",
+        "RANGO",
+        "MAYOR_QUE",
+        "MAYOR_IGUAL_QUE",
+        "MENOR_QUE",
+        "MENOR_IGUAL_QUE",
+      ],
+      default: "VALOR",
+    },
+
+    valoresCualitativosAlternativos: {
+      type: [String],
+      default: [],
+    },
+
+    valoresCualitativosReferencia: {
+      type: [String],
+      default: [],
+    },
+
+    configuracionEstructurada: {
+      type: Schema.Types.Mixed,
+      default: null,
     },
 
     permiteValorNoListado: {
       type: Boolean,
       default: false,
+    },
+
+    esOpcional: {
+      type: Boolean,
+      default: false,
+    },
+
+    mostrarReferenciaInforme: {
+      type: Boolean,
+      default: true,
     },
 
     estadoItem: {
@@ -743,6 +800,11 @@ const GrupoResultadoClinicoSchema = new Schema(
     mostrarTitulo: {
       type: Boolean,
       default: true,
+    },
+
+    comentarioReferenciaGrupo: {
+      type: String,
+      default: "",
     },
 
     items: {

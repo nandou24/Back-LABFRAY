@@ -168,11 +168,97 @@ const reglaAlertaSchema = new Schema({
   },
 });
 
+// ====== Configuración de resultados estructurados ======
+const cuantificacionHallazgoSchema = new Schema(
+  {
+    tipo: {
+      type: String,
+      enum: ["CATEGORICA", "NUMERICA"],
+      required: true,
+    },
+    precisionNumerica: {
+      type: String,
+      enum: ["ENTERO", "DECIMAL"],
+      default: "DECIMAL",
+    },
+    opciones: {
+      type: [String],
+      default: [],
+    },
+    formatosCapturaNumerica: {
+      type: [String],
+      enum: [
+        "VALOR",
+        "RANGO",
+        "MAYOR_QUE",
+        "MAYOR_IGUAL_QUE",
+        "MENOR_QUE",
+        "MENOR_IGUAL_QUE",
+      ],
+      default: ["VALOR"],
+    },
+    formatoCapturaNumericaDefault: {
+      type: String,
+      enum: [
+        "VALOR",
+        "RANGO",
+        "MAYOR_QUE",
+        "MAYOR_IGUAL_QUE",
+        "MENOR_QUE",
+        "MENOR_IGUAL_QUE",
+      ],
+      default: "VALOR",
+    },
+  },
+  { _id: false },
+);
+
+const configuracionEstructuradaSchema = new Schema(
+  {
+    subtipo: {
+      type: String,
+      enum: ["HALLAZGOS"],
+      default: "HALLAZGOS",
+    },
+    permiteMultiples: {
+      type: Boolean,
+      default: true,
+    },
+    valorAusencia: {
+      type: String,
+      default: "NO SE OBSERVAN",
+      trim: true,
+    },
+    ausenciaEsReferencia: {
+      type: Boolean,
+      default: false,
+    },
+    // ====== Hallazgos permitidos como referencia clínica ======
+    hallazgosNormales: {
+      type: [String],
+      default: [],
+    },
+    permitirOtroHallazgo: {
+      type: Boolean,
+      default: false,
+    },
+    hallazgos: {
+      type: [String],
+      default: [],
+    },
+    cuantificacion: {
+      type: cuantificacionHallazgoSchema,
+      required: true,
+    },
+  },
+  { _id: false },
+);
+
 const ItemLabSchema = Schema(
   {
     codItemLab: { type: String, unique: true },
-    nombreInforme: { type: String, required: true },
-    nombreHojaTrabajo: { type: String, required: true },
+    nombreInforme: { type: String, required: true, trim: true },
+    nombreHojaTrabajo: { type: String, required: true, trim: true },
     metodoItemLab: { type: String, required: true },
     valoresHojaTrabajo: { type: String, default: "" },
     valoresInforme: { type: String, default: "" },
@@ -205,7 +291,7 @@ const ItemLabSchema = Schema(
 
     tipoResultado: {
       type: String,
-      enum: ["NUMERICO", "TEXTO", "CATEGORICO"],
+      enum: ["NUMERICO", "TEXTO", "CATEGORICO", "ESTRUCTURADO"],
       default: "TEXTO",
       required: true,
     },
@@ -215,16 +301,84 @@ const ItemLabSchema = Schema(
       default: [],
     },
 
-    // ====== Valor inicial sugerido para captura ======
-    valorPorDefectoResultado: {
+    // ====== Formatos permitidos para captura numérica ======
+    formatosCapturaNumerica: {
+      type: [
+        {
+          type: String,
+          enum: [
+            "VALOR",
+            "RANGO",
+            "MAYOR_QUE",
+            "MAYOR_IGUAL_QUE",
+            "MENOR_QUE",
+            "MENOR_IGUAL_QUE",
+          ],
+        },
+      ],
+      default: ["VALOR"],
+    },
+
+    formatoCapturaNumericaDefault: {
       type: String,
-      default: "",
-      trim: true,
+      enum: [
+        "VALOR",
+        "RANGO",
+        "MAYOR_QUE",
+        "MAYOR_IGUAL_QUE",
+        "MENOR_QUE",
+        "MENOR_IGUAL_QUE",
+      ],
+      default: "VALOR",
+    },
+
+
+    // ====== Precisión permitida para captura numérica ======
+    precisionNumerica: {
+      type: String,
+      enum: ["ENTERO", "DECIMAL"],
+      default: "DECIMAL",
+    },
+
+    // ====== Alternativas cualitativas para Items numéricos ======
+    valoresCualitativosAlternativos: {
+      type: [String],
+      default: [],
+    },
+
+    valoresCualitativosReferencia: {
+      type: [String],
+      default: [],
+    },
+
+    // ====== Configuración de hallazgos estructurados ======
+    configuracionEstructurada: {
+      type: configuracionEstructuradaSchema,
+      default: null,
+    },
+
+    // ====== Valor inicial sugerido para captura ======
+    // Texto/categórico: string. Numérico: number u objeto estructurado.
+    valorPorDefectoResultado: {
+      type: Schema.Types.Mixed,
+      default: null,
     },
 
     permiteValorNoListado: {
       type: Boolean,
       default: false,
+    },
+
+    // ====== Item opcional en la prueba ======
+    esOpcional: {
+      type: Boolean,
+      default: false,
+    },
+
+    // ====== Presentación de referencia en informe ======
+    mostrarReferenciaInforme: {
+      type: Boolean,
+      default: true,
     },
 
     estadoItem: {

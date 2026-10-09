@@ -90,6 +90,13 @@ const GrupoResultadoSchema = new Schema({
     default: true,
   },
 
+  comentarioReferenciaGrupo: {
+    type: String,
+    default: "",
+    trim: true,
+    maxlength: 2000,
+  },
+
   procesamientoOverride: {
     type: ProcesamientoSchema,
     default: null,

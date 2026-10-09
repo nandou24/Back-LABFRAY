@@ -3,6 +3,135 @@ const mongoose = require("mongoose");
 const SolicitudAtencion = require("../../models/Gestion/SolicitudAtencion");
 const ResultadoLaboratorio = require("../../models/Gestion/ResultadoLaboratorio");
 const EntregaResultado = require("../../models/Gestion/EntregaResultadoLaboratorio");
+const MuestraLaboratorio = require("../../models/Gestion/MuestraLaboratorio");
+
+// ====== Rango operativo de fechas en hora Perú ======
+
+const OFFSET_HORARIO_PERU = "-05:00";
+
+const construirLimiteFechaOperativa = (fecha, finDia = false) => {
+  const texto = String(fecha ?? "").trim();
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(texto)) {
+    return null;
+  }
+
+  const [anio, mes, dia] = texto.split("-").map(Number);
+  const comprobacion = new Date(Date.UTC(anio, mes - 1, dia));
+
+  if (
+    comprobacion.getUTCFullYear() !== anio ||
+    comprobacion.getUTCMonth() !== mes - 1 ||
+    comprobacion.getUTCDate() !== dia
+  ) {
+    return null;
+  }
+
+  const hora = finDia ? "23:59:59.999" : "00:00:00.000";
+  const limite = new Date(`${texto}T${hora}${OFFSET_HORARIO_PERU}`);
+
+  return Number.isFinite(limite.getTime()) ? limite : null;
+};
+
+// ====== Omitir Items opcionales sin resultado ======
+const esValorResultadoVacio = (valor) =>
+  valor === null ||
+  valor === undefined ||
+  (typeof valor === "string" && valor.trim() === "");
+
+const obtenerItemsEntregables = (items = []) =>
+  (Array.isArray(items) ? items : []).filter(
+    (item) => !(item?.esOpcional === true && esValorResultadoVacio(item?.valor)),
+  );
+
+// ====== Resolver configuración histórica para informe ======
+const obtenerMetadataItemInforme = ({ solicitud, resultado, item }) => {
+  const unidades = Array.isArray(solicitud?.unidadesLaboratorio)
+    ? solicitud.unidadesLaboratorio
+    : [];
+
+  const unidad = unidades.find(
+    (unidadActual) => String(unidadActual?.claveUnidad ?? "") === String(resultado?.claveUnidad ?? ""),
+  );
+
+  const grupos = Array.isArray(unidad?.snapshotClinico?.gruposResultado)
+    ? unidad.snapshotClinico.gruposResultado
+    : [];
+  const grupo = grupos[Number(item?.indiceGrupo ?? -1)] ?? null;
+  const itemsGrupo = Array.isArray(grupo?.items) ? grupo.items : [];
+  const itemSnapshot = itemsGrupo[Number(item?.indiceItem ?? -1)]?.snapshotItem ?? null;
+
+  const mostrarReferenciaInforme =
+    typeof item?.mostrarReferenciaInforme === "boolean"
+      ? item.mostrarReferenciaInforme
+      : itemSnapshot?.mostrarReferenciaInforme !== false;
+
+  return {
+    tipoResultado: itemSnapshot?.tipoResultado ?? item?.tipoResultado ?? "TEXTO",
+    metodo: String(itemSnapshot?.metodoItemLab ?? "").trim() || null,
+    nombreGrupo: String(grupo?.nombreGrupo ?? item?.nombreGrupo ?? "").trim(),
+    comentarioReferenciaGrupo:
+      String(grupo?.comentarioReferenciaGrupo ?? "").trim() || null,
+    mostrarReferenciaInforme,
+    hallazgosNormales: Array.isArray(
+      itemSnapshot?.configuracionEstructurada?.hallazgosNormales,
+    )
+      ? [...itemSnapshot.configuracionEstructurada.hallazgosNormales]
+      : [],
+    referenciasConfiguradas: Array.isArray(itemSnapshot?.referenciasResultado)
+      ? itemSnapshot.referenciasResultado
+          .filter((referencia) => referencia?.activo !== false)
+          .map((referencia) => ({
+            descripcion: referencia.descripcion ?? "",
+            sexo: referencia.sexo ?? "TODOS",
+            edadMin: referencia.edadMin ?? null,
+            edadMax: referencia.edadMax ?? null,
+            unidadEdad: referencia.unidadEdad ?? "ANIOS",
+            tipoReferencia: referencia.tipoReferencia ?? null,
+            valorMin: referencia.valorMin ?? null,
+            valorMax: referencia.valorMax ?? null,
+            valorLimite: referencia.valorLimite ?? null,
+            valoresPermitidos: Array.isArray(referencia.valoresPermitidos)
+              ? [...referencia.valoresPermitidos]
+              : [],
+            textoReferencia: referencia.textoReferencia ?? "",
+          }))
+      : [],
+  };
+};
+
+// ====== Tipos de muestra realmente utilizados por unidad ======
+const construirMuestrasPorUnidad = (muestras = []) => {
+  const mapa = new Map();
+
+  for (const muestra of Array.isArray(muestras) ? muestras : []) {
+    const nombreMuestra = String(
+      muestra?.tipoMuestra?.nombreTipoMuestra ?? "",
+    ).trim();
+
+    if (!nombreMuestra) continue;
+
+    for (const cobertura of Array.isArray(muestra?.coberturas)
+      ? muestra.coberturas
+      : []) {
+      const claveUnidad = String(cobertura?.claveUnidad ?? "").trim();
+      if (!claveUnidad) continue;
+
+      if (!mapa.has(claveUnidad)) {
+        mapa.set(claveUnidad, new Set());
+      }
+
+      mapa.get(claveUnidad).add(nombreMuestra);
+    }
+  }
+
+  return new Map(
+    [...mapa.entries()].map(([claveUnidad, valores]) => [
+      claveUnidad,
+      [...valores].sort((a, b) => a.localeCompare(b, "es")),
+    ]),
+  );
+};
 
 // ====== Preparar datos del paciente ======
 const construirPaciente = (solicitud) => {
@@ -22,94 +151,37 @@ const construirPaciente = (solicitud) => {
     hc: origen.hc || solicitud.hc || "",
     documento: [origen.tipoDoc || solicitud.tipoDoc, origen.nroDoc || solicitud.nroDoc]
       .filter(Boolean).join(" "),
-    sexo: solicitud.sexoPaciente || null,
-    fechaNacimiento: solicitud.fechaNacimientoPaciente || null,
   };
 };
 
-
-// ====== Obtener configuración clínica de una unidad ======
-const obtenerUnidadInforme = (solicitud, claveUnidad) =>
-  (solicitud.unidadesLaboratorio || []).find(
-    (unidad) => String(unidad?.claveUnidad || "") === String(claveUnidad || ""),
-  ) || null;
-
-// ====== Serializar referencia configurada ======
-const serializarReferenciaInforme = (referencia) => ({
-  descripcion: referencia?.descripcion || "",
-  sexo: referencia?.sexo || "TODOS",
-  edadMin: referencia?.edadMin ?? null,
-  edadMax: referencia?.edadMax ?? null,
-  unidadEdad: referencia?.unidadEdad || "ANIOS",
-  tipoReferencia: referencia?.tipoReferencia || null,
-  valorMin: referencia?.valorMin ?? null,
-  valorMax: referencia?.valorMax ?? null,
-  valorLimite: referencia?.valorLimite ?? null,
-  valoresPermitidos: Array.isArray(referencia?.valoresPermitidos)
-    ? referencia.valoresPermitidos
-    : [],
-  textoReferencia: referencia?.textoReferencia || "",
-});
-
-// ====== Resolver snapshot histórico del Item ======
-const obtenerSnapshotItemInforme = (unidad, itemResultado) => {
-  const grupos = Array.isArray(unidad?.snapshotClinico?.gruposResultado)
-    ? unidad.snapshotClinico.gruposResultado
-    : [];
-
-  const grupo = grupos[itemResultado?.indiceGrupo];
-  const itemPorIndice = Array.isArray(grupo?.items)
-    ? grupo.items[itemResultado?.indiceItem]
-    : null;
-
-  if (itemPorIndice?.snapshotItem) {
-    return itemPorIndice.snapshotItem;
-  }
-
-  const itemLabId = String(itemResultado?.itemLabId || "");
-  if (!itemLabId) {
+// ====== Preparar contexto corporativo ======
+const construirEmpresa = (solicitud) => {
+  if (solicitud.origenAtencion !== "EMPRESA") {
     return null;
   }
 
-  for (const grupoActual of grupos) {
-    for (const itemActual of grupoActual?.items || []) {
-      if (String(itemActual?.itemLabId || "") === itemLabId) {
-        return itemActual?.snapshotItem || null;
-      }
-    }
-  }
+  const programacion =
+    solicitud.programacionEmpresaId &&
+    typeof solicitud.programacionEmpresaId === "object"
+      ? solicitud.programacionEmpresaId
+      : null;
 
-  return null;
-};
-
-// ====== Preparar configuración clínica del informe ======
-const construirConfiguracionInforme = (solicitud, resultado) => {
-  const unidad = obtenerUnidadInforme(solicitud, resultado.claveUnidad);
-
-  const items = (resultado.resultadosItems || []).map((item) => {
-    const snapshotItem = obtenerSnapshotItemInforme(unidad, item);
-    const referenciasConfiguradas = Array.isArray(snapshotItem?.referenciasResultado)
-      ? snapshotItem.referenciasResultado
-          .filter((referencia) => referencia?.activo !== false)
-          .map(serializarReferenciaInforme)
-      : [];
-
-    return {
-      nombreInforme: item.nombreInforme,
-      codItemLab: item.codItemLab,
-      metodo: String(snapshotItem?.metodoItemLab || "").trim() || null,
-      valor: item.valor,
-      unidadesRef: item.unidadesRef,
-      observacion: item.observacion,
-      evaluacionReferencia: item.evaluacionReferencia,
-      alertasDetectadas: item.alertasDetectadas,
-      ordenGrupo: item.ordenGrupo,
-      ordenItem: item.ordenItem,
-      referenciasConfiguradas,
-    };
-  });
-
-  return { items };
+  return {
+    programacionEmpresaId: String(
+      programacion?._id ?? solicitud.programacionEmpresaId ?? "",
+    ) || null,
+    codProgramacion:
+      programacion?.codProgramacion ?? solicitud.codProgramacion ?? null,
+    empresaId: String(programacion?.empresaId ?? solicitud.empresaId ?? "") || null,
+    rucEmpresa: programacion?.rucEmpresa ?? null,
+    razonSocialEmpresa:
+      programacion?.razonSocialEmpresa ?? solicitud.razonSocialEmpresa ?? "",
+    sede: programacion?.sede ?? null,
+    prioridad: programacion?.prioridad ?? null,
+    protocoloId: String(solicitud.protocoloId ?? "") || null,
+    codProtocolo: solicitud.codProtocolo ?? null,
+    nombreProtocolo: solicitud.nombreProtocolo ?? null,
+  };
 };
 
 // ====== Calcular disponibilidad, sin confundirla con entrega ======
@@ -134,23 +206,64 @@ const calcularResumen = (solicitud, resultados) => {
 // ====== Consulta de solicitudes con resultados entregables ======
 const obtenerBandejaEntregaResultados = async (req, res = response) => {
   try {
-    const { fechaInicio, fechaFin, terminoBusqueda = "" } = req.query;
+    const { fechaInicio, fechaFin, terminoBusqueda = "", empresaId = "" } = req.query;
     if (!fechaInicio || !fechaFin) {
       return res.status(400).json({ ok: false, msg: "Debe indicar ambas fechas" });
     }
-    const desde = new Date(`${fechaInicio}T00:00:00.000Z`);
-    const hasta = new Date(`${fechaFin}T23:59:59.999Z`);
-    if (!Number.isFinite(desde.getTime()) || !Number.isFinite(hasta.getTime()) ||
+    // ====== Interpretar el rango como día calendario de Perú ======
+    const desde = construirLimiteFechaOperativa(fechaInicio, false);
+    const hasta = construirLimiteFechaOperativa(fechaFin, true);
+
+    if (!desde || !hasta ||
         desde > hasta || (hasta - desde) > 1000 * 60 * 60 * 24 * 93) {
       return res.status(400).json({ ok: false, msg: "Rango de fechas inválido (máximo 93 días)" });
     }
 
-    const solicitudes = await SolicitudAtencion.find({
+    const empresaFiltro = String(empresaId ?? "").trim();
+
+    if (empresaFiltro && !mongoose.isValidObjectId(empresaFiltro)) {
+      return res.status(400).json({ ok: false, msg: "Empresa inválida" });
+    }
+
+    const filtroSolicitudes = {
       tipo: "Laboratorio",
       fechaEmision: { $gte: desde, $lte: hasta },
-    })
-      .select("_id codSolicitud codigoLaboratorio origenAtencion estado fechaEmision unidadesLaboratorio hc clienteId tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sexoPaciente fechaNacimientoPaciente programacionEmpresaId")
-      .populate("programacionEmpresaId", "hc pacienteId tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente")
+      ...(empresaFiltro
+        ? {
+            origenAtencion: "EMPRESA",
+            empresaId: empresaFiltro,
+          }
+        : {}),
+    };
+
+    const solicitudes = await SolicitudAtencion.find(filtroSolicitudes)
+      .select([
+        "_id",
+        "codSolicitud",
+        "codigoLaboratorio",
+        "origenAtencion",
+        "estado",
+        "fechaEmision",
+        "unidadesLaboratorio",
+        "hc",
+        "clienteId",
+        "tipoDoc",
+        "nroDoc",
+        "nombreCliente",
+        "apePatCliente",
+        "apeMatCliente",
+        "programacionEmpresaId",
+        "codProgramacion",
+        "empresaId",
+        "razonSocialEmpresa",
+        "protocoloId",
+        "codProtocolo",
+        "nombreProtocolo",
+      ].join(" "))
+      .populate(
+        "programacionEmpresaId",
+        "_id codProgramacion empresaId rucEmpresa razonSocialEmpresa hc pacienteId tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sede prioridad",
+      )
       .sort({ fechaEmision: -1 })
       .limit(500)
       .lean();
@@ -190,6 +303,7 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
       const tieneHistorial = conEntregasPrevias.has(String(solicitud._id));
       if (!resumen.liberados && !tieneHistorial) return [];
       const paciente = construirPaciente(solicitud);
+      const empresa = construirEmpresa(solicitud);
       const fila = {
         solicitudAtencionId: String(solicitud._id),
         codSolicitud: solicitud.codSolicitud,
@@ -197,6 +311,7 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
         fechaEmision: solicitud.fechaEmision,
         origenAtencion: solicitud.origenAtencion,
         paciente,
+        empresa,
         resumen,
         tieneHistorial,
       };
@@ -206,6 +321,12 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
         paciente.nombreCompleto,
         paciente.documento,
         paciente.hc,
+        empresa?.codProgramacion,
+        empresa?.razonSocialEmpresa,
+        empresa?.rucEmpresa,
+        empresa?.codProtocolo,
+        empresa?.nombreProtocolo,
+        empresa?.sede,
       ].some((dato) => String(dato || "").toLocaleLowerCase("es").includes(filtro))) {
         return [];
       }
@@ -227,8 +348,32 @@ const obtenerInformeEntregable = async (req, res = response) => {
       return res.status(400).json({ ok: false, msg: "Id de solicitud inválido" });
     }
     const solicitud = await SolicitudAtencion.findById(solicitudAtencionId)
-      .select("codSolicitud codigoLaboratorio origenAtencion fechaEmision unidadesLaboratorio hc clienteId tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sexoPaciente fechaNacimientoPaciente programacionEmpresaId tipo")
-      .populate("programacionEmpresaId", "hc pacienteId tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente")
+      .select([
+        "codSolicitud",
+        "codigoLaboratorio",
+        "origenAtencion",
+        "fechaEmision",
+        "unidadesLaboratorio",
+        "hc",
+        "clienteId",
+        "tipoDoc",
+        "nroDoc",
+        "nombreCliente",
+        "apePatCliente",
+        "apeMatCliente",
+        "programacionEmpresaId",
+        "codProgramacion",
+        "empresaId",
+        "razonSocialEmpresa",
+        "protocoloId",
+        "codProtocolo",
+        "nombreProtocolo",
+        "tipo",
+      ].join(" "))
+      .populate(
+        "programacionEmpresaId",
+        "_id codProgramacion empresaId rucEmpresa razonSocialEmpresa hc pacienteId tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sede prioridad",
+      )
       .lean();
     if (!solicitud || solicitud.tipo !== "Laboratorio") {
       return res.status(404).json({ ok: false, msg: "Solicitud no encontrada" });
@@ -245,24 +390,55 @@ const obtenerInformeEntregable = async (req, res = response) => {
       .sort({ numeroInstancia: 1, createdAt: 1 })
       .lean();
 
-    // ====== Preparar informe con snapshot clínico histórico ======
-    const resultados = liberados.map((resultado) => {
-      const configuracion = construirConfiguracionInforme(solicitud, resultado);
+    const muestrasAceptadas = await MuestraLaboratorio.find({
+      solicitudAtencionId,
+      estadoMuestra: "ACEPTADA",
+    })
+      .select("tipoMuestra coberturas.claveUnidad")
+      .lean();
 
-      return {
-        _id: String(resultado._id),
-        codPruebaLab: resultado.codPruebaLab,
-        nombrePruebaLab: resultado.nombrePruebaLab,
-        numeroInstancia: resultado.numeroInstancia,
-        etiquetaInstancia: resultado.etiquetaInstancia,
-        versionResultado: resultado.versionResultado || 1,
-        fechaValidacion: resultado.fechaValidacion,
-        fechaLiberacion: resultado.fechaLiberacion,
-        usuarioLiberacion: resultado.usuarioLiberacion,
-        observacionGeneral: resultado.observacionGeneral,
-        items: configuracion.items,
-      };
-    });
+    const muestrasPorUnidad = construirMuestrasPorUnidad(muestrasAceptadas);
+
+    // ====== No enviar información interna del laboratorio ======
+    const resultados = liberados.map((resultado) => ({
+      _id: String(resultado._id),
+      codPruebaLab: resultado.codPruebaLab,
+      nombrePruebaLab: resultado.nombrePruebaLab,
+      numeroInstancia: resultado.numeroInstancia,
+      etiquetaInstancia: resultado.etiquetaInstancia,
+      versionResultado: resultado.versionResultado || 1,
+      fechaValidacion: resultado.fechaValidacion ?? null,
+      fechaLiberacion: resultado.fechaLiberacion,
+      usuarioLiberacion: resultado.usuarioLiberacion,
+      observacionGeneral: resultado.observacionGeneral,
+      muestras: muestrasPorUnidad.get(String(resultado.claveUnidad ?? "")) ?? [],
+      items: obtenerItemsEntregables(resultado.resultadosItems).map((item) => {
+        const metadata = obtenerMetadataItemInforme({
+          solicitud,
+          resultado,
+          item,
+        });
+
+        return {
+          nombreInforme: item.nombreInforme,
+          codItemLab: item.codItemLab,
+          tipoResultado: metadata.tipoResultado,
+          metodo: metadata.metodo,
+          nombreGrupo: metadata.nombreGrupo,
+          comentarioReferenciaGrupo: metadata.comentarioReferenciaGrupo,
+          mostrarReferenciaInforme: metadata.mostrarReferenciaInforme,
+          hallazgosNormales: metadata.hallazgosNormales,
+          valor: item.valor,
+          unidadesRef: item.unidadesRef,
+          observacion: item.observacion,
+          evaluacionReferencia: item.evaluacionReferencia,
+          referenciasConfiguradas: metadata.referenciasConfiguradas,
+          alertasDetectadas: item.alertasDetectadas,
+          ordenGrupo: item.ordenGrupo,
+          ordenItem: item.ordenItem,
+        };
+      }),
+    }));
     const entregas = await EntregaResultado.find({ solicitudAtencionId })
       .select("tipoEntrega medio receptorNombre fechaEntrega usuarioEntrega resultados")
       .sort({ fechaEntrega: -1 })
@@ -276,9 +452,9 @@ const obtenerInformeEntregable = async (req, res = response) => {
         codSolicitud: solicitud.codSolicitud,
         codigoLaboratorio: solicitud.codigoLaboratorio,
         fechaEmision: solicitud.fechaEmision,
-        fechaAtencion: solicitud.fechaEmision,
         origenAtencion: solicitud.origenAtencion,
         paciente: construirPaciente(solicitud),
+        empresa: construirEmpresa(solicitud),
       },
       resumen,
       resultados,
@@ -377,7 +553,7 @@ const registrarEntregaResultados = async (req, res = response) => {
       nombrePruebaLab: resultado.nombrePruebaLab,
       versionResultado: resultado.versionResultado || 1,
       fechaLiberacion: resultado.fechaLiberacion,
-      resultadosItems: (resultado.resultadosItems || []).map((item) => ({
+      resultadosItems: obtenerItemsEntregables(resultado.resultadosItems).map((item) => ({
         nombreInforme: item.nombreInforme,
         valor: item.valor,
         unidadesRef: item.unidadesRef,

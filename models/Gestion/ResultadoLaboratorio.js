@@ -223,13 +223,23 @@ const ResultadoItemSchema = new Schema(
 
     tipoResultado: {
       type: String,
-      enum: ["NUMERICO", "TEXTO", "CATEGORICO"],
+      enum: ["NUMERICO", "TEXTO", "CATEGORICO", "ESTRUCTURADO"],
       required: true,
     },
 
     unidadesRef: {
       type: String,
       default: "",
+    },
+
+    esOpcional: {
+      type: Boolean,
+      default: false,
+    },
+
+    mostrarReferenciaInforme: {
+      type: Boolean,
+      default: true,
     },
 
     // ====== Resultado transaccional ======

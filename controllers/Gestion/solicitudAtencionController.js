@@ -655,6 +655,41 @@ const normalizarEstadoItemClinico = (estadoItem) => {
   return estadoItem ?? "ACTIVO";
 };
 
+// ====== Clonar configuración clínica serializable ======
+const clonarConfiguracionClinica = (valor) => {
+  if (valor === null || valor === undefined) return null;
+
+  if (valor && typeof valor.toObject === "function") {
+    valor = valor.toObject();
+  }
+
+  if (Array.isArray(valor)) {
+    return valor.map((item) => clonarConfiguracionClinica(item));
+  }
+
+  if (typeof valor === "object") {
+    return Object.fromEntries(
+      Object.entries(valor).map(([clave, contenido]) => [
+        clave,
+        clonarConfiguracionClinica(contenido),
+      ]),
+    );
+  }
+
+  if (typeof valor === "string") return valor.trim();
+
+  return valor;
+};
+
+// ====== Clonar valor por defecto de resultado ======
+const clonarValorPorDefectoResultado = (valor) => {
+  if (valor === null || valor === undefined || valor === "") {
+    return null;
+  }
+
+  return clonarConfiguracionClinica(valor);
+};
+
 // ====== Construir snapshot de ItemLab ======
 
 const construirSnapshotItemLab = (itemMaestro) => {
@@ -715,12 +750,51 @@ const construirSnapshotItemLab = (itemMaestro) => {
       ? [...itemMaestro.opcionesResultado]
       : [],
 
-    valorPorDefectoResultado:
+    valorPorDefectoResultado: clonarValorPorDefectoResultado(
+      itemMaestro.valorPorDefectoResultado,
+    ),
+
+    formatosCapturaNumerica:
+      itemMaestro.tipoResultado === "NUMERICO" &&
+      Array.isArray(itemMaestro.formatosCapturaNumerica) &&
+      itemMaestro.formatosCapturaNumerica.length > 0
+        ? [...itemMaestro.formatosCapturaNumerica]
+        : ["VALOR"],
+
+    precisionNumerica:
       itemMaestro.tipoResultado === "NUMERICO"
-        ? ""
-        : String(itemMaestro.valorPorDefectoResultado ?? "").trim(),
+        ? (itemMaestro.precisionNumerica ?? "DECIMAL")
+        : "DECIMAL",
+
+    formatoCapturaNumericaDefault:
+      itemMaestro.tipoResultado === "NUMERICO"
+        ? (itemMaestro.formatoCapturaNumericaDefault ??
+          itemMaestro.formatosCapturaNumerica?.[0] ??
+          "VALOR")
+        : "VALOR",
+
+    valoresCualitativosAlternativos:
+      itemMaestro.tipoResultado === "NUMERICO" &&
+      Array.isArray(itemMaestro.valoresCualitativosAlternativos)
+        ? [...itemMaestro.valoresCualitativosAlternativos]
+        : [],
+
+    valoresCualitativosReferencia:
+      itemMaestro.tipoResultado === "NUMERICO" &&
+      Array.isArray(itemMaestro.valoresCualitativosReferencia)
+        ? [...itemMaestro.valoresCualitativosReferencia]
+        : [],
+
+    configuracionEstructurada:
+      itemMaestro.tipoResultado === "ESTRUCTURADO"
+        ? clonarConfiguracionClinica(itemMaestro.configuracionEstructurada)
+        : null,
 
     permiteValorNoListado: itemMaestro.permiteValorNoListado ?? false,
+
+    esOpcional: itemMaestro.esOpcional === true,
+
+    mostrarReferenciaInforme: itemMaestro.mostrarReferenciaInforme !== false,
 
     estadoItem: normalizarEstadoItemClinico(itemMaestro.estadoItem),
 
@@ -986,6 +1060,10 @@ const construirSnapshotPruebaLab = (pruebaDocumento) => {
       ordenGrupo: Number(grupo.ordenGrupo ?? 0),
 
       mostrarTitulo: grupo.mostrarTitulo ?? true,
+
+      comentarioReferenciaGrupo: String(
+        grupo.comentarioReferenciaGrupo ?? "",
+      ).trim(),
 
       items: Array.isArray(grupo.items)
         ? grupo.items.map((itemConfig) => {

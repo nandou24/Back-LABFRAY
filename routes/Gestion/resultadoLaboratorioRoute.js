@@ -8,6 +8,7 @@ const {
   revisarResultadoAntesValidacion,
   validarResultadosMasivamente,
   validarResultadoLaboratorio,
+  liberarResultadosMasivamente,
   liberarResultadoLaboratorio,
   obtenerResultadosPorSolicitud,
   obtenerResultadoPorId,
@@ -108,6 +109,15 @@ router.put(
   validarPermisoAccion(PERMISOS_ACCION.RESULTADOS_VALIDAR),
   validarConfirmacionAlertasCriticasResultado,
   validarResultadoLaboratorio,
+);
+
+// ====== Liberar resultados masivamente ======
+
+router.put(
+  "/liberar-masivo",
+  validarJWT,
+  validarPermisoAccion(PERMISOS_ACCION.RESULTADOS_LIBERAR),
+  liberarResultadosMasivamente,
 );
 
 // ====== Liberar resultado ======

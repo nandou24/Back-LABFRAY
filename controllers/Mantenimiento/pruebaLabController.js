@@ -622,7 +622,17 @@ const validarComposicionPruebaLab = (datos) => {
     const grupo = gruposResultado[i];
     const nombreGrupo = grupo?.nombreGrupo?.trim() ?? "";
     const mostrarTitulo = grupo?.mostrarTitulo === true;
+    const comentarioReferenciaGrupo = String(
+      grupo?.comentarioReferenciaGrupo ?? "",
+    ).trim();
     const items = Array.isArray(grupo?.items) ? grupo.items : [];
+
+    if (comentarioReferenciaGrupo.length > 2000) {
+      return {
+        ok: false,
+        msg: `La referencia / interpretación del Grupo ${i + 1} no puede superar 2000 caracteres.`,
+      };
+    }
 
     // ====== Mostrar título requiere nombre ======
 

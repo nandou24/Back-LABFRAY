@@ -37,6 +37,7 @@ const validacionesItemLab = [
     "NUMERICO",
     "TEXTO",
     "CATEGORICO",
+    "ESTRUCTURADO",
   ]),
 
   // ========================================================

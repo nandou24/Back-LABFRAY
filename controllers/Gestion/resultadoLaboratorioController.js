@@ -423,6 +423,11 @@ const construirResultadosItemsDesdeUnidad = (unidad) => {
 
         unidadesRef: snapshotItem.unidadesRef ?? "",
 
+        esOpcional: snapshotItem.esOpcional === true,
+
+        mostrarReferenciaInforme:
+          snapshotItem.mostrarReferenciaInforme !== false,
+
         // ====== Resultado inicial ======
 
         valor: null,
@@ -518,15 +523,114 @@ const construirResultadoDesdeUnidad = ({
   };
 };
 
-// ====== Normalizar valor según tipo ======
+// ====== Formatos numéricos soportados ======
 
-const normalizarValorResultado = ({ valor, tipoResultado, snapshotItem }) => {
-  // ====== Numérico ======
+const FORMATOS_CAPTURA_NUMERICA = new Set([
+  "VALOR",
+  "RANGO",
+  "MAYOR_QUE",
+  "MAYOR_IGUAL_QUE",
+  "MENOR_QUE",
+  "MENOR_IGUAL_QUE",
+]);
 
-  if (tipoResultado === "NUMERICO") {
-    if (valor === null || valor === undefined || valor === "") {
-      throw new Error("El valor numérico es obligatorio");
+// ====== Detectar resultado vacío ======
+const esValorResultadoVacio = (valor) =>
+  valor === null ||
+  valor === undefined ||
+  (typeof valor === "string" && valor.trim() === "");
+
+// ====== Resolver opción canónica ======
+const obtenerOpcionCanonicaResultado = (valor, opciones = []) => {
+  const buscado = String(valor ?? "").trim().toUpperCase();
+  if (!buscado) return null;
+
+  return (
+    (Array.isArray(opciones) ? opciones : []).find(
+      (opcion) => String(opcion ?? "").trim().toUpperCase() === buscado,
+    ) ?? null
+  );
+};
+
+// ====== Identificar valor cualitativo en Item numérico ======
+const esValorCualitativoNumerico = (valor) =>
+  Boolean(
+    valor &&
+      typeof valor === "object" &&
+      !Array.isArray(valor) &&
+      String(valor.tipo ?? "").trim().toUpperCase() === "CUALITATIVO",
+  );
+
+// ====== Obtener formatos históricos permitidos ======
+
+const obtenerFormatosCapturaNumerica = (snapshotItem) => {
+  const formatos = Array.isArray(snapshotItem?.formatosCapturaNumerica)
+    ? snapshotItem.formatosCapturaNumerica.filter((formato) =>
+        FORMATOS_CAPTURA_NUMERICA.has(formato),
+      )
+    : [];
+
+  return formatos.length > 0 ? [...new Set(formatos)] : ["VALOR"];
+};
+
+// ====== Resolver precisión numérica histórica ======
+const obtenerPrecisionNumerica = (snapshotItem) =>
+  String(snapshotItem?.precisionNumerica ?? "DECIMAL").toUpperCase() === "ENTERO"
+    ? "ENTERO"
+    : "DECIMAL";
+
+// ====== Validar precisión del resultado ======
+const validarPrecisionResultadoNumerico = (valor, snapshotItem) => {
+  if (obtenerPrecisionNumerica(snapshotItem) === "ENTERO" && !Number.isInteger(valor)) {
+    throw new Error("Este Item solo permite valores enteros");
+  }
+};
+
+// ====== Normalizar resultado numérico estructurado ======
+
+const normalizarValorNumericoResultado = ({ valor, snapshotItem }) => {
+  const formatosPermitidos = obtenerFormatosCapturaNumerica(snapshotItem);
+
+  // ====== Alternativa cualitativa ======
+  if (esValorCualitativoNumerico(valor)) {
+    const alternativas = Array.isArray(snapshotItem?.valoresCualitativosAlternativos)
+      ? snapshotItem.valoresCualitativosAlternativos
+      : [];
+    const opcion = obtenerOpcionCanonicaResultado(valor.valor, alternativas);
+
+    if (!opcion) {
+      throw new Error(
+        "El valor cualitativo no está permitido para este Item numérico",
+      );
     }
+
+    return {
+      tipo: "CUALITATIVO",
+      valor: opcion,
+    };
+  }
+
+  const validarFormato = (formato) => {
+    if (!formatosPermitidos.includes(formato)) {
+      throw new Error(
+        `El formato numérico ${formato} no está permitido para este Item`,
+      );
+    }
+  };
+
+  // ====== Compatibilidad valor simple ======
+
+  if (
+    valor === null ||
+    valor === undefined ||
+    valor === "" ||
+    Array.isArray(valor)
+  ) {
+    throw new Error("El valor numérico es obligatorio");
+  }
+
+  if (typeof valor !== "object") {
+    validarFormato("VALOR");
 
     const valorNumerico = Number(valor);
 
@@ -534,7 +638,431 @@ const normalizarValorResultado = ({ valor, tipoResultado, snapshotItem }) => {
       throw new Error("El resultado debe ser un valor numérico válido");
     }
 
+    validarPrecisionResultadoNumerico(valorNumerico, snapshotItem);
+
     return valorNumerico;
+  }
+
+  const formato = String(valor.tipo ?? "").trim().toUpperCase();
+
+  if (!FORMATOS_CAPTURA_NUMERICA.has(formato)) {
+    throw new Error("El formato del resultado numérico no es válido");
+  }
+
+  validarFormato(formato);
+
+  // ====== Valor único enviado como objeto ======
+
+  if (formato === "VALOR") {
+    if (valor.valor === null || valor.valor === undefined || valor.valor === "") {
+      throw new Error("El resultado debe ser un valor numérico válido");
+    }
+
+    const valorNumerico = Number(valor.valor);
+
+    if (!Number.isFinite(valorNumerico)) {
+      throw new Error("El resultado debe ser un valor numérico válido");
+    }
+
+    validarPrecisionResultadoNumerico(valorNumerico, snapshotItem);
+
+    return valorNumerico;
+  }
+
+  // ====== Rango ======
+
+  if (formato === "RANGO") {
+    if (
+      valor.desde === null ||
+      valor.desde === undefined ||
+      valor.desde === "" ||
+      valor.hasta === null ||
+      valor.hasta === undefined ||
+      valor.hasta === ""
+    ) {
+      throw new Error("Debe indicar ambos extremos del rango numérico");
+    }
+
+    const desde = Number(valor.desde);
+    const hasta = Number(valor.hasta);
+
+    if (!Number.isFinite(desde) || !Number.isFinite(hasta)) {
+      throw new Error("Debe indicar ambos extremos del rango numérico");
+    }
+
+    validarPrecisionResultadoNumerico(desde, snapshotItem);
+    validarPrecisionResultadoNumerico(hasta, snapshotItem);
+
+    if (desde > hasta) {
+      throw new Error("El valor inicial no puede ser mayor que el valor final");
+    }
+
+    return {
+      tipo: "RANGO",
+      desde,
+      hasta,
+    };
+  }
+
+  // ====== Operador con un límite ======
+
+  if (valor.valor === null || valor.valor === undefined || valor.valor === "") {
+    throw new Error("Debe indicar un valor numérico para el operador seleccionado");
+  }
+
+  const valorLimite = Number(valor.valor);
+
+  if (!Number.isFinite(valorLimite)) {
+    throw new Error("Debe indicar un valor numérico para el operador seleccionado");
+  }
+
+  validarPrecisionResultadoNumerico(valorLimite, snapshotItem);
+
+  return {
+    tipo: formato,
+    valor: valorLimite,
+  };
+};
+
+// ====== Convertir resultado numérico a intervalo ======
+
+const obtenerIntervaloResultadoNumerico = (valor) => {
+  if (typeof valor !== "object" || valor === null || Array.isArray(valor)) {
+    const numero = Number(valor);
+
+    if (!Number.isFinite(numero)) {
+      return null;
+    }
+
+    return {
+      minimo: numero,
+      maximo: numero,
+      incluyeMinimo: true,
+      incluyeMaximo: true,
+    };
+  }
+
+  const tipo = String(valor.tipo ?? "").toUpperCase();
+
+  if (tipo === "RANGO") {
+    const desde = Number(valor.desde);
+    const hasta = Number(valor.hasta);
+
+    if (!Number.isFinite(desde) || !Number.isFinite(hasta) || desde > hasta) {
+      return null;
+    }
+
+    return {
+      minimo: desde,
+      maximo: hasta,
+      incluyeMinimo: true,
+      incluyeMaximo: true,
+    };
+  }
+
+  const limite = Number(valor.valor);
+
+  if (!Number.isFinite(limite)) {
+    return null;
+  }
+
+  if (tipo === "MAYOR_QUE") {
+    return {
+      minimo: limite,
+      maximo: Number.POSITIVE_INFINITY,
+      incluyeMinimo: false,
+      incluyeMaximo: false,
+    };
+  }
+
+  if (tipo === "MAYOR_IGUAL_QUE") {
+    return {
+      minimo: limite,
+      maximo: Number.POSITIVE_INFINITY,
+      incluyeMinimo: true,
+      incluyeMaximo: false,
+    };
+  }
+
+  if (tipo === "MENOR_QUE") {
+    return {
+      minimo: Number.NEGATIVE_INFINITY,
+      maximo: limite,
+      incluyeMinimo: false,
+      incluyeMaximo: false,
+    };
+  }
+
+  if (tipo === "MENOR_IGUAL_QUE") {
+    return {
+      minimo: Number.NEGATIVE_INFINITY,
+      maximo: limite,
+      incluyeMinimo: false,
+      incluyeMaximo: true,
+    };
+  }
+
+  if (tipo === "VALOR") {
+    const numero = Number(valor.valor);
+    if (!Number.isFinite(numero)) return null;
+    return {
+      minimo: numero,
+      maximo: numero,
+      incluyeMinimo: true,
+      incluyeMaximo: true,
+    };
+  }
+
+  return null;
+};
+
+// ====== Convertir referencia numérica a intervalo ======
+
+const obtenerIntervaloReferenciaNumerica = (referencia) => {
+  const tipo = referencia?.tipoReferencia;
+
+  if (tipo === "RANGO") {
+    const minimo = Number(referencia.valorMin);
+    const maximo = Number(referencia.valorMax);
+
+    if (!Number.isFinite(minimo) || !Number.isFinite(maximo) || minimo > maximo) {
+      return null;
+    }
+
+    return {
+      minimo,
+      maximo,
+      incluyeMinimo: true,
+      incluyeMaximo: true,
+    };
+  }
+
+  const limite = Number(referencia?.valorLimite);
+  if (!Number.isFinite(limite)) return null;
+
+  if (tipo === "MENOR_QUE") {
+    return {
+      minimo: Number.NEGATIVE_INFINITY,
+      maximo: limite,
+      incluyeMinimo: false,
+      incluyeMaximo: false,
+    };
+  }
+
+  if (tipo === "MENOR_IGUAL_QUE") {
+    return {
+      minimo: Number.NEGATIVE_INFINITY,
+      maximo: limite,
+      incluyeMinimo: false,
+      incluyeMaximo: true,
+    };
+  }
+
+  if (tipo === "MAYOR_QUE") {
+    return {
+      minimo: limite,
+      maximo: Number.POSITIVE_INFINITY,
+      incluyeMinimo: false,
+      incluyeMaximo: false,
+    };
+  }
+
+  if (tipo === "MAYOR_IGUAL_QUE") {
+    return {
+      minimo: limite,
+      maximo: Number.POSITIVE_INFINITY,
+      incluyeMinimo: true,
+      incluyeMaximo: false,
+    };
+  }
+
+  return null;
+};
+
+// ====== Validar inclusión de intervalos ======
+
+const intervaloContenido = (resultado, referencia) => {
+  if (!resultado || !referencia) return false;
+
+  const cumpleMinimo =
+    resultado.minimo > referencia.minimo ||
+    (resultado.minimo === referencia.minimo &&
+      (!resultado.incluyeMinimo || referencia.incluyeMinimo));
+
+  const cumpleMaximo =
+    resultado.maximo < referencia.maximo ||
+    (resultado.maximo === referencia.maximo &&
+      (!resultado.incluyeMaximo || referencia.incluyeMaximo));
+
+  return cumpleMinimo && cumpleMaximo;
+};
+
+// ====== Dirección de desvío de intervalo ======
+
+const direccionFueraIntervalo = (resultado, referencia) => {
+  if (!resultado || !referencia) return "FUERA_REFERENCIA";
+
+  const violaMinimo = !(
+    resultado.minimo > referencia.minimo ||
+    (resultado.minimo === referencia.minimo &&
+      (!resultado.incluyeMinimo || referencia.incluyeMinimo))
+  );
+
+  const violaMaximo = !(
+    resultado.maximo < referencia.maximo ||
+    (resultado.maximo === referencia.maximo &&
+      (!resultado.incluyeMaximo || referencia.incluyeMaximo))
+  );
+
+  if (violaMinimo && !violaMaximo) return "BAJO";
+  if (violaMaximo && !violaMinimo) return "ALTO";
+  return "FUERA_REFERENCIA";
+};
+
+// ====== Validar si un intervalo contiene un valor ======
+
+const intervaloContieneValor = (intervalo, valor) => {
+  if (!intervalo || !Number.isFinite(valor)) return false;
+
+  const cumpleMinimo =
+    valor > intervalo.minimo ||
+    (valor === intervalo.minimo && intervalo.incluyeMinimo);
+  const cumpleMaximo =
+    valor < intervalo.maximo ||
+    (valor === intervalo.maximo && intervalo.incluyeMaximo);
+
+  return cumpleMinimo && cumpleMaximo;
+};
+
+// ====== Normalizar resultado estructurado de hallazgos ======
+const normalizarValorEstructuradoResultado = ({ valor, snapshotItem }) => {
+  const configuracion = snapshotItem?.configuracionEstructurada;
+
+  if (
+    !configuracion ||
+    configuracion.subtipo !== "HALLAZGOS" ||
+    !valor ||
+    typeof valor !== "object" ||
+    Array.isArray(valor) ||
+    String(valor.tipo ?? "").trim().toUpperCase() !== "HALLAZGOS"
+  ) {
+    throw new Error("El resultado estructurado no es válido");
+  }
+
+  const modo = String(valor.modo ?? "").trim().toUpperCase();
+
+  if (modo === "AUSENCIA") {
+    return {
+      tipo: "HALLAZGOS",
+      modo: "AUSENCIA",
+      valorAusencia: String(configuracion.valorAusencia ?? "NO SE OBSERVAN").trim(),
+      hallazgos: [],
+    };
+  }
+
+  if (modo !== "DETALLE") {
+    throw new Error("El modo del resultado estructurado no es válido");
+  }
+
+  const hallazgosEntrada = Array.isArray(valor.hallazgos) ? valor.hallazgos : [];
+
+  if (!hallazgosEntrada.length) {
+    throw new Error("Debe registrar al menos un hallazgo");
+  }
+
+  if (configuracion.permiteMultiples === false && hallazgosEntrada.length > 1) {
+    throw new Error("Este Item solo permite un hallazgo");
+  }
+
+  const hallazgosConfigurados = Array.isArray(configuracion.hallazgos)
+    ? configuracion.hallazgos
+    : [];
+  const usados = new Set();
+  const hallazgos = [];
+
+  for (const entrada of hallazgosEntrada) {
+    const solicitado = String(entrada?.hallazgo ?? "").trim();
+    const canonico = obtenerOpcionCanonicaResultado(
+      solicitado,
+      hallazgosConfigurados,
+    );
+
+    if (!canonico && configuracion.permitirOtroHallazgo !== true) {
+      throw new Error(`El hallazgo ${solicitado || "indicado"} no está permitido`);
+    }
+
+    const hallazgo = canonico ?? solicitado;
+
+    if (!hallazgo) {
+      throw new Error("Debe indicar el nombre del hallazgo");
+    }
+
+    const clave = hallazgo.toUpperCase();
+    if (usados.has(clave)) {
+      throw new Error(`El hallazgo ${hallazgo} está repetido`);
+    }
+    usados.add(clave);
+
+    if (configuracion.cuantificacion?.tipo === "CATEGORICA") {
+      const valorEntrada =
+        entrada?.valor && typeof entrada.valor === "object"
+          ? entrada.valor.valor
+          : entrada?.valor;
+      const opcion = obtenerOpcionCanonicaResultado(
+        valorEntrada,
+        configuracion.cuantificacion.opciones,
+      );
+
+      if (!opcion) {
+        throw new Error(
+          `La cuantificación de ${hallazgo} no está entre las opciones permitidas`,
+        );
+      }
+
+      hallazgos.push({
+        hallazgo,
+        valor: { tipo: "CATEGORICO", valor: opcion },
+      });
+      continue;
+    }
+
+    if (configuracion.cuantificacion?.tipo !== "NUMERICA") {
+      throw new Error("La cuantificación del Item estructurado no está configurada");
+    }
+
+    const snapshotNumerico = {
+      formatosCapturaNumerica:
+        configuracion.cuantificacion.formatosCapturaNumerica,
+      formatoCapturaNumericaDefault:
+        configuracion.cuantificacion.formatoCapturaNumericaDefault,
+      precisionNumerica:
+        configuracion.cuantificacion.precisionNumerica ?? "DECIMAL",
+      valoresCualitativosAlternativos: [],
+    };
+
+    hallazgos.push({
+      hallazgo,
+      valor: normalizarValorNumericoResultado({
+        valor: entrada?.valor,
+        snapshotItem: snapshotNumerico,
+      }),
+    });
+  }
+
+  return {
+    tipo: "HALLAZGOS",
+    modo: "DETALLE",
+    hallazgos,
+  };
+};
+
+// ====== Normalizar valor según tipo ======
+
+const normalizarValorResultado = ({ valor, tipoResultado, snapshotItem }) => {
+  // ====== Numérico ======
+
+  if (tipoResultado === "NUMERICO") {
+    return normalizarValorNumericoResultado({ valor, snapshotItem });
   }
 
   // ====== Texto ======
@@ -594,6 +1122,12 @@ const normalizarValorResultado = ({ valor, tipoResultado, snapshotItem }) => {
     return valorTexto;
   }
 
+  // ====== Estructurado ======
+
+  if (tipoResultado === "ESTRUCTURADO") {
+    return normalizarValorEstructuradoResultado({ valor, snapshotItem });
+  }
+
   throw new Error(`Tipo de resultado no soportado: ${tipoResultado}`);
 };
 
@@ -612,9 +1146,20 @@ const recalcularEstadoResultado = (resultadoLaboratorio) => {
     return "PENDIENTE";
   }
 
-  const pendientes = items.filter((item) => item.estado === "PENDIENTE").length;
+  // ====== Los Items opcionales vacíos no bloquean la completitud ======
+  const requeridos = items.filter((item) => item.esOpcional !== true);
 
-  if (pendientes === items.length) {
+  if (requeridos.length === 0) {
+    return items.some((item) => item.estado !== "PENDIENTE")
+      ? "COMPLETO"
+      : "PENDIENTE";
+  }
+
+  const pendientes = requeridos.filter(
+    (item) => item.estado === "PENDIENTE",
+  ).length;
+
+  if (pendientes === requeridos.length) {
     return "PENDIENTE";
   }
 
@@ -625,9 +1170,9 @@ const recalcularEstadoResultado = (resultadoLaboratorio) => {
   return "COMPLETO";
 };
 
-// ====== Obtener Item desde snapshot de la orden ======
+// ====== Obtener grupo desde snapshot de la orden ======
 
-const obtenerItemSnapshotResultado = ({
+const obtenerGrupoSnapshotResultado = ({
   solicitud,
   resultadoLaboratorio,
   resultadoItem,
@@ -660,6 +1205,22 @@ const obtenerItemSnapshotResultado = ({
     throw new Error("No se encontró el grupo clínico asociado al Item");
   }
 
+  return grupo;
+};
+
+// ====== Obtener Item desde snapshot de la orden ======
+
+const obtenerItemSnapshotResultado = ({
+  solicitud,
+  resultadoLaboratorio,
+  resultadoItem,
+}) => {
+  const grupo = obtenerGrupoSnapshotResultado({
+    solicitud,
+    resultadoLaboratorio,
+    resultadoItem,
+  });
+
   const items = Array.isArray(grupo.items) ? grupo.items : [];
 
   const itemSnapshot = items[resultadoItem.indiceItem];
@@ -687,6 +1248,41 @@ const obtenerItemSnapshotResultado = ({
   return itemSnapshot;
 };
 
+// ====== Clonar configuración clínica serializable ======
+const clonarConfiguracionClinicaResultado = (valor) => {
+  if (valor === null || valor === undefined) return null;
+
+  if (valor && typeof valor.toObject === "function") {
+    valor = valor.toObject();
+  }
+
+  if (Array.isArray(valor)) {
+    return valor.map((item) => clonarConfiguracionClinicaResultado(item));
+  }
+
+  if (typeof valor === "object") {
+    return Object.fromEntries(
+      Object.entries(valor).map(([clave, contenido]) => [
+        clave,
+        clonarConfiguracionClinicaResultado(contenido),
+      ]),
+    );
+  }
+
+  if (typeof valor === "string") return valor.trim();
+
+  return valor;
+};
+
+// ====== Clonar valor por defecto de resultado ======
+const clonarValorPorDefectoResultado = (valor) => {
+  if (valor === null || valor === undefined || valor === "") {
+    return null;
+  }
+
+  return clonarConfiguracionClinicaResultado(valor);
+};
+
 // ====== Adjuntar configuración clínica histórica ======
 
 const adjuntarConfiguracionClinicaResultado = ({ solicitud, resultado }) => {
@@ -707,18 +1303,61 @@ const adjuntarConfiguracionClinicaResultado = ({ solicitud, resultado }) => {
       });
 
       const snapshotItem = itemSnapshot.snapshotItem;
+      const grupoSnapshot = obtenerGrupoSnapshotResultado({
+        solicitud,
+        resultadoLaboratorio: resultadoPlano,
+        resultadoItem: item,
+      });
 
       return {
         ...item,
+        esOpcional:
+          item.esOpcional === true || snapshotItem.esOpcional === true,
+        comentarioReferenciaGrupo: String(
+          grupoSnapshot.comentarioReferenciaGrupo ?? "",
+        ).trim(),
         configuracionClinica: {
           tipoResultado: snapshotItem.tipoResultado ?? item.tipoResultado,
+          esOpcional: snapshotItem.esOpcional === true,
+          mostrarReferenciaInforme:
+            item.mostrarReferenciaInforme !== false &&
+            snapshotItem.mostrarReferenciaInforme !== false,
           opcionesResultado: Array.isArray(snapshotItem.opcionesResultado)
             ? [...snapshotItem.opcionesResultado]
             : [],
-          valorPorDefectoResultado:
+          valorPorDefectoResultado: clonarValorPorDefectoResultado(
+            snapshotItem.valorPorDefectoResultado,
+          ),
+          formatosCapturaNumerica:
             snapshotItem.tipoResultado === "NUMERICO"
-              ? ""
-              : String(snapshotItem.valorPorDefectoResultado ?? "").trim(),
+              ? obtenerFormatosCapturaNumerica(snapshotItem)
+              : ["VALOR"],
+          formatoCapturaNumericaDefault:
+            snapshotItem.tipoResultado === "NUMERICO"
+              ? (snapshotItem.formatoCapturaNumericaDefault ??
+                obtenerFormatosCapturaNumerica(snapshotItem)[0] ??
+                "VALOR")
+              : "VALOR",
+          precisionNumerica:
+            snapshotItem.tipoResultado === "NUMERICO"
+              ? obtenerPrecisionNumerica(snapshotItem)
+              : "DECIMAL",
+          valoresCualitativosAlternativos:
+            snapshotItem.tipoResultado === "NUMERICO" &&
+            Array.isArray(snapshotItem.valoresCualitativosAlternativos)
+              ? [...snapshotItem.valoresCualitativosAlternativos]
+              : [],
+          valoresCualitativosReferencia:
+            snapshotItem.tipoResultado === "NUMERICO" &&
+            Array.isArray(snapshotItem.valoresCualitativosReferencia)
+              ? [...snapshotItem.valoresCualitativosReferencia]
+              : [],
+          configuracionEstructurada:
+            snapshotItem.tipoResultado === "ESTRUCTURADO"
+              ? clonarConfiguracionClinicaResultado(
+                  snapshotItem.configuracionEstructurada,
+                )
+              : null,
           permiteValorNoListado: snapshotItem.permiteValorNoListado === true,
           referenciasResultado: Array.isArray(snapshotItem.referenciasResultado)
             ? snapshotItem.referenciasResultado.map((referencia) => ({
@@ -1008,45 +1647,10 @@ const valorCumpleReferencia = ({ valor, referencia }) => {
       "MAYOR_IGUAL_QUE",
     ].includes(tipoReferencia)
   ) {
-    const valorNumerico = Number(valor);
+    const intervaloResultado = obtenerIntervaloResultadoNumerico(valor);
+    const intervaloReferencia = obtenerIntervaloReferenciaNumerica(referencia);
 
-    if (!Number.isFinite(valorNumerico)) {
-      return false;
-    }
-
-    if (tipoReferencia === "RANGO") {
-      const valorMin = Number(referencia.valorMin);
-
-      const valorMax = Number(referencia.valorMax);
-
-      if (!Number.isFinite(valorMin) || !Number.isFinite(valorMax)) {
-        return false;
-      }
-
-      return valorNumerico >= valorMin && valorNumerico <= valorMax;
-    }
-
-    const valorLimite = Number(referencia.valorLimite);
-
-    if (!Number.isFinite(valorLimite)) {
-      return false;
-    }
-
-    if (tipoReferencia === "MENOR_QUE") {
-      return valorNumerico < valorLimite;
-    }
-
-    if (tipoReferencia === "MENOR_IGUAL_QUE") {
-      return valorNumerico <= valorLimite;
-    }
-
-    if (tipoReferencia === "MAYOR_QUE") {
-      return valorNumerico > valorLimite;
-    }
-
-    if (tipoReferencia === "MAYOR_IGUAL_QUE") {
-      return valorNumerico >= valorLimite;
-    }
+    return intervaloContenido(intervaloResultado, intervaloReferencia);
   }
 
   // ====== Valores permitidos ======
@@ -1100,42 +1704,105 @@ const evaluarFueraReferenciaUnica = ({ valor, referencia }) => {
     return "FUERA_REFERENCIA";
   }
 
-  const valorNumerico = Number(valor);
+  const intervaloResultado = obtenerIntervaloResultadoNumerico(valor);
+  const intervaloReferencia = obtenerIntervaloReferenciaNumerica(referencia);
 
-  if (!Number.isFinite(valorNumerico)) {
-    return "FUERA_REFERENCIA";
-  }
-
-  if (tipoReferencia === "RANGO") {
-    const valorMin = Number(referencia.valorMin);
-
-    const valorMax = Number(referencia.valorMax);
-
-    if (Number.isFinite(valorMin) && valorNumerico < valorMin) {
-      return "BAJO";
-    }
-
-    if (Number.isFinite(valorMax) && valorNumerico > valorMax) {
-      return "ALTO";
-    }
-
-    return "FUERA_REFERENCIA";
-  }
-
-  if (tipoReferencia === "MENOR_QUE" || tipoReferencia === "MENOR_IGUAL_QUE") {
-    return "ALTO";
-  }
-
-  if (tipoReferencia === "MAYOR_QUE" || tipoReferencia === "MAYOR_IGUAL_QUE") {
-    return "BAJO";
-  }
-
-  return "FUERA_REFERENCIA";
+  return direccionFueraIntervalo(intervaloResultado, intervaloReferencia);
 };
 
 // ====== Evaluar referencia del resultado ======
 
 const evaluarReferenciaResultado = ({ solicitud, snapshotItem, valor }) => {
+  // ====== Resultados estructurados ======
+  if (snapshotItem?.tipoResultado === "ESTRUCTURADO") {
+    const configuracion = snapshotItem?.configuracionEstructurada;
+    const hallazgosNormales = Array.isArray(configuracion?.hallazgosNormales)
+      ? configuracion.hallazgosNormales
+          .map((hallazgo) => String(hallazgo ?? "").trim().toUpperCase())
+          .filter(Boolean)
+      : [];
+    const ausenciaEsReferencia = configuracion?.ausenciaEsReferencia === true;
+
+    if (!ausenciaEsReferencia && hallazgosNormales.length === 0) {
+      return {
+        estado: "NO_APLICA",
+        referenciaAplicada: null,
+        mensaje: "No existe una referencia estructurada configurada",
+      };
+    }
+
+    const modo = String(valor?.modo ?? "").trim().toUpperCase();
+    const valorEsperado = String(
+      configuracion?.valorAusencia ?? "NO SE OBSERVAN",
+    ).trim();
+
+    if (modo === "AUSENCIA") {
+      return {
+        estado: ausenciaEsReferencia ? "VALOR_PERMITIDO" : "VALOR_NO_PERMITIDO",
+        referenciaAplicada: null,
+        mensaje: ausenciaEsReferencia
+          ? `Resultado estructurado dentro del valor esperado: ${valorEsperado}`
+          : `El resultado de ausencia no está configurado como valor esperado: ${valorEsperado}`,
+      };
+    }
+
+    const hallazgos = Array.isArray(valor?.hallazgos) ? valor.hallazgos : [];
+    const fueraReferencia = hallazgos
+      .map((hallazgo) => String(hallazgo?.hallazgo ?? "").trim())
+      .filter(Boolean)
+      .filter(
+        (hallazgo) => !hallazgosNormales.includes(hallazgo.toUpperCase()),
+      );
+
+    if (fueraReferencia.length === 0 && hallazgos.length > 0) {
+      return {
+        estado: "VALOR_PERMITIDO",
+        referenciaAplicada: null,
+        mensaje: "Los hallazgos registrados están considerados dentro de los valores esperados",
+      };
+    }
+
+    return {
+      estado: "VALOR_NO_PERMITIDO",
+      referenciaAplicada: null,
+      mensaje: fueraReferencia.length
+        ? `Hallazgos fuera del valor esperado: ${fueraReferencia.join(", ")}`
+        : `Se registraron hallazgos. Valor esperado: ${valorEsperado}`,
+    };
+  }
+
+  // ====== Alternativa cualitativa de un Item numérico ======
+  if (
+    snapshotItem?.tipoResultado === "NUMERICO" &&
+    esValorCualitativoNumerico(valor)
+  ) {
+    const valoresReferencia = Array.isArray(
+      snapshotItem.valoresCualitativosReferencia,
+    )
+      ? snapshotItem.valoresCualitativosReferencia
+      : [];
+
+    if (valoresReferencia.length === 0) {
+      return {
+        estado: "NO_APLICA",
+        referenciaAplicada: null,
+        mensaje: "No existe una referencia cualitativa configurada",
+      };
+    }
+
+    const coincide = Boolean(
+      obtenerOpcionCanonicaResultado(valor.valor, valoresReferencia),
+    );
+
+    return {
+      estado: coincide ? "VALOR_PERMITIDO" : "VALOR_NO_PERMITIDO",
+      referenciaAplicada: null,
+      mensaje: coincide
+        ? "Resultado cualitativo dentro de la referencia clínica"
+        : "Resultado cualitativo fuera de la referencia clínica",
+    };
+  }
+
   const referencias = obtenerReferenciasDemograficas({
     solicitud,
     snapshotItem,
@@ -1273,6 +1940,15 @@ const cumpleCondicionAlerta = ({ valor, tipoResultado, regla }) => {
     throw new Error("Existe una regla de alerta sin condición configurada");
   }
 
+  // ====== Un valor cualitativo alternativo no se evalúa con reglas numéricas ======
+  if (tipoResultado === "NUMERICO" && esValorCualitativoNumerico(valor)) {
+    return false;
+  }
+
+  if (tipoResultado === "ESTRUCTURADO") {
+    return false;
+  }
+
   const condicionesNumericas = [
     "MENOR_QUE",
     "MENOR_IGUAL_QUE",
@@ -1290,9 +1966,9 @@ const cumpleCondicionAlerta = ({ valor, tipoResultado, regla }) => {
       );
     }
 
-    const valorNumerico = Number(valor);
+    const intervalo = obtenerIntervaloResultadoNumerico(valor);
 
-    if (!Number.isFinite(valorNumerico)) {
+    if (!intervalo) {
       throw new Error(
         "No se puede evaluar una alerta numérica con un resultado no numérico",
       );
@@ -1307,19 +1983,19 @@ const cumpleCondicionAlerta = ({ valor, tipoResultado, regla }) => {
     }
 
     if (condicion === "MENOR_QUE") {
-      return valorNumerico < valor1;
+      return intervalo.minimo < valor1;
     }
 
     if (condicion === "MENOR_IGUAL_QUE") {
-      return valorNumerico <= valor1;
+      return intervalo.minimo <= valor1;
     }
 
     if (condicion === "MAYOR_QUE") {
-      return valorNumerico > valor1;
+      return intervalo.maximo > valor1;
     }
 
     if (condicion === "MAYOR_IGUAL_QUE") {
-      return valorNumerico >= valor1;
+      return intervalo.maximo >= valor1;
     }
 
     // ====== Fuera de rango ======
@@ -1338,7 +2014,7 @@ const cumpleCondicionAlerta = ({ valor, tipoResultado, regla }) => {
       );
     }
 
-    return valorNumerico < valor1 || valorNumerico > valor2;
+    return intervalo.minimo < valor1 || intervalo.maximo > valor2;
   }
 
   // ====== Igual o distinto ======
@@ -1347,16 +2023,16 @@ const cumpleCondicionAlerta = ({ valor, tipoResultado, regla }) => {
     let sonIguales;
 
     if (tipoResultado === "NUMERICO") {
-      const valorNumerico = Number(valor);
+      const intervalo = obtenerIntervaloResultadoNumerico(valor);
       const valorRegla = Number(regla.valor1);
 
-      if (!Number.isFinite(valorNumerico) || !Number.isFinite(valorRegla)) {
+      if (!intervalo || !Number.isFinite(valorRegla)) {
         throw new Error(
           `La regla de alerta ${regla.descripcion || condicion} no posee un valor numérico válido`,
         );
       }
 
-      sonIguales = valorNumerico === valorRegla;
+      sonIguales = intervaloContieneValor(intervalo, valorRegla);
     } else {
       sonIguales =
         normalizarTextoComparacion(valor) ===
@@ -1534,67 +2210,67 @@ const registrarEditarResultadoItem = async (req, res = response) => {
       );
     }
 
-    // ====== Normalizar valor ======
-
-    const valorNormalizado = normalizarValorResultado({
-      valor,
-      tipoResultado: resultadoItem.tipoResultado,
-      snapshotItem,
-    });
-
     const ahora = new Date();
     const estadoAnteriorResultado = resultadoLaboratorio.estadoResultado;
     const valorAnterior = resultadoItem.valor;
+    const esLimpieza = esValorResultadoVacio(valor);
+    const primeraCaptura =
+      !resultadoItem.fechaRegistroResultado && !esLimpieza;
 
-    const primeraCaptura = !resultadoItem.fechaRegistroResultado;
+    // ====== Registrar o limpiar valor ======
 
-    // ====== Registrar valor ======
+    if (esLimpieza) {
+      resultadoItem.valor = null;
+      resultadoItem.estado = "PENDIENTE";
+      resultadoItem.evaluacionReferencia = {
+        estado: "PENDIENTE",
+        referenciaAplicada: null,
+        mensaje: "",
+      };
+      resultadoItem.alertasDetectadas = [];
+    } else {
+      const valorNormalizado = normalizarValorResultado({
+        valor,
+        tipoResultado: resultadoItem.tipoResultado,
+        snapshotItem,
+      });
 
-    resultadoItem.valor = valorNormalizado;
+      resultadoItem.valor = valorNormalizado;
+      resultadoItem.estado = "REGISTRADO";
+
+      resultadoItem.evaluacionReferencia = evaluarReferenciaResultado({
+        solicitud,
+        snapshotItem,
+        valor: valorNormalizado,
+      });
+
+      resultadoItem.alertasDetectadas = detectarAlertasResultado({
+        solicitud,
+        snapshotItem,
+        valor: valorNormalizado,
+        fechaDeteccion: ahora,
+      });
+    }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "observacion")) {
       resultadoItem.observacion =
         typeof observacion === "string" ? observacion.trim() : "";
     }
 
-    resultadoItem.estado = "REGISTRADO";
-
-    // ====== Trazabilidad primera captura ======
+    // ====== Trazabilidad ======
 
     if (primeraCaptura) {
       resultadoItem.registradoPor = uid;
-
       resultadoItem.usuarioRegistroResultado = nombreUsuario ?? null;
-
       resultadoItem.fechaRegistroResultado = ahora;
-    } else {
-      // ====== Trazabilidad edición ======
-
+    } else if (
+      resultadoItem.fechaRegistroResultado ||
+      !esValorResultadoVacio(valorAnterior)
+    ) {
       resultadoItem.actualizadoPor = uid;
-
       resultadoItem.usuarioActualizacionResultado = nombreUsuario ?? null;
-
       resultadoItem.fechaActualizacionResultado = ahora;
     }
-
-    // ====== Evaluar referencia clínica ======
-
-    const evaluacionReferencia = evaluarReferenciaResultado({
-      solicitud,
-      snapshotItem,
-      valor: valorNormalizado,
-    });
-
-    resultadoItem.evaluacionReferencia = evaluacionReferencia;
-
-    // ====== Detectar alertas ======
-
-    resultadoItem.alertasDetectadas = detectarAlertasResultado({
-      solicitud,
-      snapshotItem,
-      valor: valorNormalizado,
-      fechaDeteccion: ahora,
-    });
 
     // ====== Recalcular estado general ======
 
@@ -1849,62 +2525,65 @@ const registrarResultadosMasivos = async (req, res = response) => {
         );
       }
 
-      // ====== Normalizar valor ======
-
-      const valorNormalizado = normalizarValorResultado({
-        valor,
-        tipoResultado: resultadoItem.tipoResultado,
-        snapshotItem,
-      });
-
-      const primeraCaptura = !resultadoItem.fechaRegistroResultado;
       const valorAnterior = resultadoItem.valor;
+      const esLimpieza = esValorResultadoVacio(valor);
+      const primeraCaptura =
+        !resultadoItem.fechaRegistroResultado && !esLimpieza;
 
-      // ====== Registrar valor ======
+      // ====== Registrar o limpiar valor ======
 
-      resultadoItem.valor = valorNormalizado;
+      if (esLimpieza) {
+        resultadoItem.valor = null;
+        resultadoItem.estado = "PENDIENTE";
+        resultadoItem.evaluacionReferencia = {
+          estado: "PENDIENTE",
+          referenciaAplicada: null,
+          mensaje: "",
+        };
+        resultadoItem.alertasDetectadas = [];
+      } else {
+        const valorNormalizado = normalizarValorResultado({
+          valor,
+          tipoResultado: resultadoItem.tipoResultado,
+          snapshotItem,
+        });
+
+        resultadoItem.valor = valorNormalizado;
+        resultadoItem.estado = "REGISTRADO";
+
+        resultadoItem.evaluacionReferencia = evaluarReferenciaResultado({
+          solicitud,
+          snapshotItem,
+          valor: valorNormalizado,
+        });
+
+        resultadoItem.alertasDetectadas = detectarAlertasResultado({
+          solicitud,
+          snapshotItem,
+          valor: valorNormalizado,
+          fechaDeteccion: ahora,
+        });
+      }
 
       if (Object.prototype.hasOwnProperty.call(itemRecibido, "observacion")) {
         resultadoItem.observacion =
           typeof observacion === "string" ? observacion.trim() : "";
       }
 
-      resultadoItem.estado = "REGISTRADO";
-
       // ====== Trazabilidad ======
 
       if (primeraCaptura) {
         resultadoItem.registradoPor = uid;
-
         resultadoItem.usuarioRegistroResultado = nombreUsuario ?? null;
-
         resultadoItem.fechaRegistroResultado = ahora;
-      } else {
+      } else if (
+        resultadoItem.fechaRegistroResultado ||
+        !esValorResultadoVacio(valorAnterior)
+      ) {
         resultadoItem.actualizadoPor = uid;
-
         resultadoItem.usuarioActualizacionResultado = nombreUsuario ?? null;
-
         resultadoItem.fechaActualizacionResultado = ahora;
       }
-
-      // ====== Evaluar referencia clínica ======
-
-      const evaluacionReferencia = evaluarReferenciaResultado({
-        solicitud,
-        snapshotItem,
-        valor: valorNormalizado,
-      });
-
-      resultadoItem.evaluacionReferencia = evaluacionReferencia;
-
-      // ====== Detectar alertas ======
-
-      resultadoItem.alertasDetectadas = detectarAlertasResultado({
-        solicitud,
-        snapshotItem,
-        valor: valorNormalizado,
-        fechaDeteccion: ahora,
-      });
 
       itemsActualizados.push(resultadoItem);
       trazabilidadItems.push({
@@ -2098,9 +2777,12 @@ const revisarResultadoAntesValidacion = async (req, res = response) => {
         throw new Error(`El Item ${itemResultadoId} no existe`);
       }
 
-      if (resultadoItem.estado !== "REGISTRADO") {
+      if (
+        resultadoItem.estado !== "REGISTRADO" &&
+        !(resultadoItem.esOpcional === true && resultadoItem.estado === "PENDIENTE")
+      ) {
         throw new Error(
-          `El Item ${resultadoItem.nombreInforme} no se encuentra REGISTRADO`,
+          `El Item ${resultadoItem.nombreInforme} no se encuentra disponible para revisión`,
         );
       }
 
@@ -2111,13 +2793,39 @@ const revisarResultadoAntesValidacion = async (req, res = response) => {
       });
 
       const valorAnterior = resultadoItem.valor;
-      const valorNormalizado = normalizarValorResultado({
-        valor: itemRecibido.valor,
-        tipoResultado: resultadoItem.tipoResultado,
-        snapshotItem,
-      });
+      const esLimpieza = esValorResultadoVacio(itemRecibido.valor);
 
-      resultadoItem.valor = valorNormalizado;
+      if (esLimpieza) {
+        resultadoItem.valor = null;
+        resultadoItem.estado = "PENDIENTE";
+        resultadoItem.evaluacionReferencia = {
+          estado: "PENDIENTE",
+          referenciaAplicada: null,
+          mensaje: "",
+        };
+        resultadoItem.alertasDetectadas = [];
+      } else {
+        const valorNormalizado = normalizarValorResultado({
+          valor: itemRecibido.valor,
+          tipoResultado: resultadoItem.tipoResultado,
+          snapshotItem,
+        });
+
+        resultadoItem.valor = valorNormalizado;
+        resultadoItem.estado = "REGISTRADO";
+        resultadoItem.evaluacionReferencia = evaluarReferenciaResultado({
+          solicitud,
+          snapshotItem,
+          valor: valorNormalizado,
+        });
+        resultadoItem.alertasDetectadas = detectarAlertasResultado({
+          solicitud,
+          snapshotItem,
+          valor: valorNormalizado,
+          fechaDeteccion: ahora,
+        });
+      }
+
       if (Object.prototype.hasOwnProperty.call(itemRecibido, "observacion")) {
         resultadoItem.observacion =
           typeof itemRecibido.observacion === "string"
@@ -2128,17 +2836,6 @@ const revisarResultadoAntesValidacion = async (req, res = response) => {
       resultadoItem.actualizadoPor = uid;
       resultadoItem.usuarioActualizacionResultado = nombreUsuario ?? null;
       resultadoItem.fechaActualizacionResultado = ahora;
-      resultadoItem.evaluacionReferencia = evaluarReferenciaResultado({
-        solicitud,
-        snapshotItem,
-        valor: valorNormalizado,
-      });
-      resultadoItem.alertasDetectadas = detectarAlertasResultado({
-        solicitud,
-        snapshotItem,
-        valor: valorNormalizado,
-        fechaDeteccion: ahora,
-      });
 
       trazabilidadItems.push({
         itemResultadoId: resultadoItem._id,
@@ -2150,6 +2847,9 @@ const revisarResultadoAntesValidacion = async (req, res = response) => {
       itemsActualizados.push(resultadoItem);
     }
 
+    resultadoLaboratorio.estadoResultado =
+      recalcularEstadoResultado(resultadoLaboratorio);
+
     resultadoLaboratorio.updatedBy = uid;
     resultadoLaboratorio.usuarioActualizacion = nombreUsuario ?? null;
     resultadoLaboratorio.fechaActualizacion = ahora;
@@ -2157,7 +2857,7 @@ const revisarResultadoAntesValidacion = async (req, res = response) => {
     registrarEventoHistorialResultado(resultadoLaboratorio, {
       tipoEvento: "REVISION_VALIDACION",
       estadoAnterior: "COMPLETO",
-      estadoNuevo: "COMPLETO",
+      estadoNuevo: resultadoLaboratorio.estadoResultado,
       uid,
       nombreUsuario,
       fecha: ahora,
@@ -2285,17 +2985,24 @@ const validarResultadosMasivamente = async (req, res = response) => {
         ? resultado.resultadosItems
         : [];
 
-      if (items.length === 0 || items.some((item) => item.estado !== "REGISTRADO")) {
+      if (
+        items.length === 0 ||
+        items.some(
+          (item) =>
+            item.esOpcional !== true && item.estado !== "REGISTRADO",
+        )
+      ) {
         throw new Error(
-          `${resultado.codPruebaLab} - ${resultado.nombrePruebaLab} posee Items pendientes de registro`,
+          `${resultado.codPruebaLab} - ${resultado.nombrePruebaLab} posee Items obligatorios pendientes de registro`,
         );
       }
 
       if (
         items.some(
           (item) =>
-            !item.evaluacionReferencia ||
-            item.evaluacionReferencia.estado === "PENDIENTE",
+            (item.esOpcional !== true || item.estado === "REGISTRADO") &&
+            (!item.evaluacionReferencia ||
+              item.evaluacionReferencia.estado === "PENDIENTE"),
         )
       ) {
         throw new Error(
@@ -2473,7 +3180,8 @@ const validarResultadoLaboratorio = async (req, res = response) => {
     // ====== Validar registro completo ======
 
     const itemsNoRegistrados = items.filter(
-      (item) => item.estado !== "REGISTRADO",
+      (item) =>
+        item.esOpcional !== true && item.estado !== "REGISTRADO",
     );
 
     if (itemsNoRegistrados.length > 0) {
@@ -2490,8 +3198,9 @@ const validarResultadoLaboratorio = async (req, res = response) => {
 
     const itemsEvaluacionPendiente = items.filter(
       (item) =>
-        !item.evaluacionReferencia ||
-        item.evaluacionReferencia.estado === "PENDIENTE",
+        (item.esOpcional !== true || item.estado === "REGISTRADO") &&
+        (!item.evaluacionReferencia ||
+          item.evaluacionReferencia.estado === "PENDIENTE"),
     );
 
     if (itemsEvaluacionPendiente.length > 0) {
@@ -2648,6 +3357,233 @@ const validarResultadoLaboratorio = async (req, res = response) => {
       ok: false,
 
       msg: error.message || "No se pudo validar el resultado de laboratorio",
+    });
+  } finally {
+    await session.endSession();
+  }
+};
+
+// ====== Liberar varios resultados validados ======
+
+const liberarResultadosMasivamente = async (req, res = response) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { uid, nombreUsuario } = req.user;
+    const { resultadoIds, confirmarAlertasCriticas } = req.body ?? {};
+
+    if (!Array.isArray(resultadoIds) || resultadoIds.length === 0) {
+      throw new Error("Debe indicar al menos un resultado para liberar");
+    }
+
+    const ids = [...new Set(resultadoIds.map((id) => String(id ?? "")))];
+
+    if (ids.length > 500) {
+      throw new Error(
+        "No se pueden liberar más de 500 resultados en una sola operación masiva",
+      );
+    }
+
+    if (ids.some((id) => !mongoose.Types.ObjectId.isValid(id))) {
+      throw new Error("Existe un id de resultado no válido");
+    }
+
+    const resultados = await ResultadoLaboratorio.find({
+      _id: { $in: ids },
+    }).session(session);
+
+    if (resultados.length !== ids.length) {
+      throw new Error("No se encontraron todos los resultados solicitados");
+    }
+
+    const solicitudIds = [
+      ...new Set(
+        resultados.map((resultado) => String(resultado.solicitudAtencionId)),
+      ),
+    ];
+
+    const solicitudes = await SolicitudAtencion.find({
+      _id: { $in: solicitudIds },
+    }).session(session);
+
+    if (solicitudes.length !== solicitudIds.length) {
+      throw new Error("No se encontraron todas las solicitudes asociadas");
+    }
+
+    const solicitudesPorId = new Map(
+      solicitudes.map((solicitud) => [String(solicitud._id), solicitud]),
+    );
+
+    for (const solicitud of solicitudes) {
+      if (solicitud.tipo !== "Laboratorio") {
+        throw new Error(
+          `La solicitud ${solicitud.codSolicitud} no corresponde a Laboratorio`,
+        );
+      }
+
+      if (solicitud.estado === "ANULADO") {
+        throw new Error(
+          `No se pueden liberar resultados de la solicitud anulada ${solicitud.codSolicitud}`,
+        );
+      }
+    }
+
+    const alertas = [];
+
+    for (const resultado of resultados) {
+      if (resultado.estadoResultado !== "VALIDADO") {
+        throw new Error(
+          `${resultado.codPruebaLab} - ${resultado.nombrePruebaLab} no se encuentra VALIDADO`,
+        );
+      }
+
+      const items = Array.isArray(resultado.resultadosItems)
+        ? resultado.resultadosItems
+        : [];
+
+      if (items.length === 0) {
+        throw new Error(
+          `${resultado.codPruebaLab} - ${resultado.nombrePruebaLab} no contiene Items para liberar`,
+        );
+      }
+
+      const itemsNoValidados = items.filter(
+        (item) => item.estado !== "VALIDADO",
+      );
+
+      if (itemsNoValidados.length > 0) {
+        throw new Error(
+          `${resultado.codPruebaLab} - ${resultado.nombrePruebaLab} posee Items que no se encuentran VALIDADOS`,
+        );
+      }
+
+      if (!resultado.validadoPor || !resultado.fechaValidacion) {
+        throw new Error(
+          `${resultado.codPruebaLab} - ${resultado.nombrePruebaLab} no posee trazabilidad de validación completa`,
+        );
+      }
+
+      if (!solicitudesPorId.has(String(resultado.solicitudAtencionId))) {
+        throw new Error("La solicitud asociada al resultado no existe");
+      }
+
+      for (const item of items) {
+        alertas.push(
+          ...(Array.isArray(item.alertasDetectadas)
+            ? item.alertasDetectadas
+            : []),
+        );
+      }
+    }
+
+    const resumenAlertas = {
+      total: alertas.length,
+      informativas: alertas.filter(
+        (alerta) => alerta.nivelAlerta === "INFORMATIVA",
+      ).length,
+      advertencias: alertas.filter(
+        (alerta) => alerta.nivelAlerta === "ADVERTENCIA",
+      ).length,
+      criticas: alertas.filter((alerta) => alerta.nivelAlerta === "CRITICA")
+        .length,
+    };
+
+    if (resumenAlertas.criticas > 0 && confirmarAlertasCriticas !== true) {
+      const error = new Error(
+        "Debe confirmar explícitamente la revisión de las alertas críticas antes de liberar los resultados",
+      );
+      error.statusCode = 409;
+      error.codigo = "CONFIRMACION_ALERTAS_CRITICAS_REQUERIDA";
+      throw error;
+    }
+
+    const ahora = new Date();
+
+    for (const resultado of resultados) {
+      const alertasResultado = (resultado.resultadosItems ?? []).flatMap(
+        (item) =>
+          Array.isArray(item.alertasDetectadas) ? item.alertasDetectadas : [],
+      );
+      const criticasResultado = alertasResultado.filter(
+        (alerta) => alerta.nivelAlerta === "CRITICA",
+      ).length;
+
+      resultado.estadoResultado = "LIBERADO";
+      resultado.liberadoPor = uid;
+      resultado.usuarioLiberacion = nombreUsuario ?? null;
+      resultado.fechaLiberacion = ahora;
+      resultado.confirmoAlertasCriticasLiberacion =
+        criticasResultado > 0 && confirmarAlertasCriticas === true;
+      resultado.updatedBy = uid;
+      resultado.usuarioActualizacion = nombreUsuario ?? null;
+      resultado.fechaActualizacion = ahora;
+
+      registrarEventoHistorialResultado(resultado, {
+        tipoEvento: "LIBERACION",
+        estadoAnterior: "VALIDADO",
+        estadoNuevo: "LIBERADO",
+        uid,
+        nombreUsuario,
+        fecha: ahora,
+        detalle: "Resultado liberado masivamente para visualización o entrega",
+        metadatos: {
+          liberacionMasiva: true,
+          confirmoAlertasCriticas:
+            resultado.confirmoAlertasCriticasLiberacion === true,
+        },
+      });
+
+      await resultado.save({ session });
+    }
+
+    const estadosSolicitudes = [];
+
+    for (const solicitud of solicitudes) {
+      const estadoOperativo = await sincronizarEstadosSolicitudLaboratorio({
+        solicitud,
+        uid,
+        nombreUsuario,
+        session,
+      });
+
+      estadosSolicitudes.push({
+        solicitudAtencionId: String(solicitud._id),
+        codSolicitud: solicitud.codSolicitud,
+        estadoSolicitud: solicitud.estado,
+        estadoOperativo,
+      });
+    }
+
+    await session.commitTransaction();
+
+    const resultadosOrdenados = ids.map((id) =>
+      resultados.find((resultado) => String(resultado._id) === id),
+    );
+
+    return res.status(200).json({
+      ok: true,
+      msg: `${resultados.length} resultado(s) liberado(s) correctamente`,
+      resumen: {
+        totalSolicitados: ids.length,
+        liberados: resultados.length,
+        solicitudesAfectadas: solicitudes.length,
+        alertas: resumenAlertas,
+      },
+      solicitudes: estadosSolicitudes,
+      resultados: resultadosOrdenados,
+    });
+  } catch (error) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    console.error("Error al liberar resultados masivamente:", error);
+
+    return res.status(error.statusCode ?? 400).json({
+      ok: false,
+      msg: error.message || "No se pudieron liberar los resultados",
+      ...(error.codigo ? { codigo: error.codigo } : {}),
     });
   } finally {
     await session.endSession();
@@ -3102,6 +4038,8 @@ const obtenerBandejaResultadosLaboratorio = async (req, res = response) => {
           "tipoEvaluacion",
           "tipoAtencion",
           "estadoProgramacion",
+          "codProtocolo",
+          "nombreProtocolo",
         ].join(" "),
       })
       .sort({
@@ -3349,6 +4287,14 @@ const obtenerBandejaResultadosLaboratorio = async (req, res = response) => {
                 codProgramacion:
                   programacion?.codProgramacion ??
                   solicitud.codProgramacion ??
+                  null,
+                codProtocolo:
+                  programacion?.codProtocolo ??
+                  solicitud.codProtocolo ??
+                  null,
+                nombreProtocolo:
+                  programacion?.nombreProtocolo ??
+                  solicitud.nombreProtocolo ??
                   null,
                 empresaId:
                   obtenerId(programacion?.empresaId) ??
@@ -4015,6 +4961,7 @@ module.exports = {
   revisarResultadoAntesValidacion,
   validarResultadosMasivamente,
   validarResultadoLaboratorio,
+  liberarResultadosMasivamente,
   liberarResultadoLaboratorio,
   anularResultadoLaboratorio,
   obtenerResultadosPorSolicitud,
