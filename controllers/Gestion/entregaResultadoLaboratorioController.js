@@ -139,18 +139,39 @@ const construirPaciente = (solicitud) => {
     typeof solicitud.programacionEmpresaId === "object"
     ? solicitud.programacionEmpresaId
     : solicitud;
-  const nombre = [
-    origen.nombreCliente || solicitud.nombreCliente,
-    origen.apePatCliente || solicitud.apePatCliente,
-    origen.apeMatCliente || solicitud.apeMatCliente,
-  ].filter(Boolean).join(" ");
+
+  const nombres = String(origen.nombreCliente || solicitud.nombreCliente || "").trim();
+  const apellidoPaterno = String(
+    origen.apePatCliente || solicitud.apePatCliente || "",
+  ).trim();
+  const apellidoMaterno = String(
+    origen.apeMatCliente || solicitud.apeMatCliente || "",
+  ).trim();
+
+  const nombreCompleto = [nombres, apellidoPaterno, apellidoMaterno]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+
+  const nombreInforme = [apellidoPaterno, apellidoMaterno, nombres]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
 
   return {
     pacienteId: String(origen.pacienteId || solicitud.clienteId || "") || null,
-    nombreCompleto: nombre.trim(),
+    nombres,
+    apellidoPaterno,
+    apellidoMaterno,
+    nombreCompleto,
+    nombreInforme,
     hc: origen.hc || solicitud.hc || "",
     documento: [origen.tipoDoc || solicitud.tipoDoc, origen.nroDoc || solicitud.nroDoc]
-      .filter(Boolean).join(" "),
+      .filter(Boolean)
+      .join(" "),
+    sexo: origen.sexoCliente || solicitud.sexoPaciente || null,
+    fechaNacimiento:
+      origen.fechaNacimiento || solicitud.fechaNacimientoPaciente || null,
   };
 };
 
@@ -184,6 +205,376 @@ const construirEmpresa = (solicitud) => {
   };
 };
 
+
+// ====== Interpretar tiempo de respuesta configurado ======
+const obtenerDiasRespuesta = (valor) => {
+  const texto = String(valor ?? "").trim().replace(",", ".");
+  const coincidencia = texto.match(/\d+(?:\.\d+)?/);
+
+  if (!coincidencia) {
+    return null;
+  }
+
+  const dias = Number(coincidencia[0]);
+  return Number.isFinite(dias) && dias >= 0 ? dias : null;
+};
+
+const sumarDias = (fecha, dias) => {
+  const base = fecha ? new Date(fecha) : null;
+
+  if (!base || !Number.isFinite(base.getTime()) || !Number.isFinite(dias)) {
+    return null;
+  }
+
+  return new Date(base.getTime() + dias * 24 * 60 * 60 * 1000);
+};
+
+// ====== Semáforo de plazo en hora Perú ======
+const obtenerClaveFechaPeru = (fecha) => {
+  const base = fecha instanceof Date ? fecha : new Date(fecha);
+
+  if (!Number.isFinite(base.getTime())) {
+    return null;
+  }
+
+  const partes = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Lima",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(base);
+
+  const valores = Object.fromEntries(
+    partes
+      .filter((parte) => ["year", "month", "day"].includes(parte.type))
+      .map((parte) => [parte.type, parte.value]),
+  );
+
+  if (!valores.year || !valores.month || !valores.day) {
+    return null;
+  }
+
+  return `${valores.year}-${valores.month}-${valores.day}`;
+};
+
+const construirSemaforoPlazo = (fechaEstimada, estadoResultado) => {
+  if (["LIBERADO", "ANULADO"].includes(estadoResultado)) {
+    return { estado: "FINALIZADO", etiqueta: "FINALIZADO" };
+  }
+
+  if (!fechaEstimada || !Number.isFinite(fechaEstimada.getTime())) {
+    return { estado: "SIN_FECHA", etiqueta: "SIN FECHA" };
+  }
+
+  const ahora = new Date();
+  const milisegundosRestantes = fechaEstimada.getTime() - ahora.getTime();
+
+  if (milisegundosRestantes < 0) {
+    return { estado: "VENCIDO", etiqueta: "VENCIDO" };
+  }
+
+  const hoyPeru = obtenerClaveFechaPeru(ahora);
+  const vencimientoPeru = obtenerClaveFechaPeru(fechaEstimada);
+
+  if (hoyPeru && vencimientoPeru && hoyPeru === vencimientoPeru) {
+    return { estado: "HOY", etiqueta: "VENCE HOY" };
+  }
+
+  if (milisegundosRestantes <= 24 * 60 * 60 * 1000) {
+    return { estado: "PROXIMO", etiqueta: "PRÓXIMO" };
+  }
+
+  return { estado: "EN_PLAZO", etiqueta: "EN PLAZO" };
+};
+
+// ====== Tomar el intento vigente por recipiente planificado ======
+const obtenerIntentosVigentes = (muestras = []) => {
+  const porPlan = new Map();
+
+  for (const muestra of Array.isArray(muestras) ? muestras : []) {
+    if (!muestra || muestra.estadoMuestra === "ANULADA") {
+      continue;
+    }
+
+    const clavePlan = String(
+      muestra.claveMuestraPlan ?? muestra.codMuestra ?? muestra._id ?? "",
+    );
+
+    const actual = porPlan.get(clavePlan);
+    const intento = Number(muestra.numeroIntento ?? 1);
+    const intentoActual = Number(actual?.numeroIntento ?? 0);
+
+    if (
+      !actual ||
+      intento > intentoActual ||
+      (intento === intentoActual &&
+        new Date(muestra.fechaRegistro ?? 0).getTime() >
+          new Date(actual.fechaRegistro ?? 0).getTime())
+    ) {
+      porPlan.set(clavePlan, muestra);
+    }
+  }
+
+  return [...porPlan.values()];
+};
+
+// ====== Estado de muestra por unidad clínica ======
+const construirEstadoMuestraUnidad = (unidad, muestrasSolicitud = []) => {
+  if (unidad?.snapshotClinico?.requiereMuestra === false) {
+    return {
+      estado: "NO_REQUIERE",
+      descripcion: "No requiere muestra",
+      pendiente: false,
+      fechaAceptacion: null,
+      motivo: null,
+    };
+  }
+
+  const relacionadas = (Array.isArray(muestrasSolicitud) ? muestrasSolicitud : [])
+    .filter((muestra) =>
+      (Array.isArray(muestra?.coberturas) ? muestra.coberturas : []).some(
+        (cobertura) =>
+          String(cobertura?.claveUnidad ?? "") === String(unidad?.claveUnidad ?? ""),
+      ),
+    );
+
+  const vigentes = obtenerIntentosVigentes(relacionadas);
+
+  if (!vigentes.length) {
+    return {
+      estado: "PENDIENTE",
+      descripcion: "Muestra pendiente de recolección",
+      pendiente: true,
+      fechaAceptacion: null,
+      motivo: null,
+    };
+  }
+
+  const rechazadas = vigentes.filter((muestra) => muestra.estadoMuestra === "RECHAZADA");
+  if (rechazadas.length) {
+    const rechazo = rechazadas
+      .slice()
+      .sort(
+        (a, b) =>
+          new Date(b.fechaRechazo ?? b.fechaRegistro ?? 0).getTime() -
+          new Date(a.fechaRechazo ?? a.fechaRegistro ?? 0).getTime(),
+      )[0];
+
+    return {
+      estado: "RECHAZADA",
+      descripcion: "Muestra rechazada; requiere nueva toma",
+      pendiente: true,
+      fechaAceptacion: null,
+      motivo: String(rechazo?.motivoRechazo ?? "").trim() || null,
+    };
+  }
+
+  if (vigentes.some((muestra) => muestra.estadoMuestra === "PENDIENTE")) {
+    return {
+      estado: "PENDIENTE",
+      descripcion: "Muestra pendiente de recolección",
+      pendiente: true,
+      fechaAceptacion: null,
+      motivo: null,
+    };
+  }
+
+  if (vigentes.some((muestra) => muestra.estadoMuestra === "RECOLECTADA")) {
+    return {
+      estado: "RECOLECTADA",
+      descripcion: "Muestra recolectada, pendiente de recepción",
+      pendiente: true,
+      fechaAceptacion: null,
+      motivo: null,
+    };
+  }
+
+  if (vigentes.some((muestra) => muestra.estadoMuestra === "RECEPCIONADA")) {
+    return {
+      estado: "RECEPCIONADA",
+      descripcion: "Muestra recepcionada, pendiente de aceptación",
+      pendiente: true,
+      fechaAceptacion: null,
+      motivo: null,
+    };
+  }
+
+  const aceptadas = vigentes.filter((muestra) => muestra.estadoMuestra === "ACEPTADA");
+  if (aceptadas.length === vigentes.length) {
+    const fechaAceptacion = aceptadas
+      .map((muestra) => muestra.fechaAceptacion)
+      .filter(Boolean)
+      .map((fecha) => new Date(fecha))
+      .filter((fecha) => Number.isFinite(fecha.getTime()))
+      .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+
+    return {
+      estado: "ACEPTADA",
+      descripcion: "Muestra aceptada",
+      pendiente: false,
+      fechaAceptacion,
+      motivo: null,
+    };
+  }
+
+  return {
+    estado: "PENDIENTE",
+    descripcion: "Muestra pendiente",
+    pendiente: true,
+    fechaAceptacion: null,
+    motivo: null,
+  };
+};
+
+// ====== Seguimiento visible para Recepción / Informes ======
+const construirPruebasSeguimiento = (solicitud, resultados = [], muestras = []) => {
+  const porUnidad = new Map(
+    (Array.isArray(resultados) ? resultados : []).map((resultado) => [
+      String(resultado?.claveUnidad ?? ""),
+      resultado,
+    ]),
+  );
+
+  return (Array.isArray(solicitud?.unidadesLaboratorio)
+    ? solicitud.unidadesLaboratorio
+    : [])
+    .filter((unidad) => unidad?.estado !== "ANULADO")
+    .map((unidad) => {
+      const resultado = porUnidad.get(String(unidad?.claveUnidad ?? "")) ?? null;
+      const estadoResultado = resultado?.estadoResultado ?? "PENDIENTE";
+      const muestra = construirEstadoMuestraUnidad(unidad, muestras);
+      const tiempoRespuesta = String(
+        unidad?.snapshotClinico?.tiempoRespuesta ?? "",
+      ).trim();
+      const diasRespuesta = obtenerDiasRespuesta(tiempoRespuesta);
+
+      const fechaBasePlazo =
+        muestra.estado === "ACEPTADA"
+          ? muestra.fechaAceptacion
+          : unidad?.snapshotClinico?.requiereMuestra === false
+            ? solicitud?.fechaAtencionArea ?? solicitud?.fechaEmision ?? null
+            : null;
+
+      const fechaEstimada =
+        diasRespuesta !== null && fechaBasePlazo
+          ? sumarDias(fechaBasePlazo, diasRespuesta)
+          : null;
+
+      const semaforoPlazo = construirSemaforoPlazo(
+        fechaEstimada,
+        estadoResultado,
+      );
+      const fueraPlazo = semaforoPlazo.estado === "VENCIDO";
+
+      let situacion = "";
+
+      if (muestra.pendiente) {
+        situacion = muestra.descripcion;
+      } else {
+        switch (estadoResultado) {
+          case "EN PROCESO":
+            situacion = "Resultado en procesamiento";
+            break;
+          case "COMPLETO":
+            situacion = "Resultado registrado, pendiente de validación";
+            break;
+          case "VALIDADO":
+            situacion = "Resultado validado, pendiente de liberación";
+            break;
+          case "LIBERADO":
+            situacion = "Resultado liberado";
+            break;
+          case "ANULADO":
+            situacion = "Resultado anulado";
+            break;
+          default:
+            situacion = "Pendiente de registro de resultados";
+            break;
+        }
+      }
+
+      if (fueraPlazo) {
+        situacion = `${situacion}. Plazo configurado vencido`;
+      }
+
+      return {
+        claveUnidad: unidad?.claveUnidad ?? "",
+        codPruebaLab:
+          resultado?.codPruebaLab ??
+          unidad?.snapshotClinico?.codPruebaLab ??
+          unidad?.codExamen ??
+          "",
+        nombrePruebaLab:
+          resultado?.nombrePruebaLab ??
+          unidad?.snapshotClinico?.nombrePruebaLab ??
+          unidad?.nombreExamen ??
+          "",
+        numeroInstancia:
+          resultado?.numeroInstancia ?? unidad?.numeroInstancia ?? 1,
+        etiquetaInstancia:
+          resultado?.etiquetaInstancia ?? unidad?.etiquetaInstancia ?? null,
+        estadoResultado,
+        fechaValidacion: resultado?.fechaValidacion ?? null,
+        fechaLiberacion: resultado?.fechaLiberacion ?? null,
+        tiempoRespuesta: tiempoRespuesta || null,
+        diasRespuesta,
+        fechaEstimada,
+        estadoPlazo: semaforoPlazo.estado,
+        etiquetaPlazo: semaforoPlazo.etiqueta,
+        fueraPlazo,
+        situacion,
+        muestra,
+      };
+    });
+};
+
+const construirResumenSeguimiento = (solicitud, resultados, pruebas) => {
+  const base = calcularResumen(solicitud, resultados);
+  const activas = Array.isArray(pruebas) ? pruebas : [];
+  const pendientesLiberacion = activas.filter(
+    (prueba) => !["LIBERADO", "ANULADO"].includes(prueba.estadoResultado),
+  );
+
+  const enPlazo = pendientesLiberacion.filter(
+    (prueba) => prueba.estadoPlazo === "EN_PLAZO",
+  ).length;
+  const proximosVencer = pendientesLiberacion.filter(
+    (prueba) => prueba.estadoPlazo === "PROXIMO",
+  ).length;
+  const vencenHoy = pendientesLiberacion.filter(
+    (prueba) => prueba.estadoPlazo === "HOY",
+  ).length;
+  const vencidos = pendientesLiberacion.filter(
+    (prueba) => prueba.estadoPlazo === "VENCIDO",
+  ).length;
+
+  const semaforoPlazo = vencidos > 0
+    ? "VENCIDO"
+    : vencenHoy > 0
+      ? "HOY"
+      : proximosVencer > 0
+        ? "PROXIMO"
+        : enPlazo > 0
+          ? "EN_PLAZO"
+          : pendientesLiberacion.length > 0
+            ? "SIN_FECHA"
+            : "FINALIZADO";
+
+  return {
+    ...base,
+    pendientesMuestra: activas.filter((prueba) => prueba?.muestra?.pendiente).length,
+    enProceso: activas.filter((prueba) => prueba.estadoResultado === "EN PROCESO").length,
+    completos: activas.filter((prueba) => prueba.estadoResultado === "COMPLETO").length,
+    validados: activas.filter((prueba) => prueba.estadoResultado === "VALIDADO").length,
+    enPlazo,
+    proximosVencer,
+    vencenHoy,
+    vencidos,
+    fueraPlazo: vencidos,
+    semaforoPlazo,
+  };
+};
+
 // ====== Calcular disponibilidad, sin confundirla con entrega ======
 const calcularResumen = (solicitud, resultados) => {
   const activos = resultados.filter((r) => r.estadoResultado !== "ANULADO");
@@ -214,9 +605,11 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
     const desde = construirLimiteFechaOperativa(fechaInicio, false);
     const hasta = construirLimiteFechaOperativa(fechaFin, true);
 
-    if (!desde || !hasta ||
-        desde > hasta || (hasta - desde) > 1000 * 60 * 60 * 24 * 93) {
-      return res.status(400).json({ ok: false, msg: "Rango de fechas inválido (máximo 93 días)" });
+    if (!desde || !hasta || desde > hasta) {
+      return res.status(400).json({
+        ok: false,
+        msg: "Rango de fechas inválido",
+      });
     }
 
     const empresaFiltro = String(empresaId ?? "").trim();
@@ -244,6 +637,7 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
         "origenAtencion",
         "estado",
         "fechaEmision",
+        "fechaAtencionArea",
         "unidadesLaboratorio",
         "hc",
         "clienteId",
@@ -252,6 +646,8 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
         "nombreCliente",
         "apePatCliente",
         "apeMatCliente",
+        "sexoPaciente",
+        "fechaNacimientoPaciente",
         "programacionEmpresaId",
         "codProgramacion",
         "empresaId",
@@ -262,10 +658,9 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
       ].join(" "))
       .populate(
         "programacionEmpresaId",
-        "_id codProgramacion empresaId rucEmpresa razonSocialEmpresa hc pacienteId tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sede prioridad",
+        "_id codProgramacion empresaId rucEmpresa razonSocialEmpresa hc pacienteId tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sexoCliente fechaNacimiento sede prioridad",
       )
       .sort({ fechaEmision: -1 })
-      .limit(500)
       .lean();
 
     if (!solicitudes.length) {
@@ -273,14 +668,24 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
     }
 
     const idsSolicitudes = solicitudes.map((s) => s._id);
-    const [entregasPrevias, resultados] = await Promise.all([
+    const [entregasPrevias, resultados, muestras] = await Promise.all([
       EntregaResultado.distinct("solicitudAtencionId", {
         solicitudAtencionId: { $in: idsSolicitudes },
       }),
       ResultadoLaboratorio.find({
         solicitudAtencionId: { $in: idsSolicitudes },
       })
-        .select("solicitudAtencionId estadoResultado")
+        .select(
+          "solicitudAtencionId claveUnidad codPruebaLab nombrePruebaLab numeroInstancia etiquetaInstancia estadoResultado fechaValidacion fechaLiberacion",
+        )
+        .lean(),
+      MuestraLaboratorio.find({
+        solicitudAtencionId: { $in: idsSolicitudes },
+        estadoMuestra: { $ne: "ANULADA" },
+      })
+        .select(
+          "solicitudAtencionId claveMuestraPlan codMuestra numeroIntento estadoMuestra coberturas.claveUnidad fechaRegistro fechaRecoleccion fechaRecepcion fechaAceptacion fechaRechazo motivoRechazo",
+        )
         .lean(),
     ]);
     const conEntregasPrevias = new Set(entregasPrevias.map(String));
@@ -294,18 +699,37 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
       porSolicitud.get(clave).push(resultado);
     }
 
+    const muestrasPorSolicitud = new Map();
+    for (const muestra of muestras) {
+      const clave = String(muestra.solicitudAtencionId);
+      if (!muestrasPorSolicitud.has(clave)) muestrasPorSolicitud.set(clave, []);
+      muestrasPorSolicitud.get(clave).push(muestra);
+    }
+
     const filtro = String(terminoBusqueda).trim().toLocaleLowerCase("es");
     const bandeja = solicitudes.flatMap((solicitud) => {
-      const resumen = calcularResumen(
+      const claveSolicitud = String(solicitud._id);
+      const resultadosSolicitud = porSolicitud.get(claveSolicitud) || [];
+      const pruebas = construirPruebasSeguimiento(
         solicitud,
-        porSolicitud.get(String(solicitud._id)) || [],
+        resultadosSolicitud,
+        muestrasPorSolicitud.get(claveSolicitud) || [],
       );
-      const tieneHistorial = conEntregasPrevias.has(String(solicitud._id));
-      if (!resumen.liberados && !tieneHistorial) return [];
+      const resumen = construirResumenSeguimiento(
+        solicitud,
+        resultadosSolicitud,
+        pruebas,
+      );
+      const tieneHistorial = conEntregasPrevias.has(claveSolicitud);
+
+      if (!resumen.totalPruebas && !tieneHistorial) {
+        return [];
+      }
+
       const paciente = construirPaciente(solicitud);
       const empresa = construirEmpresa(solicitud);
       const fila = {
-        solicitudAtencionId: String(solicitud._id),
+        solicitudAtencionId: claveSolicitud,
         codSolicitud: solicitud.codSolicitud,
         codigoLaboratorio: solicitud.codigoLaboratorio || "",
         fechaEmision: solicitud.fechaEmision,
@@ -313,6 +737,7 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
         paciente,
         empresa,
         resumen,
+        pruebas,
         tieneHistorial,
       };
       if (filtro && ![
@@ -353,6 +778,7 @@ const obtenerInformeEntregable = async (req, res = response) => {
         "codigoLaboratorio",
         "origenAtencion",
         "fechaEmision",
+        "fechaAtencionArea",
         "unidadesLaboratorio",
         "hc",
         "clienteId",
@@ -361,6 +787,8 @@ const obtenerInformeEntregable = async (req, res = response) => {
         "nombreCliente",
         "apePatCliente",
         "apeMatCliente",
+        "sexoPaciente",
+        "fechaNacimientoPaciente",
         "programacionEmpresaId",
         "codProgramacion",
         "empresaId",
@@ -372,7 +800,7 @@ const obtenerInformeEntregable = async (req, res = response) => {
       ].join(" "))
       .populate(
         "programacionEmpresaId",
-        "_id codProgramacion empresaId rucEmpresa razonSocialEmpresa hc pacienteId tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sede prioridad",
+        "_id codProgramacion empresaId rucEmpresa razonSocialEmpresa hc pacienteId tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sexoCliente fechaNacimiento sede prioridad",
       )
       .lean();
     if (!solicitud || solicitud.tipo !== "Laboratorio") {
