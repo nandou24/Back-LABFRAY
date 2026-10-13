@@ -204,6 +204,12 @@ const PruebaLabSchema = Schema(
     condPreAnalitPaciente: { type: String, required: true },
     condPreAnalitRefer: { type: String, required: true },
     tiempoRespuesta: { type: String, required: true },
+    tipoDiasRespuesta: {
+      type: String,
+      enum: ["HABILES", "CALENDARIO"],
+      default: "HABILES",
+      required: true,
+    },
     observPruebas: { type: String },
     estadoPrueba: {
       type: String,

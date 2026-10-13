@@ -1,6 +1,7 @@
 const { response } = require("express");
 const mongoose = require("mongoose");
 const ProgramacionPacienteEmpresa = require("../../models/Gestion/programacionPacienteEmpresa");
+const Empresa = require("../../models/Mantenimiento/Empresa");
 const Paciente = require("../../models/Mantenimiento/Paciente");
 const { crearSolicitudesAtencion } = require("./solicitudAtencionController");
 
@@ -31,6 +32,82 @@ const generarCodigoProgramacion = async () => {
   return `PPE-${anioActual}-${String(ultimoNumero + 1).padStart(4, "0")}`;
 };
 
+// ====== Normalizar plazo del protocolo ======
+
+const normalizarPlazoResultados = (plazo) => {
+  const cantidadDias = Number(plazo?.cantidadDias);
+  const tipoDias = String(plazo?.tipoDias ?? "").trim().toUpperCase();
+
+  if (!Number.isInteger(cantidadDias) || cantidadDias < 1) {
+    throw new Error(
+      "El protocolo seleccionado no tiene un plazo de resultados válido",
+    );
+  }
+
+  if (!["HABILES", "CALENDARIO"].includes(tipoDias)) {
+    throw new Error(
+      "El protocolo seleccionado no tiene definido el tipo de días del plazo",
+    );
+  }
+
+  return { cantidadDias, tipoDias };
+};
+
+// ====== Resolver snapshot contractual del protocolo ======
+
+const resolverSnapshotProtocolo = async ({ empresaId, protocoloId }) => {
+  if (!mongoose.Types.ObjectId.isValid(empresaId)) {
+    throw new Error("La empresa seleccionada no es válida");
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(protocoloId)) {
+    throw new Error("El protocolo seleccionado no es válido");
+  }
+
+  const empresa = await Empresa.findById(empresaId).lean();
+
+  if (!empresa || empresa.estado === false) {
+    throw new Error("La empresa seleccionada no existe o se encuentra inactiva");
+  }
+
+  const protocolo = (empresa.protocolos ?? []).find(
+    (item) => item?._id?.toString() === protocoloId.toString(),
+  );
+
+  if (!protocolo) {
+    throw new Error("El protocolo seleccionado no pertenece a la empresa");
+  }
+
+  if (protocolo.estado === false) {
+    throw new Error("El protocolo seleccionado se encuentra inactivo");
+  }
+
+  const serviciosProgramados = Array.isArray(protocolo.servicios)
+    ? protocolo.servicios.map((servicio) => ({
+        servicioId: servicio.servicioId,
+        codServicio: servicio.codServicio,
+        nombreServicio: servicio.nombreServicio,
+        tipoServicio: servicio.tipoServicio,
+      }))
+    : [];
+
+  if (serviciosProgramados.length === 0) {
+    throw new Error("El protocolo seleccionado no tiene servicios configurados");
+  }
+
+  return {
+    empresaId: empresa._id,
+    rucEmpresa: empresa.ruc,
+    razonSocialEmpresa: empresa.razonSocial,
+    nombreComercialEmpresa: empresa.nombreComercial ?? "",
+    protocoloId: protocolo._id,
+    codProtocolo: protocolo.codigoProtocolo,
+    nombreProtocolo: protocolo.nombreProtocolo,
+    serviciosProgramados,
+    plazoResultados: normalizarPlazoResultados(protocolo.plazoResultados),
+  };
+};
+
 const crearProgramacion = async (req, res = response) => {
   try {
     const {
@@ -41,6 +118,13 @@ const crearProgramacion = async (req, res = response) => {
       tipoDoc,
       nroDoc,
     } = req.body;
+
+    // ====== Congelar protocolo vigente ======
+
+    const snapshotProtocolo = await resolverSnapshotProtocolo({
+      empresaId,
+      protocoloId,
+    });
 
     const { inicioDia, finDia } = construirRangoDia(fechaProgramada);
 
@@ -72,6 +156,7 @@ const crearProgramacion = async (req, res = response) => {
     const codProgramacion = await generarCodigoProgramacion();
     const programacion = new ProgramacionPacienteEmpresa({
       ...req.body,
+      ...snapshotProtocolo,
       codProgramacion,
       estadoProgramacion: "PROGRAMADO",
       createdBy: req.user.uid,
@@ -87,9 +172,9 @@ const crearProgramacion = async (req, res = response) => {
     });
   } catch (error) {
     console.error("Error al registrar programación empresarial:", error);
-    return res.status(500).json({
+    return res.status(400).json({
       ok: false,
-      msg: "Error al registrar la programación",
+      msg: error.message || "Error al registrar la programación",
     });
   }
 };
@@ -150,11 +235,52 @@ const obtenerProgramacion = async (req, res = response) => {
 
 const actualizarProgramacion = async (req, res = response) => {
   try {
+    const programacionActual = await ProgramacionPacienteEmpresa.findById(
+      req.params.id,
+    );
+
+    if (!programacionActual) {
+      return res
+        .status(404)
+        .json({ ok: false, msg: "Programación no encontrada" });
+    }
+
     const datosActualizables = { ...req.body };
+
     delete datosActualizables.codProgramacion;
     delete datosActualizables.estadoProgramacion;
     delete datosActualizables.createdBy;
     delete datosActualizables.usuarioRegistro;
+    delete datosActualizables.plazoResultados;
+    delete datosActualizables.serviciosProgramados;
+    delete datosActualizables.codProtocolo;
+    delete datosActualizables.nombreProtocolo;
+    delete datosActualizables.rucEmpresa;
+    delete datosActualizables.razonSocialEmpresa;
+    delete datosActualizables.nombreComercialEmpresa;
+
+    const empresaIdNuevo = String(
+      req.body.empresaId ?? programacionActual.empresaId ?? "",
+    );
+    const protocoloIdNuevo = String(
+      req.body.protocoloId ?? programacionActual.protocoloId ?? "",
+    );
+
+    const cambioContrato =
+      empresaIdNuevo !== String(programacionActual.empresaId ?? "") ||
+      protocoloIdNuevo !== String(programacionActual.protocoloId ?? "");
+
+    if (cambioContrato) {
+      const snapshotProtocolo = await resolverSnapshotProtocolo({
+        empresaId: empresaIdNuevo,
+        protocoloId: protocoloIdNuevo,
+      });
+
+      Object.assign(datosActualizables, snapshotProtocolo);
+    } else {
+      delete datosActualizables.empresaId;
+      delete datosActualizables.protocoloId;
+    }
 
     const programacion = await ProgramacionPacienteEmpresa.findByIdAndUpdate(
       req.params.id,
@@ -167,12 +293,6 @@ const actualizarProgramacion = async (req, res = response) => {
       { new: true, runValidators: true },
     );
 
-    if (!programacion) {
-      return res
-        .status(404)
-        .json({ ok: false, msg: "Programación no encontrada" });
-    }
-
     return res.json({
       ok: true,
       msg: "Programación actualizada correctamente",
@@ -180,9 +300,10 @@ const actualizarProgramacion = async (req, res = response) => {
     });
   } catch (error) {
     console.error("Error al actualizar programación empresarial:", error);
-    return res
-      .status(400)
-      .json({ ok: false, msg: "Datos de programación inválidos" });
+    return res.status(400).json({
+      ok: false,
+      msg: error.message || "Datos de programación inválidos",
+    });
   }
 };
 
@@ -627,6 +748,7 @@ const iniciarAtencionProgramacion = async (req, res = response) => {
         protocoloId: programacion.protocoloId,
         codProtocolo: programacion.codProtocolo,
         nombreProtocolo: programacion.nombreProtocolo,
+        plazoResultados: programacion.plazoResultados ?? null,
       },
 
       session,

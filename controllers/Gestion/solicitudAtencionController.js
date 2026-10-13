@@ -974,6 +974,12 @@ const construirSnapshotPruebaLab = (pruebaDocumento) => {
 
     tiempoRespuesta: prueba.tiempoRespuesta ?? "",
 
+    tipoDiasRespuesta: ["HABILES", "CALENDARIO"].includes(
+      String(prueba.tipoDiasRespuesta ?? "").trim().toUpperCase(),
+    )
+      ? String(prueba.tipoDiasRespuesta).trim().toUpperCase()
+      : "HABILES",
+
     observPruebas: prueba.observPruebas ?? null,
 
     estadoPrueba:
@@ -1375,6 +1381,23 @@ const crearSolicitudesAtencion = async ({
     }
   }
 
+  // ====== Validar plazo empresarial snapshot ======
+
+  if (origenAtencion === "EMPRESA" && datosOrigen?.plazoResultados) {
+    const cantidadDias = Number(datosOrigen.plazoResultados.cantidadDias);
+    const tipoDias = String(datosOrigen.plazoResultados.tipoDias ?? "")
+      .trim()
+      .toUpperCase();
+
+    if (!Number.isInteger(cantidadDias) || cantidadDias < 1) {
+      throw new Error("El plazo empresarial de resultados no es válido");
+    }
+
+    if (!["HABILES", "CALENDARIO"].includes(tipoDias)) {
+      throw new Error("El tipo de días del plazo empresarial no es válido");
+    }
+  }
+
   // ====== Expandir servicios ======
 
   const serviciosExpandidos = await expandirServiciosCotizacionParaAtencion(
@@ -1505,6 +1528,42 @@ const crearSolicitudesAtencion = async ({
       datosSolicitud.unidadesLaboratorio = unidadesLaboratorioClinicas.map(
         (unidad) => ({
           ...unidad,
+
+          plazoComprometido:
+            origenAtencion === "EMPRESA" &&
+            datosOrigen?.plazoResultados?.cantidadDias &&
+            datosOrigen?.plazoResultados?.tipoDias
+              ? {
+                  cantidadDias: Number(
+                    datosOrigen.plazoResultados.cantidadDias,
+                  ),
+                  tipoDias: String(
+                    datosOrigen.plazoResultados.tipoDias,
+                  ).toUpperCase(),
+                  origen: "PROTOCOLO",
+                  codProtocolo: datosOrigen.codProtocolo ?? null,
+                }
+              : origenAtencion === "PARTICULAR" &&
+                  Number(unidad?.snapshotClinico?.tiempoRespuesta) >= 1
+                ? {
+                    cantidadDias: Number(
+                      unidad.snapshotClinico.tiempoRespuesta,
+                    ),
+                    tipoDias: ["HABILES", "CALENDARIO"].includes(
+                      String(
+                        unidad?.snapshotClinico?.tipoDiasRespuesta ?? "",
+                      )
+                        .trim()
+                        .toUpperCase(),
+                    )
+                      ? String(
+                          unidad.snapshotClinico.tipoDiasRespuesta,
+                        ).toUpperCase()
+                      : "HABILES",
+                    origen: "MAESTRO_PRUEBA",
+                    codProtocolo: null,
+                  }
+                : null,
 
           estado: "PENDIENTE",
         }),

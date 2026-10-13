@@ -393,6 +393,76 @@ const normalizarVolumenRecoleccionMasiva = ({
   };
 };
 
+
+// ====== Normalizar fecha real de toma ======
+
+const obtenerClaveFechaPeru = (fecha = new Date()) => {
+  const base = fecha instanceof Date ? fecha : new Date(fecha);
+
+  if (!Number.isFinite(base.getTime())) {
+    return null;
+  }
+
+  const partes = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Lima",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(base);
+
+  const valores = Object.fromEntries(
+    partes
+      .filter((parte) => ["year", "month", "day"].includes(parte.type))
+      .map((parte) => [parte.type, parte.value]),
+  );
+
+  if (!valores.year || !valores.month || !valores.day) {
+    return null;
+  }
+
+  return `${valores.year}-${valores.month}-${valores.day}`;
+};
+
+const normalizarFechaRecoleccion = (valor, ahora = new Date()) => {
+  const hoyPeru = obtenerClaveFechaPeru(ahora);
+
+  if (!hoyPeru) {
+    throw new Error("No se pudo resolver la fecha actual");
+  }
+
+  const texto =
+    valor === undefined || valor === null || String(valor).trim() === ""
+      ? hoyPeru
+      : String(valor).trim();
+
+  const coincidencia = /^(\d{4})-(\d{2})-(\d{2})$/.exec(texto);
+
+  if (!coincidencia) {
+    throw new Error("La fecha de toma no es válida");
+  }
+
+  const anio = Number(coincidencia[1]);
+  const mes = Number(coincidencia[2]);
+  const dia = Number(coincidencia[3]);
+
+  const validacion = new Date(Date.UTC(anio, mes - 1, dia));
+
+  if (
+    validacion.getUTCFullYear() !== anio ||
+    validacion.getUTCMonth() !== mes - 1 ||
+    validacion.getUTCDate() !== dia
+  ) {
+    throw new Error("La fecha de toma no es válida");
+  }
+
+  if (texto > hoyPeru) {
+    throw new Error("La fecha de toma no puede ser futura");
+  }
+
+  // ====== Guardar al mediodía de Lima para evitar desplazamientos de fecha ======
+  return new Date(`${texto}T12:00:00-05:00`);
+};
+
 // ====== Obtener Items de unidad ======
 
 const obtenerItemsUnidad = (unidad) => {
@@ -1593,6 +1663,7 @@ const recolectarMuestra = async (req, res = response) => {
       volumenRecolectado,
       unidadVolumenRecolectado,
       observacionRecoleccion,
+      fechaRecoleccion,
     } = req.body;
 
     // ====== Validar id de muestra ======
@@ -1712,6 +1783,11 @@ const recolectarMuestra = async (req, res = response) => {
 
     const ahora = new Date();
 
+    const fechaToma = normalizarFechaRecoleccion(
+      fechaRecoleccion,
+      ahora,
+    );
+
     // ====== Registrar opción utilizada ======
 
     muestra.tipoMuestraId = opcionSeleccionada.tipoMuestraId;
@@ -1736,7 +1812,9 @@ const recolectarMuestra = async (req, res = response) => {
 
     muestra.usuarioRecoleccion = nombreUsuario ?? null;
 
-    muestra.fechaRecoleccion = ahora;
+    muestra.fechaRecoleccion = fechaToma;
+
+    muestra.fechaRegistroRecoleccion = ahora;
 
     muestra.observacionRecoleccion =
       typeof observacionRecoleccion === "string"
@@ -2138,7 +2216,11 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
   try {
     const { uid, nombreUsuario } = req.user;
 
-    const { muestras: itemsEntrada, observacionRecoleccion } = req.body;
+    const {
+      muestras: itemsEntrada,
+      observacionRecoleccion,
+      fechaRecoleccion,
+    } = req.body;
 
     // ====== Validar lista ======
 
@@ -2170,6 +2252,13 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
       typeof observacionRecoleccion === "string"
         ? observacionRecoleccion.trim()
         : "";
+
+    const ahoraRegistro = new Date();
+
+    const fechaToma = normalizarFechaRecoleccion(
+      fechaRecoleccion,
+      ahoraRegistro,
+    );
 
     // ====== Validar duplicados ======
 
@@ -2398,7 +2487,7 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
 
     // ====== Registrar recolección en bloque ======
 
-    const ahora = new Date();
+    const ahora = ahoraRegistro;
 
     if (candidatas.length > 0) {
       await MuestraLaboratorio.bulkWrite(
@@ -2425,7 +2514,8 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
                 estadoMuestra: "RECOLECTADA",
                 recolectadoPor: uid,
                 usuarioRecoleccion: nombreUsuario ?? null,
-                fechaRecoleccion: ahora,
+                fechaRecoleccion: fechaToma,
+                fechaRegistroRecoleccion: ahora,
                 observacionRecoleccion: observacionNormalizada,
                 updatedBy: uid,
                 usuarioActualizacion: nombreUsuario ?? null,
@@ -2454,7 +2544,7 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
             },
             estadoMuestra: "RECOLECTADA",
             recolectadoPor: uid,
-            fechaRecoleccion: ahora,
+            fechaRegistroRecoleccion: ahora,
           })
             .select(
               [
@@ -2470,6 +2560,7 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
                 "unidadVolumenRecolectado",
                 "usuarioRecoleccion",
                 "fechaRecoleccion",
+                "fechaRegistroRecoleccion",
               ].join(" "),
             )
             .lean()

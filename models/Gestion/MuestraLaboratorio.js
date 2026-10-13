@@ -615,6 +615,11 @@ const MuestraLaboratorioSchema = new Schema(
       default: null,
     },
 
+    fechaRegistroRecoleccion: {
+      type: Date,
+      default: null,
+    },
+
     observacionRecoleccion: {
       type: String,
       default: "",

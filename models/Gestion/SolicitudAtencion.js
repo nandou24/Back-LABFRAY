@@ -857,6 +857,12 @@ const SnapshotClinicoPruebaLabSchema = new Schema(
       default: "",
     },
 
+    tipoDiasRespuesta: {
+      type: String,
+      enum: ["HABILES", "CALENDARIO"],
+      default: "HABILES",
+    },
+
     observPruebas: {
       type: String,
       default: null,
@@ -891,6 +897,34 @@ const SnapshotClinicoPruebaLabSchema = new Schema(
   {
     _id: false,
   },
+);
+
+// ====== Plazo comprometido de unidad ======
+
+const PlazoComprometidoUnidadSchema = new Schema(
+  {
+    cantidadDias: {
+      type: Number,
+      min: 1,
+      required: true,
+    },
+    tipoDias: {
+      type: String,
+      enum: ["HABILES", "CALENDARIO"],
+      required: true,
+    },
+    origen: {
+      type: String,
+      enum: ["PROTOCOLO", "PARTICULAR", "MAESTRO_PRUEBA", "AJUSTE_MANUAL"],
+      required: true,
+    },
+    codProtocolo: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+  },
+  { _id: false },
 );
 
 // ====== Unidad clínica de laboratorio ======
@@ -1019,6 +1053,13 @@ const UnidadLaboratorioSchema = new Schema(
       type: SnapshotClinicoPruebaLabSchema,
 
       // Compatibilidad con solicitudes creadas antes de 7B.
+      default: null,
+    },
+
+    // ====== Compromiso de entrega ======
+
+    plazoComprometido: {
+      type: PlazoComprometidoUnidadSchema,
       default: null,
     },
 

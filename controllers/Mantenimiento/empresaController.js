@@ -189,6 +189,43 @@ const actualizarEmpresa = async (req, res = response) => {
       }
 
       const protocolosActualizados = protocolos.map((protocolo) => {
+        // ====== Validar plazo comprometido ======
+        let plazoResultados = null;
+        const plazoEntrada = protocolo.plazoResultados;
+
+        if (
+          plazoEntrada &&
+          plazoEntrada.cantidadDias !== undefined &&
+          plazoEntrada.cantidadDias !== null &&
+          plazoEntrada.cantidadDias !== ""
+        ) {
+          const cantidadDias = Number(plazoEntrada.cantidadDias);
+          const tipoDias = String(plazoEntrada.tipoDias ?? "")
+            .trim()
+            .toUpperCase();
+
+          if (!Number.isInteger(cantidadDias) || cantidadDias < 1) {
+            const error = new Error(
+              `El plazo de resultados del protocolo ${protocolo.codigoProtocolo || ""} debe ser un número entero mayor a cero`,
+            );
+            error.statusCode = 400;
+            throw error;
+          }
+
+          if (!["HABILES", "CALENDARIO"].includes(tipoDias)) {
+            const error = new Error(
+              `El tipo de días del protocolo ${protocolo.codigoProtocolo || ""} no es válido`,
+            );
+            error.statusCode = 400;
+            throw error;
+          }
+
+          plazoResultados = {
+            cantidadDias,
+            tipoDias,
+          };
+        }
+
         const protocoloBase = {
           codigoProtocolo: protocolo.codigoProtocolo,
           nombreProtocolo: protocolo.nombreProtocolo,
@@ -199,6 +236,7 @@ const actualizarEmpresa = async (req, res = response) => {
           observaciones: protocolo.observaciones,
           fechaInicioVigencia: protocolo.fechaInicioVigencia || null,
           fechaFinVigencia: protocolo.fechaFinVigencia || null,
+          plazoResultados,
           servicios: Array.isArray(protocolo.servicios)
             ? protocolo.servicios
             : [],
@@ -250,6 +288,13 @@ const actualizarEmpresa = async (req, res = response) => {
     });
   } catch (error) {
     console.error("Error al actualizar empresa:", error);
+
+    if (error.statusCode === 400) {
+      return res.status(400).json({
+        ok: false,
+        msg: error.message,
+      });
+    }
 
     if (error.name === "ValidationError") {
       const validationErrors = Object.values(error.errors).map(

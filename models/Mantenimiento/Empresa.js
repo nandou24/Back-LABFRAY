@@ -31,6 +31,25 @@ const ServiciosSchema = new mongoose.Schema({
   tipoServicio: { type: String },
 });
 
+// ====== Plazo de resultados del protocolo ======
+const plazoResultadosProtocoloSchema = new mongoose.Schema(
+  {
+    cantidadDias: {
+      type: Number,
+      min: 1,
+      default: null,
+    },
+    tipoDias: {
+      type: String,
+      enum: ["HABILES", "CALENDARIO"],
+      default: null,
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
 // Schema para protocolos empresariales
 const protocoloEmpresaSchema = new mongoose.Schema({
   codigoProtocolo: { type: String, required: true },
@@ -45,6 +64,10 @@ const protocoloEmpresaSchema = new mongoose.Schema({
   observaciones: { type: String },
   fechaInicioVigencia: { type: Date, default: null },
   fechaFinVigencia: { type: Date, default: null },
+  plazoResultados: {
+    type: plazoResultadosProtocoloSchema,
+    default: null,
+  },
   servicios: [ServiciosSchema],
 });
 

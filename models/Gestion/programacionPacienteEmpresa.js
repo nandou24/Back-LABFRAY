@@ -37,6 +37,24 @@ const PendienteProgramacionSchema = new Schema(
   { _id: false },
 );
 
+// ====== Snapshot de plazo comprometido ======
+
+const PlazoResultadosProgramacionSchema = new Schema(
+  {
+    cantidadDias: {
+      type: Number,
+      min: 1,
+      default: null,
+    },
+    tipoDias: {
+      type: String,
+      enum: ["HABILES", "CALENDARIO"],
+      default: null,
+    },
+  },
+  { _id: false },
+);
+
 const ProgramacionPacienteEmpresaSchema = new Schema(
   {
     codProgramacion: { type: String, required: true, unique: true, trim: true },
@@ -84,6 +102,10 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
     protocoloId: { type: Schema.Types.ObjectId, required: true },
     codProtocolo: { type: String, required: true, trim: true },
     nombreProtocolo: { type: String, required: true, trim: true },
+    plazoResultados: {
+      type: PlazoResultadosProgramacionSchema,
+      default: null,
+    },
     serviciosProgramados: { type: [ServicioProgramadoSchema], required: true },
     fechaProgramada: { type: Date, required: true },
     turno: { type: String, enum: ["MAÑANA", "TARDE", "NOCHE"] },

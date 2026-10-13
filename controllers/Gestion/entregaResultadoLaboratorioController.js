@@ -206,7 +206,7 @@ const construirEmpresa = (solicitud) => {
 };
 
 
-// ====== Interpretar tiempo de respuesta configurado ======
+// ====== Interpretar plazo comprometido ======
 const obtenerDiasRespuesta = (valor) => {
   const texto = String(valor ?? "").trim().replace(",", ".");
   const coincidencia = texto.match(/\d+(?:\.\d+)?/);
@@ -219,14 +219,83 @@ const obtenerDiasRespuesta = (valor) => {
   return Number.isFinite(dias) && dias >= 0 ? dias : null;
 };
 
-const sumarDias = (fecha, dias) => {
-  const base = fecha ? new Date(fecha) : null;
+const obtenerTipoDiasRespuesta = (valor) => {
+  const texto = String(valor ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toUpperCase();
 
-  if (!base || !Number.isFinite(base.getTime()) || !Number.isFinite(dias)) {
+  if (texto.includes("CALENDARIO")) {
+    return "CALENDARIO";
+  }
+
+  // ====== Legacy: los tiempos numéricos se consideran días hábiles ======
+  return "HABILES";
+};
+
+const describirPlazo = (cantidadDias, tipoDias) => {
+  if (!Number.isFinite(cantidadDias)) {
     return null;
   }
 
-  return new Date(base.getTime() + dias * 24 * 60 * 60 * 1000);
+  const cantidad = Number(cantidadDias);
+  const etiquetaDias = tipoDias === "HABILES" ? "hábiles" : "calendario";
+
+  return `${cantidad} ${cantidad === 1 ? "día" : "días"} ${etiquetaDias}`;
+};
+
+const resolverPlazoUnidad = (unidad) => {
+  const plazoSnapshot = unidad?.plazoComprometido ?? null;
+  const cantidadSnapshot = Number(plazoSnapshot?.cantidadDias);
+  const tipoSnapshot = String(plazoSnapshot?.tipoDias ?? "")
+    .trim()
+    .toUpperCase();
+
+  if (
+    Number.isFinite(cantidadSnapshot) &&
+    cantidadSnapshot >= 1 &&
+    ["HABILES", "CALENDARIO"].includes(tipoSnapshot)
+  ) {
+    return {
+      cantidadDias: cantidadSnapshot,
+      tipoDias: tipoSnapshot,
+      origen: plazoSnapshot?.origen ?? "PROTOCOLO",
+      descripcion: describirPlazo(cantidadSnapshot, tipoSnapshot),
+    };
+  }
+
+  const tiempoRespuesta = String(
+    unidad?.snapshotClinico?.tiempoRespuesta ?? "",
+  ).trim();
+
+  const cantidadDias = obtenerDiasRespuesta(tiempoRespuesta);
+
+  if (cantidadDias === null) {
+    return {
+      cantidadDias: null,
+      tipoDias: null,
+      origen: null,
+      descripcion: tiempoRespuesta || null,
+    };
+  }
+
+  const tipoDiasSnapshot = String(
+    unidad?.snapshotClinico?.tipoDiasRespuesta ?? "",
+  )
+    .trim()
+    .toUpperCase();
+
+  const tipoDias = ["HABILES", "CALENDARIO"].includes(tipoDiasSnapshot)
+    ? tipoDiasSnapshot
+    : obtenerTipoDiasRespuesta(tiempoRespuesta);
+
+  return {
+    cantidadDias,
+    tipoDias,
+    origen: "MAESTRO_PRUEBA",
+    descripcion: describirPlazo(cantidadDias, tipoDias),
+  };
 };
 
 // ====== Semáforo de plazo en hora Perú ======
@@ -255,6 +324,52 @@ const obtenerClaveFechaPeru = (fecha) => {
   }
 
   return `${valores.year}-${valores.month}-${valores.day}`;
+};
+
+const sumarDiasCompromiso = (fecha, dias, tipoDias) => {
+  const base = fecha ? new Date(fecha) : null;
+  const cantidad = Number(dias);
+
+  if (
+    !base ||
+    !Number.isFinite(base.getTime()) ||
+    !Number.isFinite(cantidad) ||
+    cantidad < 0
+  ) {
+    return null;
+  }
+
+  const claveBase = obtenerClaveFechaPeru(base);
+
+  if (!claveBase) {
+    return null;
+  }
+
+  const [anio, mes, dia] = claveBase.split("-").map(Number);
+  const cursor = new Date(Date.UTC(anio, mes - 1, dia));
+  let restantes = Math.ceil(cantidad);
+
+  while (restantes > 0) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+
+    if (tipoDias === "HABILES") {
+      const diaSemana = cursor.getUTCDay();
+
+      if (diaSemana === 0 || diaSemana === 6) {
+        continue;
+      }
+    }
+
+    restantes -= 1;
+  }
+
+  const claveVencimiento = [
+    cursor.getUTCFullYear(),
+    String(cursor.getUTCMonth() + 1).padStart(2, "0"),
+    String(cursor.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+
+  return construirLimiteFechaOperativa(claveVencimiento, true);
 };
 
 const construirSemaforoPlazo = (fechaEstimada, estadoResultado) => {
@@ -318,6 +433,76 @@ const obtenerIntentosVigentes = (muestras = []) => {
   return [...porPlan.values()];
 };
 
+// ====== Muestras relacionadas con una unidad clínica ======
+const obtenerMuestrasRelacionadasUnidad = (unidad, muestrasSolicitud = []) =>
+  (Array.isArray(muestrasSolicitud) ? muestrasSolicitud : []).filter(
+    (muestra) =>
+      (Array.isArray(muestra?.coberturas) ? muestra.coberturas : []).some(
+        (cobertura) =>
+          String(cobertura?.claveUnidad ?? "") ===
+          String(unidad?.claveUnidad ?? ""),
+      ),
+  );
+
+// ====== Fecha real de toma que inicia el compromiso ======
+const obtenerFechaBaseTomaUnidad = (unidad, muestrasSolicitud = []) => {
+  if (unidad?.snapshotClinico?.requiereMuestra === false) {
+    return null;
+  }
+
+  const relacionadas = obtenerMuestrasRelacionadasUnidad(
+    unidad,
+    muestrasSolicitud,
+  ).filter((muestra) => muestra?.estadoMuestra !== "ANULADA");
+
+  if (!relacionadas.length) {
+    return null;
+  }
+
+  const planes = new Map();
+
+  for (const muestra of relacionadas) {
+    const clavePlan = String(
+      muestra?.claveMuestraPlan ?? muestra?.codMuestra ?? muestra?._id ?? "",
+    );
+
+    if (!clavePlan) {
+      continue;
+    }
+
+    if (!planes.has(clavePlan)) {
+      planes.set(clavePlan, []);
+    }
+
+    const fecha = muestra?.fechaRecoleccion
+      ? new Date(muestra.fechaRecoleccion)
+      : null;
+
+    if (fecha && Number.isFinite(fecha.getTime())) {
+      planes.get(clavePlan).push(fecha);
+    }
+  }
+
+  if (!planes.size) {
+    return null;
+  }
+
+  const primerasTomas = [];
+
+  for (const fechas of planes.values()) {
+    if (!fechas.length) {
+      return null;
+    }
+
+    fechas.sort((a, b) => a.getTime() - b.getTime());
+    primerasTomas.push(fechas[0]);
+  }
+
+  // ====== Si una prueba requiere varios recipientes, el plazo inicia cuando
+  // ====== se completa la toma del último recipiente requerido ======
+  return primerasTomas.sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+};
+
 // ====== Estado de muestra por unidad clínica ======
 const construirEstadoMuestraUnidad = (unidad, muestrasSolicitud = []) => {
   if (unidad?.snapshotClinico?.requiereMuestra === false) {
@@ -330,13 +515,10 @@ const construirEstadoMuestraUnidad = (unidad, muestrasSolicitud = []) => {
     };
   }
 
-  const relacionadas = (Array.isArray(muestrasSolicitud) ? muestrasSolicitud : [])
-    .filter((muestra) =>
-      (Array.isArray(muestra?.coberturas) ? muestra.coberturas : []).some(
-        (cobertura) =>
-          String(cobertura?.claveUnidad ?? "") === String(unidad?.claveUnidad ?? ""),
-      ),
-    );
+  const relacionadas = obtenerMuestrasRelacionadasUnidad(
+    unidad,
+    muestrasSolicitud,
+  );
 
   const vigentes = obtenerIntentosVigentes(relacionadas);
 
@@ -443,21 +625,22 @@ const construirPruebasSeguimiento = (solicitud, resultados = [], muestras = []) 
       const resultado = porUnidad.get(String(unidad?.claveUnidad ?? "")) ?? null;
       const estadoResultado = resultado?.estadoResultado ?? "PENDIENTE";
       const muestra = construirEstadoMuestraUnidad(unidad, muestras);
-      const tiempoRespuesta = String(
-        unidad?.snapshotClinico?.tiempoRespuesta ?? "",
-      ).trim();
-      const diasRespuesta = obtenerDiasRespuesta(tiempoRespuesta);
+      const plazo = resolverPlazoUnidad(unidad);
+      const tiempoRespuesta = plazo.descripcion;
+      const diasRespuesta = plazo.cantidadDias;
 
       const fechaBasePlazo =
-        muestra.estado === "ACEPTADA"
-          ? muestra.fechaAceptacion
-          : unidad?.snapshotClinico?.requiereMuestra === false
-            ? solicitud?.fechaAtencionArea ?? solicitud?.fechaEmision ?? null
-            : null;
+        unidad?.snapshotClinico?.requiereMuestra === false
+          ? solicitud?.fechaAtencionArea ?? solicitud?.fechaEmision ?? null
+          : obtenerFechaBaseTomaUnidad(unidad, muestras);
 
       const fechaEstimada =
-        diasRespuesta !== null && fechaBasePlazo
-          ? sumarDias(fechaBasePlazo, diasRespuesta)
+        diasRespuesta !== null && plazo.tipoDias && fechaBasePlazo
+          ? sumarDiasCompromiso(
+              fechaBasePlazo,
+              diasRespuesta,
+              plazo.tipoDias,
+            )
           : null;
 
       const semaforoPlazo = construirSemaforoPlazo(
@@ -597,19 +780,36 @@ const calcularResumen = (solicitud, resultados) => {
 // ====== Consulta de solicitudes con resultados entregables ======
 const obtenerBandejaEntregaResultados = async (req, res = response) => {
   try {
-    const { fechaInicio, fechaFin, terminoBusqueda = "", empresaId = "" } = req.query;
-    if (!fechaInicio || !fechaFin) {
-      return res.status(400).json({ ok: false, msg: "Debe indicar ambas fechas" });
-    }
-    // ====== Interpretar el rango como día calendario de Perú ======
-    const desde = construirLimiteFechaOperativa(fechaInicio, false);
-    const hasta = construirLimiteFechaOperativa(fechaFin, true);
+    const {
+      fechaInicio,
+      fechaFin,
+      terminoBusqueda = "",
+      empresaId = "",
+      soloVencidos = "false",
+    } = req.query;
 
-    if (!desde || !hasta || desde > hasta) {
-      return res.status(400).json({
-        ok: false,
-        msg: "Rango de fechas inválido",
-      });
+    const modoSoloVencidos = ["1", "true", "si", "sí"].includes(
+      String(soloVencidos ?? "").trim().toLocaleLowerCase("es"),
+    );
+
+    let desde = null;
+    let hasta = null;
+
+    if (!modoSoloVencidos) {
+      if (!fechaInicio || !fechaFin) {
+        return res.status(400).json({ ok: false, msg: "Debe indicar ambas fechas" });
+      }
+
+      // ====== Interpretar el rango como día calendario de Perú ======
+      desde = construirLimiteFechaOperativa(fechaInicio, false);
+      hasta = construirLimiteFechaOperativa(fechaFin, true);
+
+      if (!desde || !hasta || desde > hasta) {
+        return res.status(400).json({
+          ok: false,
+          msg: "Rango de fechas inválido",
+        });
+      }
     }
 
     const empresaFiltro = String(empresaId ?? "").trim();
@@ -620,7 +820,9 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
 
     const filtroSolicitudes = {
       tipo: "Laboratorio",
-      fechaEmision: { $gte: desde, $lte: hasta },
+      ...(modoSoloVencidos
+        ? { estado: { $nin: ["ANULADO", "ATENDIDO"] } }
+        : { fechaEmision: { $gte: desde, $lte: hasta } }),
       ...(empresaFiltro
         ? {
             origenAtencion: "EMPRESA",
@@ -669,9 +871,11 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
 
     const idsSolicitudes = solicitudes.map((s) => s._id);
     const [entregasPrevias, resultados, muestras] = await Promise.all([
-      EntregaResultado.distinct("solicitudAtencionId", {
-        solicitudAtencionId: { $in: idsSolicitudes },
-      }),
+      modoSoloVencidos
+        ? Promise.resolve([])
+        : EntregaResultado.distinct("solicitudAtencionId", {
+            solicitudAtencionId: { $in: idsSolicitudes },
+          }),
       ResultadoLaboratorio.find({
         solicitudAtencionId: { $in: idsSolicitudes },
       })
@@ -726,6 +930,10 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
         return [];
       }
 
+      if (modoSoloVencidos && (resumen.vencidos ?? 0) <= 0) {
+        return [];
+      }
+
       const paciente = construirPaciente(solicitud);
       const empresa = construirEmpresa(solicitud);
       const fila = {
@@ -758,7 +966,28 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
       return [fila];
     });
 
-    return res.json({ ok: true, bandeja, total: bandeja.length });
+    const bandejaOrdenada = modoSoloVencidos
+      ? bandeja.sort((a, b) => {
+          const primeraA = (a.pruebas ?? [])
+            .filter((prueba) => prueba.estadoPlazo === "VENCIDO")
+            .map((prueba) => new Date(prueba.fechaEstimada ?? 0).getTime())
+            .filter(Number.isFinite)
+            .sort((x, y) => x - y)[0] ?? Number.MAX_SAFE_INTEGER;
+          const primeraB = (b.pruebas ?? [])
+            .filter((prueba) => prueba.estadoPlazo === "VENCIDO")
+            .map((prueba) => new Date(prueba.fechaEstimada ?? 0).getTime())
+            .filter(Number.isFinite)
+            .sort((x, y) => x - y)[0] ?? Number.MAX_SAFE_INTEGER;
+          return primeraA - primeraB;
+        })
+      : bandeja;
+
+    return res.json({
+      ok: true,
+      bandeja: bandejaOrdenada,
+      total: bandejaOrdenada.length,
+      modoSoloVencidos,
+    });
   } catch (error) {
     console.error("Error de bandeja de entrega:", error);
     return res.status(500).json({ ok: false, msg: "No se pudo consultar la bandeja de entregas" });
