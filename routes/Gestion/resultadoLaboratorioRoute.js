@@ -19,6 +19,10 @@ const {
   reabrirResultadoLaboratorio,
 } = require("../../controllers/Gestion/resultadoLaboratorioCierreController");
 
+const {
+  obtenerBandejaEntregaResultados,
+} = require("../../controllers/Gestion/entregaResultadoLaboratorioController");
+
 const { validarJWT } = require("../../middlewares/validar-token");
 const {
   validarPermisoAccion,
@@ -32,6 +36,16 @@ const router = Router();
 
 // ====== Consulta y entrega independiente para Recepción ======
 router.use("/entrega", require("./entregaResultadoLaboratorioRoute"));
+
+// ====== Alerta crítica global de resultados vencidos ======
+router.get(
+  "/alertas-vencidas",
+  validarJWT,
+  (req, res, next) => {
+    req.query.soloVencidos = "true";
+    return obtenerBandejaEntregaResultados(req, res, next);
+  },
+);
 
 // ====== Bandeja de Gestión de Resultados ======
 
