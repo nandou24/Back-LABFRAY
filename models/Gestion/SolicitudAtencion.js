@@ -899,6 +899,49 @@ const SnapshotClinicoPruebaLabSchema = new Schema(
   },
 );
 
+// ====== Día no laborable aplicado al compromiso ======
+
+const DiaNoLaborableAplicadoSchema = new Schema(
+  {
+    fecha: {
+      type: String,
+      required: true,
+      trim: true,
+      match: /^\d{4}-\d{2}-\d{2}$/,
+    },
+    descripcion: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    tipo: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+  },
+  { _id: false },
+);
+
+// ====== Historial de cálculos de compromiso ======
+
+const HistorialCalculoPlazoSchema = new Schema(
+  {
+    fechaInicioCompromiso: { type: Date, default: null },
+    fechaEntregaComprometida: { type: Date, default: null },
+    diasNoLaborablesAplicados: {
+      type: [DiaNoLaborableAplicadoSchema],
+      default: [],
+    },
+    fechaCalculoCompromiso: { type: Date, default: null },
+    fechaCierre: { type: Date, required: true },
+    motivoCierre: { type: String, required: true, trim: true },
+    cerradoPor: { type: String, default: null },
+    usuarioCierre: { type: String, default: null },
+  },
+  { _id: false },
+);
+
 // ====== Plazo comprometido de unidad ======
 
 const PlazoComprometidoUnidadSchema = new Schema(
@@ -922,6 +965,32 @@ const PlazoComprometidoUnidadSchema = new Schema(
       type: String,
       default: null,
       trim: true,
+    },
+
+    // ====== Compromiso congelado ======
+
+    fechaInicioCompromiso: {
+      type: Date,
+      default: null,
+    },
+    fechaEntregaComprometida: {
+      type: Date,
+      default: null,
+    },
+    diasNoLaborablesAplicados: {
+      type: [DiaNoLaborableAplicadoSchema],
+      default: [],
+    },
+    fechaCalculoCompromiso: {
+      type: Date,
+      default: null,
+    },
+
+    // ====== Trazabilidad de recálculos ======
+
+    historialCalculos: {
+      type: [HistorialCalculoPlazoSchema],
+      default: [],
     },
   },
   { _id: false },

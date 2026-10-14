@@ -11,6 +11,10 @@ require("../../models/Mantenimiento/TuboEnvase");
 // ====== Registrar laboratorio de referencia ======
 require("../../models/Mantenimiento/LaboratorioReferencia");
 
+const {
+  sincronizarCompromisosSolicitud,
+} = require("../../utils/Gestion/compromisoEntregaLaboratorio");
+
 const { response } = require("express");
 
 // Generar el código de solicitud con formato SOL'año''mes'0001
@@ -1633,6 +1637,18 @@ const crearSolicitudesAtencion = async ({
     await nuevaSolicitud.save({
       session,
     });
+
+    // ====== Congelar plazos que ya tienen fecha base ======
+
+    if (tipo === "Laboratorio") {
+      await sincronizarCompromisosSolicitud({
+        solicitudAtencionId: nuevaSolicitud._id,
+        session,
+        uid,
+        nombreUsuario,
+        motivoInvalidacion: "CREACION_SOLICITUD",
+      });
+    }
 
     solicitudesCreadas.push(nuevaSolicitud);
   }

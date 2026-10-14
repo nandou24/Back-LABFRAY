@@ -39,25 +39,67 @@ const construirFinDiaPeru = (claveFecha) => {
 
 // ====== Normalizar días no laborables ======
 
-const normalizarDiasNoLaborables = (diasNoLaborables) => {
-  if (diasNoLaborables instanceof Set) {
+const construirMapaDiasNoLaborables = (diasNoLaborables) => {
+  if (diasNoLaborables instanceof Map) {
     return diasNoLaborables;
   }
 
-  return new Set(
-    (Array.isArray(diasNoLaborables) ? diasNoLaborables : [])
-      .map((valor) => String(valor ?? "").trim())
-      .filter(Boolean),
-  );
+  const mapa = new Map();
+
+  if (diasNoLaborables instanceof Set) {
+    for (const fecha of diasNoLaborables) {
+      const clave = String(fecha ?? "").trim();
+
+      if (clave) {
+        mapa.set(clave, {
+          fecha: clave,
+          descripcion: "",
+          tipo: null,
+        });
+      }
+    }
+
+    return mapa;
+  }
+
+  for (const dia of Array.isArray(diasNoLaborables) ? diasNoLaborables : []) {
+    if (typeof dia === "string") {
+      const clave = dia.trim();
+
+      if (clave) {
+        mapa.set(clave, {
+          fecha: clave,
+          descripcion: "",
+          tipo: null,
+        });
+      }
+
+      continue;
+    }
+
+    const clave = String(dia?.fecha ?? "").trim();
+
+    if (!clave) {
+      continue;
+    }
+
+    mapa.set(clave, {
+      fecha: clave,
+      descripcion: String(dia?.descripcion ?? "").trim(),
+      tipo: dia?.tipo ?? null,
+    });
+  }
+
+  return mapa;
 };
 
-// ====== Sumar plazo comprometido ======
+// ====== Calcular compromiso con trazabilidad ======
 
-const sumarDiasCompromiso = (
+const calcularCompromisoDetallado = (
   fecha,
   dias,
   tipoDias,
-  diasNoLaborables = new Set(),
+  diasNoLaborables = [],
 ) => {
   const base = fecha ? new Date(fecha) : null;
   const cantidad = Number(dias);
@@ -79,7 +121,8 @@ const sumarDiasCompromiso = (
 
   const [anio, mes, dia] = claveBase.split("-").map(Number);
   const cursor = new Date(Date.UTC(anio, mes - 1, dia));
-  const noLaborables = normalizarDiasNoLaborables(diasNoLaborables);
+  const noLaborables = construirMapaDiasNoLaborables(diasNoLaborables);
+  const aplicados = new Map();
   let restantes = Math.ceil(cantidad);
 
   while (restantes > 0) {
@@ -94,6 +137,14 @@ const sumarDiasCompromiso = (
     // ====== Feriados / cierres no cuentan en ningún calendario ======
 
     if (noLaborables.has(claveCursor)) {
+      const detalle = noLaborables.get(claveCursor);
+
+      aplicados.set(claveCursor, {
+        fecha: claveCursor,
+        descripcion: String(detalle?.descripcion ?? "").trim(),
+        tipo: detalle?.tipo ?? null,
+      });
+
       continue;
     }
 
@@ -124,10 +175,36 @@ const sumarDiasCompromiso = (
     String(cursor.getUTCDate()).padStart(2, "0"),
   ].join("-");
 
-  return construirFinDiaPeru(claveVencimiento);
+  const fechaEntregaComprometida = construirFinDiaPeru(claveVencimiento);
+
+  if (!fechaEntregaComprometida) {
+    return null;
+  }
+
+  return {
+    fechaEntregaComprometida,
+    claveFechaEntrega: claveVencimiento,
+    diasNoLaborablesAplicados: [...aplicados.values()],
+  };
 };
+
+// ====== Compatibilidad cálculo simple ======
+
+const sumarDiasCompromiso = (
+  fecha,
+  dias,
+  tipoDias,
+  diasNoLaborables = [],
+) =>
+  calcularCompromisoDetallado(
+    fecha,
+    dias,
+    tipoDias,
+    diasNoLaborables,
+  )?.fechaEntregaComprometida ?? null;
 
 module.exports = {
   obtenerClaveFechaPeru,
   sumarDiasCompromiso,
+  calcularCompromisoDetallado,
 };

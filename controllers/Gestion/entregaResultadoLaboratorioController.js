@@ -10,6 +10,9 @@ const {
   obtenerClaveFechaPeru,
   sumarDiasCompromiso,
 } = require("../../utils/Gestion/calendarioLaboral");
+const {
+  obtenerFechaBaseTomaUnidad: obtenerFechaBaseTomaUnidadVigente,
+} = require("../../utils/Gestion/compromisoEntregaLaboratorio");
 
 // ====== Rango operativo de fechas en hora Perú ======
 
@@ -361,7 +364,7 @@ const obtenerIntentosVigentes = (muestras = []) => {
   const porPlan = new Map();
 
   for (const muestra of Array.isArray(muestras) ? muestras : []) {
-    if (!muestra || muestra.estadoMuestra === "ANULADA") {
+    if (!muestra) {
       continue;
     }
 
@@ -384,7 +387,10 @@ const obtenerIntentosVigentes = (muestras = []) => {
     }
   }
 
-  return [...porPlan.values()];
+  // Si el último intento fue anulado, no se reutiliza un intento anterior.
+  return [...porPlan.values()].filter(
+    (muestra) => muestra.estadoMuestra !== "ANULADA",
+  );
 };
 
 // ====== Muestras relacionadas con una unidad clínica ======
@@ -399,63 +405,8 @@ const obtenerMuestrasRelacionadasUnidad = (unidad, muestrasSolicitud = []) =>
   );
 
 // ====== Fecha real de toma que inicia el compromiso ======
-const obtenerFechaBaseTomaUnidad = (unidad, muestrasSolicitud = []) => {
-  if (unidad?.snapshotClinico?.requiereMuestra === false) {
-    return null;
-  }
-
-  const relacionadas = obtenerMuestrasRelacionadasUnidad(
-    unidad,
-    muestrasSolicitud,
-  ).filter((muestra) => muestra?.estadoMuestra !== "ANULADA");
-
-  if (!relacionadas.length) {
-    return null;
-  }
-
-  const planes = new Map();
-
-  for (const muestra of relacionadas) {
-    const clavePlan = String(
-      muestra?.claveMuestraPlan ?? muestra?.codMuestra ?? muestra?._id ?? "",
-    );
-
-    if (!clavePlan) {
-      continue;
-    }
-
-    if (!planes.has(clavePlan)) {
-      planes.set(clavePlan, []);
-    }
-
-    const fecha = muestra?.fechaRecoleccion
-      ? new Date(muestra.fechaRecoleccion)
-      : null;
-
-    if (fecha && Number.isFinite(fecha.getTime())) {
-      planes.get(clavePlan).push(fecha);
-    }
-  }
-
-  if (!planes.size) {
-    return null;
-  }
-
-  const primerasTomas = [];
-
-  for (const fechas of planes.values()) {
-    if (!fechas.length) {
-      return null;
-    }
-
-    fechas.sort((a, b) => a.getTime() - b.getTime());
-    primerasTomas.push(fechas[0]);
-  }
-
-  // ====== Si una prueba requiere varios recipientes, el plazo inicia cuando
-  // ====== se completa la toma del último recipiente requerido ======
-  return primerasTomas.sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
-};
+const obtenerFechaBaseTomaUnidad = (unidad, muestrasSolicitud = []) =>
+  obtenerFechaBaseTomaUnidadVigente(unidad, muestrasSolicitud);
 
 // ====== Estado de muestra por unidad clínica ======
 const construirEstadoMuestraUnidad = (unidad, muestrasSolicitud = []) => {
@@ -593,15 +544,25 @@ const construirPruebasSeguimiento = (
           ? solicitud?.fechaAtencionArea ?? solicitud?.fechaEmision ?? null
           : obtenerFechaBaseTomaUnidad(unidad, muestras);
 
+      const fechaCongelada = unidad?.plazoComprometido?.fechaEntregaComprometida
+        ? new Date(unidad.plazoComprometido.fechaEntregaComprometida)
+        : null;
+
+      const fechaCongeladaValida =
+        fechaCongelada && Number.isFinite(fechaCongelada.getTime())
+          ? fechaCongelada
+          : null;
+
       const fechaEstimada =
-        diasRespuesta !== null && plazo.tipoDias && fechaBasePlazo
+        fechaCongeladaValida ??
+        (diasRespuesta !== null && plazo.tipoDias && fechaBasePlazo
           ? sumarDiasCompromiso(
               fechaBasePlazo,
               diasRespuesta,
               plazo.tipoDias,
               diasNoLaborables,
             )
-          : null;
+          : null);
 
       const semaforoPlazo = construirSemaforoPlazo(
         fechaEstimada,
@@ -662,6 +623,7 @@ const construirPruebasSeguimiento = (
         tiempoRespuesta: tiempoRespuesta || null,
         diasRespuesta,
         fechaEstimada,
+        compromisoCongelado: Boolean(fechaCongeladaValida),
         estadoPlazo: semaforoPlazo.estado,
         etiquetaPlazo: semaforoPlazo.etiqueta,
         fueraPlazo,
@@ -846,10 +808,9 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
           .lean(),
         MuestraLaboratorio.find({
           solicitudAtencionId: { $in: idsSolicitudes },
-          estadoMuestra: { $ne: "ANULADA" },
         })
           .select(
-            "solicitudAtencionId claveMuestraPlan codMuestra numeroIntento estadoMuestra coberturas.claveUnidad fechaRegistro fechaRecoleccion fechaRecepcion fechaAceptacion fechaRechazo motivoRechazo",
+            "solicitudAtencionId claveMuestraPlan codMuestra numeroIntento estadoMuestra coberturas.claveUnidad fechaRegistro createdAt fechaRecoleccion fechaRecepcion fechaAceptacion fechaRechazo motivoRechazo motivoAnulacion",
           )
           .lean(),
         DiaNoLaborable.find({

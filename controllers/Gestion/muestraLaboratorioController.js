@@ -18,6 +18,9 @@ const {
   generarUrlTemporal,
   eliminarArchivo,
 } = require("../../utils/aws/s3Storage");
+const {
+  sincronizarCompromisosSolicitud,
+} = require("../../utils/Gestion/compromisoEntregaLaboratorio");
 
 // ====== Obtener id normalizado ======
 
@@ -1137,7 +1140,9 @@ const construirPlanesConsultaMuestra = (muestras = []) => {
           }
         : null,
 
-      requiereReintento: intentoVigente?.estadoMuestra === "RECHAZADA",
+      requiereReintento: ["RECHAZADA", "ANULADA"].includes(
+        ultimoIntento?.estadoMuestra,
+      ),
 
       intentos: intentosOrdenados.map((intento) => ({
         ...intento,
@@ -1833,6 +1838,16 @@ const recolectarMuestra = async (req, res = response) => {
 
     await muestra.save({
       session,
+    });
+
+    // ====== Congelar compromiso si la toma quedó completa ======
+
+    await sincronizarCompromisosSolicitud({
+      solicitudAtencionId: muestra.solicitudAtencionId,
+      session,
+      uid,
+      nombreUsuario,
+      motivoInvalidacion: "RECOLECCION_MUESTRA",
     });
 
     await session.commitTransaction();
@@ -2599,6 +2614,44 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
       });
     }
 
+    // ====== Congelar compromisos de solicitudes afectadas ======
+
+    const solicitudesRecolectadas = [
+      ...new Set(
+        candidatas
+          .filter((candidata) =>
+            idsRecolectados.has(candidata.muestra._id.toString()),
+          )
+          .map((candidata) =>
+            String(candidata.muestra.solicitudAtencionId ?? "").trim(),
+          )
+          .filter(Boolean),
+      ),
+    ];
+
+    const advertenciasCompromiso = [];
+
+    for (const solicitudAtencionId of solicitudesRecolectadas) {
+      try {
+        await sincronizarCompromisosSolicitud({
+          solicitudAtencionId,
+          uid,
+          nombreUsuario,
+          motivoInvalidacion: "RECOLECCION_MASIVA",
+        });
+      } catch (errorCompromiso) {
+        console.error(
+          `No se pudo sincronizar el compromiso de ${solicitudAtencionId}:`,
+          errorCompromiso,
+        );
+
+        advertenciasCompromiso.push({
+          solicitudAtencionId,
+          msg: "La muestra fue recolectada, pero el compromiso debe resincronizarse.",
+        });
+      }
+    }
+
     // ====== Respuesta ======
 
     const resumen = {
@@ -2634,6 +2687,7 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
         fechaRecoleccion: muestra.fechaRecoleccion,
       })),
       noProcesadas,
+      advertenciasCompromiso,
     });
   } catch (error) {
     console.error("Error al registrar recolección masiva:", error);
@@ -4776,6 +4830,16 @@ const rechazarMuestra = async (req, res = response) => {
       session,
     });
 
+    // ====== Invalidar compromiso por rechazo ======
+
+    await sincronizarCompromisosSolicitud({
+      solicitudAtencionId: muestra.solicitudAtencionId,
+      session,
+      uid,
+      nombreUsuario,
+      motivoInvalidacion: "MUESTRA_RECHAZADA",
+    });
+
     await session.commitTransaction();
 
     evidenciaPersistida = true;
@@ -5150,6 +5214,19 @@ const corregirEvaluacionMuestra = async (req, res = response) => {
       session,
     });
 
+    // ====== Sincronizar compromiso tras corrección ======
+
+    await sincronizarCompromisosSolicitud({
+      solicitudAtencionId: muestra.solicitudAtencionId,
+      session,
+      uid,
+      nombreUsuario,
+      motivoInvalidacion:
+        estadoNuevo === "RECHAZADA"
+          ? "CORRECCION_A_RECHAZADA"
+          : "CORRECCION_A_ACEPTADA",
+    });
+
     await session.commitTransaction();
 
     evidenciaPersistida = Boolean(evidencia);
@@ -5339,6 +5416,16 @@ const anularMuestra = async (req, res = response) => {
       session,
     });
 
+    // ====== Invalidar compromiso por anulación ======
+
+    await sincronizarCompromisosSolicitud({
+      solicitudAtencionId: muestra.solicitudAtencionId,
+      session,
+      uid,
+      nombreUsuario,
+      motivoInvalidacion: "MUESTRA_ANULADA",
+    });
+
     await session.commitTransaction();
 
     return res.status(200).json({
@@ -5400,7 +5487,7 @@ const generarReintentoMuestra = async (req, res = response) => {
 
     // ====== Validar estado ======
 
-    if (muestraAnterior.estadoMuestra !== "RECHAZADA") {
+    if (!["RECHAZADA", "ANULADA"].includes(muestraAnterior.estadoMuestra)) {
       throw new Error(
         `No se puede generar un reintento de una muestra en estado ${muestraAnterior.estadoMuestra}`,
       );
@@ -5527,7 +5614,7 @@ const generarReintentoMuestra = async (req, res = response) => {
       : [];
 
     if (coberturas.length === 0) {
-      throw new Error("La muestra rechazada no posee coberturas clínicas");
+      throw new Error("La muestra anterior no posee coberturas clínicas");
     }
 
     const ahora = new Date();
@@ -5612,7 +5699,8 @@ const generarReintentoMuestra = async (req, res = response) => {
 
         estadoMuestra: muestraAnterior.estadoMuestra,
 
-        motivoRechazo: muestraAnterior.motivoRechazo,
+        motivoRechazo: muestraAnterior.motivoRechazo ?? null,
+        motivoAnulacion: muestraAnterior.motivoAnulacion ?? null,
       },
 
       muestra: nuevaMuestra,
