@@ -859,7 +859,7 @@ const SnapshotClinicoPruebaLabSchema = new Schema(
 
     tipoDiasRespuesta: {
       type: String,
-      enum: ["HABILES", "CALENDARIO"],
+      enum: ["HABILES", "LABORABLES_LS", "CALENDARIO"],
       default: "HABILES",
     },
 
@@ -905,12 +905,12 @@ const PlazoComprometidoUnidadSchema = new Schema(
   {
     cantidadDias: {
       type: Number,
-      min: 1,
+      min: 0,
       required: true,
     },
     tipoDias: {
       type: String,
-      enum: ["HABILES", "CALENDARIO"],
+      enum: ["HABILES", "LABORABLES_LS", "CALENDARIO"],
       required: true,
     },
     origen: {

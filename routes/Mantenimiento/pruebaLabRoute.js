@@ -12,6 +12,13 @@ const { validarJWT } = require("../../middlewares/validar-token");
 //Rutas
 const router = Router();
 
+// ====== Días no laborables ======
+
+router.use(
+  "/dias-no-laborables",
+  require("./diaNoLaborableRoute"),
+);
+
 //! crear un nuevo favorito
 router.post(
   "/newPruebaLab",

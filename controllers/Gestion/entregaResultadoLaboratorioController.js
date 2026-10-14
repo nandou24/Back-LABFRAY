@@ -4,6 +4,12 @@ const SolicitudAtencion = require("../../models/Gestion/SolicitudAtencion");
 const ResultadoLaboratorio = require("../../models/Gestion/ResultadoLaboratorio");
 const EntregaResultado = require("../../models/Gestion/EntregaResultadoLaboratorio");
 const MuestraLaboratorio = require("../../models/Gestion/MuestraLaboratorio");
+const DiaNoLaborable = require("../../models/Mantenimiento/DiaNoLaborable");
+
+const {
+  obtenerClaveFechaPeru,
+  sumarDiasCompromiso,
+} = require("../../utils/Gestion/calendarioLaboral");
 
 // ====== Rango operativo de fechas en hora Perú ======
 
@@ -230,6 +236,14 @@ const obtenerTipoDiasRespuesta = (valor) => {
     return "CALENDARIO";
   }
 
+  if (
+    texto.includes("LABORABLE") ||
+    texto.includes("L-S") ||
+    texto.includes("LABORABLES_LS")
+  ) {
+    return "LABORABLES_LS";
+  }
+
   // ====== Legacy: los tiempos numéricos se consideran días hábiles ======
   return "HABILES";
 };
@@ -240,7 +254,18 @@ const describirPlazo = (cantidadDias, tipoDias) => {
   }
 
   const cantidad = Number(cantidadDias);
-  const etiquetaDias = tipoDias === "HABILES" ? "hábiles" : "calendario";
+
+  if (cantidad === 0) {
+    return "Mismo día";
+  }
+
+  const etiquetas = {
+    HABILES: "hábiles (L-V)",
+    LABORABLES_LS: "laborables (L-S)",
+    CALENDARIO: "calendario",
+  };
+
+  const etiquetaDias = etiquetas[tipoDias] ?? "hábiles (L-V)";
 
   return `${cantidad} ${cantidad === 1 ? "día" : "días"} ${etiquetaDias}`;
 };
@@ -254,8 +279,8 @@ const resolverPlazoUnidad = (unidad) => {
 
   if (
     Number.isFinite(cantidadSnapshot) &&
-    cantidadSnapshot >= 1 &&
-    ["HABILES", "CALENDARIO"].includes(tipoSnapshot)
+    cantidadSnapshot >= 0 &&
+    ["HABILES", "LABORABLES_LS", "CALENDARIO"].includes(tipoSnapshot)
   ) {
     return {
       cantidadDias: cantidadSnapshot,
@@ -286,7 +311,9 @@ const resolverPlazoUnidad = (unidad) => {
     .trim()
     .toUpperCase();
 
-  const tipoDias = ["HABILES", "CALENDARIO"].includes(tipoDiasSnapshot)
+  const tipoDias = ["HABILES", "LABORABLES_LS", "CALENDARIO"].includes(
+    tipoDiasSnapshot,
+  )
     ? tipoDiasSnapshot
     : obtenerTipoDiasRespuesta(tiempoRespuesta);
 
@@ -299,79 +326,6 @@ const resolverPlazoUnidad = (unidad) => {
 };
 
 // ====== Semáforo de plazo en hora Perú ======
-const obtenerClaveFechaPeru = (fecha) => {
-  const base = fecha instanceof Date ? fecha : new Date(fecha);
-
-  if (!Number.isFinite(base.getTime())) {
-    return null;
-  }
-
-  const partes = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Lima",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(base);
-
-  const valores = Object.fromEntries(
-    partes
-      .filter((parte) => ["year", "month", "day"].includes(parte.type))
-      .map((parte) => [parte.type, parte.value]),
-  );
-
-  if (!valores.year || !valores.month || !valores.day) {
-    return null;
-  }
-
-  return `${valores.year}-${valores.month}-${valores.day}`;
-};
-
-const sumarDiasCompromiso = (fecha, dias, tipoDias) => {
-  const base = fecha ? new Date(fecha) : null;
-  const cantidad = Number(dias);
-
-  if (
-    !base ||
-    !Number.isFinite(base.getTime()) ||
-    !Number.isFinite(cantidad) ||
-    cantidad < 0
-  ) {
-    return null;
-  }
-
-  const claveBase = obtenerClaveFechaPeru(base);
-
-  if (!claveBase) {
-    return null;
-  }
-
-  const [anio, mes, dia] = claveBase.split("-").map(Number);
-  const cursor = new Date(Date.UTC(anio, mes - 1, dia));
-  let restantes = Math.ceil(cantidad);
-
-  while (restantes > 0) {
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-
-    if (tipoDias === "HABILES") {
-      const diaSemana = cursor.getUTCDay();
-
-      if (diaSemana === 0 || diaSemana === 6) {
-        continue;
-      }
-    }
-
-    restantes -= 1;
-  }
-
-  const claveVencimiento = [
-    cursor.getUTCFullYear(),
-    String(cursor.getUTCMonth() + 1).padStart(2, "0"),
-    String(cursor.getUTCDate()).padStart(2, "0"),
-  ].join("-");
-
-  return construirLimiteFechaOperativa(claveVencimiento, true);
-};
-
 const construirSemaforoPlazo = (fechaEstimada, estadoResultado) => {
   if (["LIBERADO", "ANULADO"].includes(estadoResultado)) {
     return { estado: "FINALIZADO", etiqueta: "FINALIZADO" };
@@ -609,7 +563,12 @@ const construirEstadoMuestraUnidad = (unidad, muestrasSolicitud = []) => {
 };
 
 // ====== Seguimiento visible para Recepción / Informes ======
-const construirPruebasSeguimiento = (solicitud, resultados = [], muestras = []) => {
+const construirPruebasSeguimiento = (
+  solicitud,
+  resultados = [],
+  muestras = [],
+  diasNoLaborables = new Set(),
+) => {
   const porUnidad = new Map(
     (Array.isArray(resultados) ? resultados : []).map((resultado) => [
       String(resultado?.claveUnidad ?? ""),
@@ -640,6 +599,7 @@ const construirPruebasSeguimiento = (solicitud, resultados = [], muestras = []) 
               fechaBasePlazo,
               diasRespuesta,
               plazo.tipoDias,
+              diasNoLaborables,
             )
           : null;
 
@@ -870,31 +830,36 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
     }
 
     const idsSolicitudes = solicitudes.map((s) => s._id);
-    const [entregasPrevias, resultados, muestras] = await Promise.all([
-      modoSoloVencidos
-        ? Promise.resolve([])
-        : EntregaResultado.distinct("solicitudAtencionId", {
-            solicitudAtencionId: { $in: idsSolicitudes },
-          }),
-      ResultadoLaboratorio.find({
-        solicitudAtencionId: { $in: idsSolicitudes },
-      })
-        .select(
-          "solicitudAtencionId claveUnidad codPruebaLab nombrePruebaLab numeroInstancia etiquetaInstancia estadoResultado fechaValidacion fechaLiberacion",
-        )
-        .lean(),
-      MuestraLaboratorio.find({
-        solicitudAtencionId: { $in: idsSolicitudes },
-        estadoMuestra: { $ne: "ANULADA" },
-      })
-        .select(
-          "solicitudAtencionId claveMuestraPlan codMuestra numeroIntento estadoMuestra coberturas.claveUnidad fechaRegistro fechaRecoleccion fechaRecepcion fechaAceptacion fechaRechazo motivoRechazo",
-        )
-        .lean(),
-    ]);
+    const [entregasPrevias, resultados, muestras, diasNoLaborablesActivos] =
+      await Promise.all([
+        modoSoloVencidos
+          ? Promise.resolve([])
+          : EntregaResultado.distinct("solicitudAtencionId", {
+              solicitudAtencionId: { $in: idsSolicitudes },
+            }),
+        ResultadoLaboratorio.find({
+          solicitudAtencionId: { $in: idsSolicitudes },
+        })
+          .select(
+            "solicitudAtencionId claveUnidad codPruebaLab nombrePruebaLab numeroInstancia etiquetaInstancia estadoResultado fechaValidacion fechaLiberacion",
+          )
+          .lean(),
+        MuestraLaboratorio.find({
+          solicitudAtencionId: { $in: idsSolicitudes },
+          estadoMuestra: { $ne: "ANULADA" },
+        })
+          .select(
+            "solicitudAtencionId claveMuestraPlan codMuestra numeroIntento estadoMuestra coberturas.claveUnidad fechaRegistro fechaRecoleccion fechaRecepcion fechaAceptacion fechaRechazo motivoRechazo",
+          )
+          .lean(),
+        DiaNoLaborable.find({
+          estadoDiaNoLaborable: "ACTIVO",
+        })
+          .select("fecha")
+          .lean(),
+      ]);
+
     const conEntregasPrevias = new Set(entregasPrevias.map(String));
-
-
 
     const porSolicitud = new Map();
     for (const resultado of resultados) {
@@ -910,6 +875,14 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
       muestrasPorSolicitud.get(clave).push(muestra);
     }
 
+    // ====== Calendario de días no laborables ======
+
+    const diasNoLaborables = new Set(
+      (Array.isArray(diasNoLaborablesActivos) ? diasNoLaborablesActivos : [])
+        .map((dia) => String(dia?.fecha ?? "").trim())
+        .filter(Boolean),
+    );
+
     const filtro = String(terminoBusqueda).trim().toLocaleLowerCase("es");
     const bandeja = solicitudes.flatMap((solicitud) => {
       const claveSolicitud = String(solicitud._id);
@@ -918,6 +891,7 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
         solicitud,
         resultadosSolicitud,
         muestrasPorSolicitud.get(claveSolicitud) || [],
+        diasNoLaborables,
       );
       const resumen = construirResumenSeguimiento(
         solicitud,

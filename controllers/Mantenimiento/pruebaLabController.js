@@ -730,6 +730,43 @@ const validarComposicionPruebaLab = (datos) => {
   };
 };
 
+// ====== Validar plazo de respuesta ======
+
+const TIPOS_DIAS_RESPUESTA_VALIDOS = [
+  "HABILES",
+  "LABORABLES_LS",
+  "CALENDARIO",
+];
+
+const validarPlazoRespuestaPruebaLab = (datos) => {
+  const tiempoRespuesta = String(datos?.tiempoRespuesta ?? "").trim();
+
+  if (!/^(0|[1-9]\d*)$/.test(tiempoRespuesta)) {
+    return {
+      ok: false,
+      msg: "El tiempo de respuesta debe ser un número entero mayor o igual a 0.",
+    };
+  }
+
+  const tipoDiasRespuesta = String(datos?.tipoDiasRespuesta ?? "HABILES")
+    .trim()
+    .toUpperCase();
+
+  if (!TIPOS_DIAS_RESPUESTA_VALIDOS.includes(tipoDiasRespuesta)) {
+    return {
+      ok: false,
+      msg: "El tipo de días del tiempo de respuesta no es válido.",
+    };
+  }
+
+  datos.tiempoRespuesta = tiempoRespuesta;
+  datos.tipoDiasRespuesta = tipoDiasRespuesta;
+
+  return {
+    ok: true,
+  };
+};
+
 const crearPruebaLab = async (req, res = response) => {
   const { nombrePruebaLab } = req.body;
   const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
@@ -744,6 +781,17 @@ const crearPruebaLab = async (req, res = response) => {
       return res.status(400).json({
         ok: false,
         msg: "Ya existe una prueba con ese nombre",
+      });
+    }
+
+    // ====== Validar plazo de respuesta ======
+
+    const validacionPlazo = validarPlazoRespuestaPruebaLab(req.body);
+
+    if (!validacionPlazo.ok) {
+      return res.status(400).json({
+        ok: false,
+        msg: validacionPlazo.msg,
       });
     }
 
@@ -918,6 +966,17 @@ const actualizarPrueba = async (req, res = response) => {
       return res.status(404).json({
         ok: false,
         msg: "Prueba no encontrada con ese código",
+      });
+    }
+
+    // ====== Validar plazo de respuesta ======
+
+    const validacionPlazo = validarPlazoRespuestaPruebaLab(datosActualizados);
+
+    if (!validacionPlazo.ok) {
+      return res.status(400).json({
+        ok: false,
+        msg: validacionPlazo.msg,
       });
     }
 

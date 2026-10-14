@@ -949,6 +949,30 @@ const construirSnapshotTuboEnvase = (tuboEnvaseDocumento) => {
   };
 };
 
+// ====== Normalizar plazo de respuesta ======
+
+const TIPOS_DIAS_RESPUESTA_VALIDOS = [
+  "HABILES",
+  "LABORABLES_LS",
+  "CALENDARIO",
+];
+
+const normalizarTipoDiasRespuesta = (valor) => {
+  const tipo = String(valor ?? "").trim().toUpperCase();
+
+  return TIPOS_DIAS_RESPUESTA_VALIDOS.includes(tipo) ? tipo : "HABILES";
+};
+
+const obtenerCantidadDiasRespuesta = (valor) => {
+  const texto = String(valor ?? "").trim();
+
+  if (!/^(0|[1-9]\d*)$/.test(texto)) {
+    return null;
+  }
+
+  return Number(texto);
+};
+
 // ====== Construir snapshot de PruebaLab ======
 
 const construirSnapshotPruebaLab = (pruebaDocumento) => {
@@ -974,11 +998,9 @@ const construirSnapshotPruebaLab = (pruebaDocumento) => {
 
     tiempoRespuesta: prueba.tiempoRespuesta ?? "",
 
-    tipoDiasRespuesta: ["HABILES", "CALENDARIO"].includes(
-      String(prueba.tipoDiasRespuesta ?? "").trim().toUpperCase(),
-    )
-      ? String(prueba.tipoDiasRespuesta).trim().toUpperCase()
-      : "HABILES",
+    tipoDiasRespuesta: normalizarTipoDiasRespuesta(
+      prueba.tipoDiasRespuesta,
+    ),
 
     observPruebas: prueba.observPruebas ?? null,
 
@@ -1526,47 +1548,43 @@ const crearSolicitudesAtencion = async ({
 
     if (tipo === "Laboratorio") {
       datosSolicitud.unidadesLaboratorio = unidadesLaboratorioClinicas.map(
-        (unidad) => ({
-          ...unidad,
+        (unidad) => {
+          const cantidadDiasParticular = obtenerCantidadDiasRespuesta(
+            unidad?.snapshotClinico?.tiempoRespuesta,
+          );
 
-          plazoComprometido:
-            origenAtencion === "EMPRESA" &&
-            datosOrigen?.plazoResultados?.cantidadDias &&
-            datosOrigen?.plazoResultados?.tipoDias
-              ? {
-                  cantidadDias: Number(
-                    datosOrigen.plazoResultados.cantidadDias,
-                  ),
-                  tipoDias: String(
-                    datosOrigen.plazoResultados.tipoDias,
-                  ).toUpperCase(),
-                  origen: "PROTOCOLO",
-                  codProtocolo: datosOrigen.codProtocolo ?? null,
-                }
-              : origenAtencion === "PARTICULAR" &&
-                  Number(unidad?.snapshotClinico?.tiempoRespuesta) >= 1
+          return {
+            ...unidad,
+
+            plazoComprometido:
+              origenAtencion === "EMPRESA" &&
+              datosOrigen?.plazoResultados?.cantidadDias &&
+              datosOrigen?.plazoResultados?.tipoDias
                 ? {
                     cantidadDias: Number(
-                      unidad.snapshotClinico.tiempoRespuesta,
+                      datosOrigen.plazoResultados.cantidadDias,
                     ),
-                    tipoDias: ["HABILES", "CALENDARIO"].includes(
-                      String(
-                        unidad?.snapshotClinico?.tipoDiasRespuesta ?? "",
-                      )
-                        .trim()
-                        .toUpperCase(),
-                    )
-                      ? String(
-                          unidad.snapshotClinico.tipoDiasRespuesta,
-                        ).toUpperCase()
-                      : "HABILES",
-                    origen: "MAESTRO_PRUEBA",
-                    codProtocolo: null,
+                    tipoDias: String(
+                      datosOrigen.plazoResultados.tipoDias,
+                    ).toUpperCase(),
+                    origen: "PROTOCOLO",
+                    codProtocolo: datosOrigen.codProtocolo ?? null,
                   }
-                : null,
+                : origenAtencion === "PARTICULAR" &&
+                    cantidadDiasParticular !== null
+                  ? {
+                      cantidadDias: cantidadDiasParticular,
+                      tipoDias: normalizarTipoDiasRespuesta(
+                        unidad?.snapshotClinico?.tipoDiasRespuesta,
+                      ),
+                      origen: "MAESTRO_PRUEBA",
+                      codProtocolo: null,
+                    }
+                  : null,
 
-          estado: "PENDIENTE",
-        }),
+            estado: "PENDIENTE",
+          };
+        },
       );
     }
 

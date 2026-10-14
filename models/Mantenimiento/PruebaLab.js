@@ -203,10 +203,15 @@ const PruebaLabSchema = Schema(
     },
     condPreAnalitPaciente: { type: String, required: true },
     condPreAnalitRefer: { type: String, required: true },
-    tiempoRespuesta: { type: String, required: true },
+    tiempoRespuesta: {
+      type: String,
+      required: true,
+      trim: true,
+      match: /^(0|[1-9]\d*)$/,
+    },
     tipoDiasRespuesta: {
       type: String,
-      enum: ["HABILES", "CALENDARIO"],
+      enum: ["HABILES", "LABORABLES_LS", "CALENDARIO"],
       default: "HABILES",
       required: true,
     },
