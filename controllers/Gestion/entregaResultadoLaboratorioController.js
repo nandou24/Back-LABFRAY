@@ -929,6 +929,173 @@ const obtenerBandejaEntregaResultados = async (req, res = response) => {
   }
 };
 
+// ====== Informe exacto de un despacho público ======
+const construirInformeEntregableSeleccionado = async ({
+  solicitudAtencionId,
+  resultadosEsperados = [],
+}) => {
+  if (!mongoose.isValidObjectId(solicitudAtencionId)) {
+    const error = new Error("El informe solicitado no está disponible");
+    error.codigo = "INFORME_REEMPLAZADO";
+    throw error;
+  }
+
+  const esperados = (Array.isArray(resultadosEsperados) ? resultadosEsperados : [])
+    .map((resultado) => ({
+      resultadoLaboratorioId: String(resultado?.resultadoLaboratorioId ?? ""),
+      versionResultado: Number(resultado?.versionResultado ?? 1),
+    }))
+    .filter((resultado) => mongoose.isValidObjectId(resultado.resultadoLaboratorioId));
+
+  if (!esperados.length) {
+    const error = new Error("El informe solicitado no contiene resultados disponibles");
+    error.codigo = "INFORME_REEMPLAZADO";
+    throw error;
+  }
+
+  const solicitud = await SolicitudAtencion.findById(solicitudAtencionId)
+    .select([
+      "codSolicitud",
+      "codigoLaboratorio",
+      "origenAtencion",
+      "fechaEmision",
+      "fechaAtencionArea",
+      "unidadesLaboratorio",
+      "hc",
+      "clienteId",
+      "tipoDoc",
+      "nroDoc",
+      "nombreCliente",
+      "apePatCliente",
+      "apeMatCliente",
+      "sexoPaciente",
+      "fechaNacimientoPaciente",
+      "programacionEmpresaId",
+      "codProgramacion",
+      "empresaId",
+      "razonSocialEmpresa",
+      "protocoloId",
+      "codProtocolo",
+      "nombreProtocolo",
+      "tipo",
+    ].join(" "))
+    .populate(
+      "programacionEmpresaId",
+      "_id codProgramacion empresaId rucEmpresa razonSocialEmpresa hc pacienteId tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sexoCliente fechaNacimiento sede prioridad",
+    )
+    .lean();
+
+  if (!solicitud || solicitud.tipo !== "Laboratorio") {
+    const error = new Error("El informe solicitado ya no está disponible");
+    error.codigo = "INFORME_REEMPLAZADO";
+    throw error;
+  }
+
+  const ids = esperados.map((resultado) => resultado.resultadoLaboratorioId);
+  const liberados = await ResultadoLaboratorio.find({
+    solicitudAtencionId,
+    _id: { $in: ids },
+    estadoResultado: "LIBERADO",
+  })
+    .select(
+      "_id claveUnidad codPruebaLab nombrePruebaLab numeroInstancia etiquetaInstancia versionResultado fechaValidacion fechaLiberacion usuarioLiberacion observacionGeneral resultadosItems",
+    )
+    .sort({ numeroInstancia: 1, createdAt: 1 })
+    .lean();
+
+  if (liberados.length !== esperados.length) {
+    const error = new Error(
+      "Este informe fue reemplazado o alguno de sus resultados dejó de estar liberado. Solicite el enlace actualizado.",
+    );
+    error.codigo = "INFORME_REEMPLAZADO";
+    throw error;
+  }
+
+  const esperadoPorId = new Map(
+    esperados.map((resultado) => [resultado.resultadoLaboratorioId, resultado.versionResultado]),
+  );
+
+  const versionCambio = liberados.some(
+    (resultado) =>
+      Number(resultado.versionResultado ?? 1) !==
+      Number(esperadoPorId.get(String(resultado._id)) ?? 1),
+  );
+
+  if (versionCambio) {
+    const error = new Error(
+      "Este informe fue reemplazado por una versión posterior. Solicite el enlace actualizado.",
+    );
+    error.codigo = "INFORME_REEMPLAZADO";
+    throw error;
+  }
+
+  const muestrasAceptadas = await MuestraLaboratorio.find({
+    solicitudAtencionId,
+    estadoMuestra: "ACEPTADA",
+  })
+    .select("tipoMuestra coberturas.claveUnidad")
+    .lean();
+
+  const muestrasPorUnidad = construirMuestrasPorUnidad(muestrasAceptadas);
+  const resultados = liberados.map((resultado) => ({
+    _id: String(resultado._id),
+    codPruebaLab: resultado.codPruebaLab,
+    nombrePruebaLab: resultado.nombrePruebaLab,
+    numeroInstancia: resultado.numeroInstancia,
+    etiquetaInstancia: resultado.etiquetaInstancia,
+    versionResultado: resultado.versionResultado || 1,
+    fechaValidacion: resultado.fechaValidacion ?? null,
+    fechaLiberacion: resultado.fechaLiberacion,
+    usuarioLiberacion: resultado.usuarioLiberacion,
+    observacionGeneral: resultado.observacionGeneral,
+    muestras: muestrasPorUnidad.get(String(resultado.claveUnidad ?? "")) ?? [],
+    items: obtenerItemsEntregables(resultado.resultadosItems).map((item) => {
+      const metadata = obtenerMetadataItemInforme({ solicitud, resultado, item });
+
+      return {
+        nombreInforme: item.nombreInforme,
+        codItemLab: item.codItemLab,
+        tipoResultado: metadata.tipoResultado,
+        metodo: metadata.metodo,
+        nombreGrupo: metadata.nombreGrupo,
+        comentarioReferenciaGrupo: metadata.comentarioReferenciaGrupo,
+        mostrarReferenciaInforme: metadata.mostrarReferenciaInforme,
+        hallazgosNormales: metadata.hallazgosNormales,
+        valor: item.valor,
+        unidadesRef: item.unidadesRef,
+        observacion: item.observacion,
+        evaluacionReferencia: item.evaluacionReferencia,
+        referenciasConfiguradas: metadata.referenciasConfiguradas,
+        alertasDetectadas: item.alertasDetectadas,
+        ordenGrupo: item.ordenGrupo,
+        ordenItem: item.ordenItem,
+      };
+    }),
+  }));
+
+  return {
+    ok: true,
+    solicitud: {
+      solicitudAtencionId: String(solicitud._id),
+      codSolicitud: solicitud.codSolicitud,
+      codigoLaboratorio: solicitud.codigoLaboratorio,
+      fechaEmision: solicitud.fechaEmision,
+      fechaAtencion: solicitud.fechaAtencionArea ?? null,
+      origenAtencion: solicitud.origenAtencion,
+      paciente: construirPaciente(solicitud),
+      empresa: construirEmpresa(solicitud),
+    },
+    resumen: {
+      totalPruebas: resultados.length,
+      liberados: resultados.length,
+      pendientes: 0,
+      tipoDisponibilidad: "COMPLETA",
+    },
+    resultados,
+    entregas: [],
+  };
+};
+
 // ====== Informe vigente con solo pruebas LIBERADAS ======
 const obtenerInformeEntregable = async (req, res = response) => {
   try {
@@ -1032,7 +1199,7 @@ const obtenerInformeEntregable = async (req, res = response) => {
       }),
     }));
     const entregas = await EntregaResultado.find({ solicitudAtencionId })
-      .select("tipoEntrega medio receptorNombre fechaEntrega usuarioEntrega resultados")
+      .select("tipoEntrega medio receptorNombre receptorCorreo receptorTelefono fechaEntrega usuarioEntrega resultados despachoResultadoId")
       .sort({ fechaEntrega: -1 })
       .limit(50)
       .lean();
@@ -1055,6 +1222,11 @@ const obtenerInformeEntregable = async (req, res = response) => {
         tipoEntrega: entrega.tipoEntrega,
         medio: entrega.medio,
         receptorNombre: entrega.receptorNombre,
+        receptorCorreo: entrega.receptorCorreo ?? null,
+        receptorTelefono: entrega.receptorTelefono ?? null,
+        despachoResultadoId: entrega.despachoResultadoId
+          ? String(entrega.despachoResultadoId)
+          : null,
         fechaEntrega: entrega.fechaEntrega,
         usuarioEntrega: entrega.usuarioEntrega,
         pruebasEntregadas: entrega.resultados.length,
@@ -1095,6 +1267,14 @@ const registrarEntregaResultados = async (req, res = response) => {
         msg: "Datos de entrega incompletos o inválidos",
       });
     }
+    if (["CORREO", "WHATSAPP"].includes(medio)) {
+      return res.status(409).json({
+        ok: false,
+        codigo: "CANAL_AUTOMATIZADO",
+        msg: `${medio} debe procesarse mediante el motor automático de despacho`,
+      });
+    }
+
     const ids = [...new Set(resultadosIds.map(String))];
     if (ids.length !== resultadosIds.length) {
       return res.status(400).json({ ok: false, msg: "No se permiten pruebas duplicadas" });
@@ -1189,5 +1369,6 @@ const registrarEntregaResultados = async (req, res = response) => {
 module.exports = {
   obtenerBandejaEntregaResultados,
   obtenerInformeEntregable,
+  construirInformeEntregableSeleccionado,
   registrarEntregaResultados,
 };

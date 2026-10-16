@@ -1317,8 +1317,8 @@ const SolicitudAtencionSchema = new Schema(
     estado: {
       type: String,
       required: true,
-      enum: ["GENERADO", "EN PROCESO", "ATENDIDO", "ANULADO"],
-      default: "GENERADO",
+      enum: ["PENDIENTE", "EN PROCESO", "ATENDIDO", "ANULADO"],
+      default: "PENDIENTE",
       trim: true,
     },
     fechaAtencionArea: {

@@ -1416,6 +1416,164 @@ const validarEtapaEvidenciaMuestra = ({ muestra, etapa }) => {
   }
 };
 
+// ====== Preparar muestras dentro de una transacción existente ======
+
+const prepararMuestrasSolicitud = async ({
+  solicitud,
+  uid,
+  nombreUsuario,
+  session,
+}) => {
+  if (!session) {
+    throw new Error(
+      "Se requiere una sesión de MongoDB para preparar las muestras",
+    );
+  }
+
+  // ====== Validar solicitud ======
+
+  if (solicitud.tipo !== "Laboratorio") {
+    throw new Error("La solicitud indicada no corresponde a Laboratorio");
+  }
+
+  // ====== Validar código laboratorio ======
+
+  if (!solicitud.codigoLaboratorio) {
+    throw new Error("La solicitud no posee código de laboratorio");
+  }
+
+  if (solicitud.estado === "ANULADO") {
+    throw new Error(
+      "No se pueden inicializar muestras de una solicitud anulada",
+    );
+  }
+
+  const unidades = Array.isArray(solicitud.unidadesLaboratorio)
+    ? solicitud.unidadesLaboratorio
+    : [];
+
+  if (unidades.length === 0) {
+    throw new Error("La solicitud no contiene unidades de laboratorio");
+  }
+
+  // ====== Construir slots ======
+
+  const { slots, unidadesConMuestra, requerimientosProcesados } =
+    construirSlotsMuestra(unidades);
+
+  // ====== Construir planes ======
+
+  const planes = construirPlanesMuestra(slots);
+
+  // ====== Obtener muestras existentes ======
+
+  const muestrasExistentes = await MuestraLaboratorio.find({
+    solicitudAtencionId: solicitud._id,
+  })
+    .session(session)
+    .lean();
+
+  const clavesPlanesExistentes = new Set(
+    muestrasExistentes.map((muestra) => muestra.claveMuestraPlan),
+  );
+
+  // ====== Crear planes faltantes ======
+
+  const muestrasNuevas = [];
+
+  for (let indicePlan = 0; indicePlan < planes.length; indicePlan += 1) {
+    const plan = planes[indicePlan];
+
+    if (clavesPlanesExistentes.has(plan.claveMuestraPlan)) {
+      continue;
+    }
+
+    const numeroPlan = indicePlan + 1;
+
+    const codMuestra =
+      `MUE-${solicitud.codSolicitud}-` +
+      `${numeroPlan.toString().padStart(3, "0")}`;
+
+    // ====== Código visible de etiqueta ======
+
+    const codigoEtiqueta =
+      `${solicitud.codigoLaboratorio}-` +
+      `${numeroPlan.toString().padStart(2, "0")}`;
+
+    const muestra = new MuestraLaboratorio({
+      // ====== Solicitud ======
+
+      solicitudAtencionId: solicitud._id,
+
+      codSolicitud: solicitud.codSolicitud,
+
+      codigoLaboratorio: solicitud.codigoLaboratorio,
+
+      // ====== Identidad física ======
+
+      codMuestra,
+
+      codigoEtiqueta,
+
+      claveMuestraPlan: plan.claveMuestraPlan,
+
+      numeroRecipiente: numeroPlan,
+
+      numeroIntento: 1,
+
+      muestraAnteriorId: null,
+
+      // ====== Cobertura ======
+
+      coberturas: plan.coberturas,
+
+      // ====== Opción real pendiente ======
+
+      tipoMuestraId: null,
+
+      tipoMuestra: null,
+
+      tuboEnvaseId: null,
+
+      tuboEnvase: null,
+
+      volumenRecolectado: null,
+
+      unidadVolumenRecolectado: null,
+
+      // ====== Estado ======
+
+      estadoMuestra: "PENDIENTE",
+
+      observacionGeneral: "",
+
+      // ====== Auditoría ======
+
+      createdBy: uid,
+
+      usuarioRegistro: nombreUsuario ?? null,
+
+      fechaRegistro: new Date(),
+    });
+
+    await muestra.save({
+      session,
+    });
+
+    muestrasNuevas.push(muestra);
+  }
+
+  return {
+    unidades,
+    slots,
+    unidadesConMuestra,
+    requerimientosProcesados,
+    planes,
+    muestrasExistentes,
+    muestrasNuevas,
+  };
+};
+
 // ====== Inicializar muestras de solicitud ======
 
 const inicializarMuestrasSolicitud = async (req, res = response) => {
@@ -1443,138 +1601,22 @@ const inicializarMuestrasSolicitud = async (req, res = response) => {
       throw new Error("La solicitud de atención no existe");
     }
 
-    // ====== Validar solicitud ======
+    // ====== Preparar muestras con la sesión actual ======
 
-    if (solicitud.tipo !== "Laboratorio") {
-      throw new Error("La solicitud indicada no corresponde a Laboratorio");
-    }
-
-    // ====== Validar código laboratorio ======
-
-    if (!solicitud.codigoLaboratorio) {
-      throw new Error("La solicitud no posee código de laboratorio");
-    }
-
-    if (solicitud.estado === "ANULADO") {
-      throw new Error(
-        "No se pueden inicializar muestras de una solicitud anulada",
-      );
-    }
-
-    const unidades = Array.isArray(solicitud.unidadesLaboratorio)
-      ? solicitud.unidadesLaboratorio
-      : [];
-
-    if (unidades.length === 0) {
-      throw new Error("La solicitud no contiene unidades de laboratorio");
-    }
-
-    // ====== Construir slots ======
-
-    const { slots, unidadesConMuestra, requerimientosProcesados } =
-      construirSlotsMuestra(unidades);
-
-    // ====== Construir planes ======
-
-    const planes = construirPlanesMuestra(slots);
-
-    // ====== Obtener muestras existentes ======
-
-    const muestrasExistentes = await MuestraLaboratorio.find({
-      solicitudAtencionId: solicitud._id,
-    })
-      .session(session)
-      .lean();
-
-    const clavesPlanesExistentes = new Set(
-      muestrasExistentes.map((muestra) => muestra.claveMuestraPlan),
-    );
-
-    // ====== Crear planes faltantes ======
-
-    const muestrasNuevas = [];
-
-    for (let indicePlan = 0; indicePlan < planes.length; indicePlan += 1) {
-      const plan = planes[indicePlan];
-
-      if (clavesPlanesExistentes.has(plan.claveMuestraPlan)) {
-        continue;
-      }
-
-      const numeroPlan = indicePlan + 1;
-
-      const codMuestra =
-        `MUE-${solicitud.codSolicitud}-` +
-        `${numeroPlan.toString().padStart(3, "0")}`;
-
-      // ====== Código visible de etiqueta ======
-
-      const codigoEtiqueta =
-        `${solicitud.codigoLaboratorio}-` +
-        `${numeroPlan.toString().padStart(2, "0")}`;
-
-      const muestra = new MuestraLaboratorio({
-        // ====== Solicitud ======
-
-        solicitudAtencionId: solicitud._id,
-
-        codSolicitud: solicitud.codSolicitud,
-
-        codigoLaboratorio: solicitud.codigoLaboratorio,
-
-        // ====== Identidad física ======
-
-        codMuestra,
-
-        codigoEtiqueta,
-
-        claveMuestraPlan: plan.claveMuestraPlan,
-
-        numeroRecipiente: numeroPlan,
-
-        numeroIntento: 1,
-
-        muestraAnteriorId: null,
-
-        // ====== Cobertura ======
-
-        coberturas: plan.coberturas,
-
-        // ====== Opción real pendiente ======
-
-        tipoMuestraId: null,
-
-        tipoMuestra: null,
-
-        tuboEnvaseId: null,
-
-        tuboEnvase: null,
-
-        volumenRecolectado: null,
-
-        unidadVolumenRecolectado: null,
-
-        // ====== Estado ======
-
-        estadoMuestra: "PENDIENTE",
-
-        observacionGeneral: "",
-
-        // ====== Auditoría ======
-
-        createdBy: uid,
-
-        usuarioRegistro: nombreUsuario ?? null,
-
-        fechaRegistro: new Date(),
-      });
-
-      await muestra.save({
-        session,
-      });
-
-      muestrasNuevas.push(muestra);
-    }
+    const {
+      unidades,
+      slots,
+      unidadesConMuestra,
+      requerimientosProcesados,
+      planes,
+      muestrasExistentes,
+      muestrasNuevas,
+    } = await prepararMuestrasSolicitud({
+      solicitud,
+      uid,
+      nombreUsuario,
+      session,
+    });
 
     // ====== Sincronizar estados de solicitud ======
 
@@ -1644,6 +1686,201 @@ const inicializarMuestrasSolicitud = async (req, res = response) => {
       msg:
         error.message ||
         "No se pudieron inicializar las muestras de laboratorio",
+    });
+  } finally {
+    await session.endSession();
+  }
+};
+
+// ====== Registrar toma y recepción en una operación ======
+
+// ====== Sincronizar estados tras operaciones masivas confirmadas ======
+const sincronizarEstadosDeLotes = async ({
+  candidatas,
+  idsConfirmados,
+  uid,
+  nombreUsuario,
+}) => {
+  const idsSolicitudes = [
+    ...new Set(
+      candidatas
+        .filter((candidata) =>
+          idsConfirmados.has(String(candidata.muestra._id)),
+        )
+        .map((candidata) => String(candidata.muestra.solicitudAtencionId ?? ""))
+        .filter(Boolean),
+    ),
+  ];
+
+  const advertencias = [];
+  for (const solicitudAtencionId of idsSolicitudes) {
+    try {
+      const solicitud = await SolicitudAtencion.findById(solicitudAtencionId);
+      if (solicitud) {
+        await sincronizarEstadosSolicitudLaboratorio({
+          solicitud,
+          uid,
+          nombreUsuario,
+        });
+      }
+    } catch (error) {
+      console.error(`Error al actualizar estado de ${solicitudAtencionId}:`, error);
+      advertencias.push({
+        solicitudAtencionId,
+        msg: "Operación registrada; no se pudo actualizar el estado principal de la solicitud",
+      });
+    }
+  }
+
+  return advertencias;
+};
+
+const tomarYRecibirMuestra = async (req, res = response) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { muestraLaboratorioId } = req.params;
+    const { uid, nombreUsuario } = req.user;
+    const {
+      tipoMuestraId,
+      tuboEnvaseId,
+      volumenRecolectado,
+      unidadVolumenRecolectado,
+      fechaRecoleccion,
+      observacionRecoleccion,
+      observacionRecepcion,
+    } = req.body ?? {};
+
+    // ====== Validar muestra y opción física ======
+
+    if (!mongoose.Types.ObjectId.isValid(muestraLaboratorioId)) {
+      throw new Error("El id de la muestra de laboratorio no es válido");
+    }
+    if (!mongoose.Types.ObjectId.isValid(tipoMuestraId)) {
+      throw new Error("Debe seleccionar un tipo de muestra válido");
+    }
+    if (!mongoose.Types.ObjectId.isValid(tuboEnvaseId)) {
+      throw new Error("Debe seleccionar un tubo o envase válido");
+    }
+    if (
+      (observacionRecoleccion != null &&
+        typeof observacionRecoleccion !== "string") ||
+      (observacionRecepcion != null &&
+        typeof observacionRecepcion !== "string")
+    ) {
+      throw new Error("Las observaciones deben ser textos válidos");
+    }
+
+    const volumen = normalizarVolumenRecoleccionMasiva({
+      volumenRecolectado,
+      unidadVolumenRecolectado,
+    });
+
+    // ====== Validar estado y solicitud ======
+
+    const muestra = await MuestraLaboratorio.findById(
+      muestraLaboratorioId,
+    ).session(session);
+
+    if (!muestra) {
+      throw new Error("La muestra de laboratorio no existe");
+    }
+    if (muestra.estadoMuestra !== "PENDIENTE") {
+      throw new Error(
+        `No se puede registrar la toma de una muestra en estado ${muestra.estadoMuestra}`,
+      );
+    }
+
+    const solicitud = await SolicitudAtencion.findById(
+      muestra.solicitudAtencionId,
+    ).session(session);
+
+    if (!solicitud || solicitud.tipo !== "Laboratorio") {
+      throw new Error("La solicitud asociada no corresponde a Laboratorio");
+    }
+    if (solicitud.estado === "ANULADO") {
+      throw new Error("No se puede tomar una muestra de una solicitud anulada");
+    }
+
+    // ====== Validar opción compatible con la cobertura histórica ======
+
+    const opcion = obtenerOpcionComunSeleccionada({
+      muestra,
+      tipoMuestraId,
+      tuboEnvaseId,
+    });
+
+    const ahora = new Date();
+    const fechaToma = normalizarFechaRecoleccion(fechaRecoleccion, ahora);
+
+    // ====== Registrar recolección y recepción con auditoría independiente ======
+
+    muestra.tipoMuestraId = opcion.tipoMuestraId;
+    muestra.tipoMuestra = opcion.tipoMuestra;
+    muestra.tuboEnvaseId = opcion.tuboEnvaseId;
+    muestra.tuboEnvase = opcion.tuboEnvase;
+    muestra.volumenRecolectado = volumen.volumenRecolectado;
+    muestra.unidadVolumenRecolectado = volumen.unidadVolumenRecolectado;
+
+    muestra.recolectadoPor = uid;
+    muestra.usuarioRecoleccion = nombreUsuario ?? null;
+    muestra.fechaRecoleccion = fechaToma;
+    muestra.fechaRegistroRecoleccion = ahora;
+    muestra.observacionRecoleccion =
+      typeof observacionRecoleccion === "string"
+        ? observacionRecoleccion.trim()
+        : "";
+
+    muestra.recibidoPor = uid;
+    muestra.usuarioRecepcion = nombreUsuario ?? null;
+    muestra.fechaRecepcion = ahora;
+    muestra.observacionRecepcion =
+      typeof observacionRecepcion === "string"
+        ? observacionRecepcion.trim()
+        : "";
+
+    muestra.estadoMuestra = "RECEPCIONADA";
+    muestra.updatedBy = uid;
+    muestra.usuarioActualizacion = nombreUsuario ?? null;
+    muestra.fechaActualizacion = ahora;
+
+    await muestra.save({ session });
+
+    // ====== Mantener cómputo del compromiso desde la toma real ======
+
+    await sincronizarCompromisosSolicitud({
+      solicitudAtencionId: muestra.solicitudAtencionId,
+      session,
+      uid,
+      nombreUsuario,
+      motivoInvalidacion: "TOMA_RECEPCION_MUESTRA",
+    });
+
+    // ====== Sincronizar el estado principal con la actividad clínica ======
+    await sincronizarEstadosSolicitudLaboratorio({
+      solicitud,
+      uid,
+      nombreUsuario,
+      session,
+    });
+
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      ok: true,
+      msg: "Toma y recepción registradas correctamente",
+      estadoMuestra: muestra.estadoMuestra,
+      muestra,
+    });
+  } catch (error) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    console.error("Error al registrar toma y recepción:", error);
+    return res.status(400).json({
+      ok: false,
+      msg: error.message || "No se pudo registrar la toma y recepción",
     });
   } finally {
     await session.endSession();
@@ -1848,6 +2085,14 @@ const recolectarMuestra = async (req, res = response) => {
       uid,
       nombreUsuario,
       motivoInvalidacion: "RECOLECCION_MUESTRA",
+    });
+
+    // ====== Sincronizar el estado principal con la actividad clínica ======
+    await sincronizarEstadosSolicitudLaboratorio({
+      solicitud,
+      uid,
+      nombreUsuario,
+      session,
     });
 
     await session.commitTransaction();
@@ -2228,14 +2473,28 @@ const obtenerMuestrasRecoleccionMasiva = async (req, res = response) => {
 // ====== Registrar recolección masiva ======
 
 const recolectarMuestrasMasivamente = async (req, res = response) => {
+  let archivoEvidenciaGrupal = null;
+  const tomaRecepcionUnificada =
+    req.route?.path === "/masiva/tomar-recibir";
+
   try {
     const { uid, nombreUsuario } = req.user;
 
-    const {
+    let {
       muestras: itemsEntrada,
       observacionRecoleccion,
       fechaRecoleccion,
-    } = req.body;
+    } = req.body ?? {};
+
+    // ====== Normalizar lista multipart ======
+
+    if (typeof itemsEntrada === "string") {
+      try {
+        itemsEntrada = JSON.parse(itemsEntrada);
+      } catch (error) {
+        throw new Error("La lista de muestras no posee un formato válido");
+      }
+    }
 
     // ====== Validar lista ======
 
@@ -2405,7 +2664,7 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
               $in: solicitudIds,
             },
           })
-            .select("_id tipo estado")
+            .select("_id tipo estado origenAtencion")
             .lean()
         : [];
 
@@ -2494,13 +2753,40 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
 
       candidatas.push({
         muestra,
+        solicitud,
         opcionSeleccionada,
         volumenRecolectado: item.volumenRecolectado,
         unidadVolumenRecolectado: item.unidadVolumenRecolectado,
       });
     });
 
-    // ====== Registrar recolección en bloque ======
+    // ====== Fotografía grupal opcional para Empresa ======
+
+    if (tomaRecepcionUnificada && req.file && candidatas.length > 0) {
+      if (candidatas.some((candidata) =>
+        candidata.solicitud.origenAtencion !== "EMPRESA"
+      )) {
+        throw new Error(
+          "La evidencia grupal solo aplica a muestras de Empresa",
+        );
+      }
+
+      if (!Buffer.isBuffer(req.file.buffer) || req.file.buffer.length === 0) {
+        throw new Error("La fotografía grupal no contiene datos válidos");
+      }
+
+      archivoEvidenciaGrupal = await subirArchivoStorage({
+        keyPrefix: "laboratorio/muestras/evidencias-grupales/recepcion",
+        buffer: req.file.buffer,
+        mimeType: req.file.mimetype,
+      });
+
+      if (!archivoEvidenciaGrupal?.archivoId || !archivoEvidenciaGrupal?.key) {
+        throw new Error("El almacenamiento no devolvió una evidencia válida");
+      }
+    }
+
+    // ====== Registrar toma y recepción en bloque ======
 
     const ahora = ahoraRegistro;
 
@@ -2526,7 +2812,17 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
                   candidata.volumenRecolectado,
                 unidadVolumenRecolectado:
                   candidata.unidadVolumenRecolectado,
-                estadoMuestra: "RECOLECTADA",
+                estadoMuestra: tomaRecepcionUnificada
+                  ? "RECEPCIONADA"
+                  : "RECOLECTADA",
+                ...(tomaRecepcionUnificada
+                  ? {
+                      recibidoPor: uid,
+                      usuarioRecepcion: nombreUsuario ?? null,
+                      fechaRecepcion: ahora,
+                      observacionRecepcion: observacionNormalizada,
+                    }
+                  : {}),
                 recolectadoPor: uid,
                 usuarioRecoleccion: nombreUsuario ?? null,
                 fechaRecoleccion: fechaToma,
@@ -2536,6 +2832,28 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
                 usuarioActualizacion: nombreUsuario ?? null,
                 fechaActualizacion: ahora,
               },
+              ...(tomaRecepcionUnificada && archivoEvidenciaGrupal
+                ? {
+                    $push: {
+                      evidenciasFotograficas: {
+                        _id: new mongoose.Types.ObjectId(),
+                        archivoId: archivoEvidenciaGrupal.archivoId,
+                        storageKey: archivoEvidenciaGrupal.key,
+                        versionId: archivoEvidenciaGrupal.versionId ?? null,
+                        etag: archivoEvidenciaGrupal.etag ?? null,
+                        nombreArchivo: req.file?.originalname?.trim() ?? "",
+                        mimeType: req.file?.mimetype ?? "",
+                        tamanoBytes: req.file?.size ?? null,
+                        etapa: "RECEPCION",
+                        observacion: observacionNormalizada,
+                        registradoPor: uid,
+                        usuarioRegistro: nombreUsuario ?? null,
+                        fechaRegistro: ahora,
+                        estadoEvidencia: "ACTIVA",
+                      },
+                    },
+                  }
+                : {}),
             },
           },
         })),
@@ -2557,7 +2875,9 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
             _id: {
               $in: candidatasIds,
             },
-            estadoMuestra: "RECOLECTADA",
+            estadoMuestra: tomaRecepcionUnificada
+              ? "RECEPCIONADA"
+              : "RECOLECTADA",
             recolectadoPor: uid,
             fechaRegistroRecoleccion: ahora,
           })
@@ -2576,6 +2896,8 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
                 "usuarioRecoleccion",
                 "fechaRecoleccion",
                 "fechaRegistroRecoleccion",
+                "usuarioRecepcion",
+                "fechaRecepcion",
               ].join(" "),
             )
             .lean()
@@ -2584,6 +2906,16 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
     const idsRecolectados = new Set(
       recolectadas.map((muestra) => muestra._id.toString()),
     );
+
+    // ====== Compensar evidencia sin referencias ======
+
+    if (archivoEvidenciaGrupal?.key && recolectadas.length === 0) {
+      await eliminarArchivo(
+        archivoEvidenciaGrupal.key,
+        archivoEvidenciaGrupal.versionId ?? undefined,
+      );
+      archivoEvidenciaGrupal = null;
+    }
 
     // ====== Detectar cambios concurrentes ======
 
@@ -2637,7 +2969,9 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
           solicitudAtencionId,
           uid,
           nombreUsuario,
-          motivoInvalidacion: "RECOLECCION_MASIVA",
+          motivoInvalidacion: tomaRecepcionUnificada
+            ? "TOMA_RECEPCION_MASIVA"
+            : "RECOLECCION_MASIVA",
         });
       } catch (errorCompromiso) {
         console.error(
@@ -2652,16 +2986,32 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
       }
     }
 
+    // ====== Reflejar la actividad masiva en cada solicitud afectada ======
+    const advertenciasEstado = await sincronizarEstadosDeLotes({
+      candidatas,
+      idsConfirmados: idsRecolectados,
+      uid,
+      nombreUsuario,
+    });
+
     // ====== Respuesta ======
 
     const resumen = {
       solicitadas: itemsEntrada.length,
       recolectadas: recolectadas.length,
+      ...(tomaRecepcionUnificada
+        ? { recepcionadas: recolectadas.length }
+        : {}),
       noProcesadas: noProcesadas.length,
     };
 
-    const msg =
-      resumen.recolectadas === resumen.solicitadas
+    const msg = tomaRecepcionUnificada
+      ? resumen.recolectadas === resumen.solicitadas
+        ? "Todas las muestras fueron tomadas y recepcionadas correctamente"
+        : resumen.recolectadas > 0
+          ? "La toma y recepción masiva finalizó con muestras no procesadas"
+          : "No se pudo procesar ninguna de las muestras seleccionadas"
+      : resumen.recolectadas === resumen.solicitadas
         ? "Todas las muestras fueron recolectadas correctamente"
         : resumen.recolectadas > 0
           ? "La recolección masiva finalizó con algunas muestras no procesadas"
@@ -2671,6 +3021,7 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
       ok: true,
       msg,
       resumen,
+      advertenciasEstado,
       recolectadas: recolectadas.map((muestra) => ({
         muestraLaboratorioId: muestra._id,
         codigoEtiqueta:
@@ -2685,11 +3036,42 @@ const recolectarMuestrasMasivamente = async (req, res = response) => {
           muestra.unidadVolumenRecolectado ?? null,
         usuarioRecoleccion: muestra.usuarioRecoleccion ?? null,
         fechaRecoleccion: muestra.fechaRecoleccion,
+        usuarioRecepcion: muestra.usuarioRecepcion ?? null,
+        fechaRecepcion: muestra.fechaRecepcion ?? null,
       })),
+      evidenciaGrupal: archivoEvidenciaGrupal && recolectadas.length > 0
+        ? {
+            archivoId: archivoEvidenciaGrupal.archivoId,
+            nombreArchivo: req.file?.originalname?.trim() ?? "",
+            mimeType: req.file?.mimetype ?? "",
+            tamanoBytes: req.file?.size ?? null,
+            etapa: "RECEPCION",
+            muestrasAsociadas: recolectadas.length,
+          }
+        : null,
       noProcesadas,
       advertenciasCompromiso,
     });
   } catch (error) {
+    // ====== Compensar fotografía grupal no vinculada ======
+
+    if (archivoEvidenciaGrupal?.key) {
+      try {
+        const evidenciaReferenciada = await MuestraLaboratorio.exists({
+          "evidenciasFotograficas.archivoId": archivoEvidenciaGrupal.archivoId,
+        });
+
+        if (!evidenciaReferenciada) {
+          await eliminarArchivo(
+            archivoEvidenciaGrupal.key,
+            archivoEvidenciaGrupal.versionId ?? undefined,
+          );
+        }
+      } catch (errorEliminacion) {
+        console.error("No se pudo compensar evidencia grupal:", errorEliminacion);
+      }
+    }
+
     console.error("Error al registrar recolección masiva:", error);
 
     return res.status(400).json({
@@ -2808,6 +3190,14 @@ const recibirMuestra = async (req, res = response) => {
     // ====== Guardar ======
 
     await muestra.save({
+      session,
+    });
+
+    // ====== Sincronizar el estado principal con la actividad clínica ======
+    await sincronizarEstadosSolicitudLaboratorio({
+      solicitud,
+      uid,
+      nombreUsuario,
       session,
     });
 
@@ -3584,6 +3974,14 @@ const recibirMuestrasMasivamente = async (req, res = response) => {
       });
     }
 
+    // ====== Reflejar la actividad masiva en cada solicitud afectada ======
+    const advertenciasEstado = await sincronizarEstadosDeLotes({
+      candidatas,
+      idsConfirmados: idsRecepcionados,
+      uid,
+      nombreUsuario,
+    });
+
     // ====== Respuesta ======
 
     const resumen = {
@@ -3604,6 +4002,7 @@ const recibirMuestrasMasivamente = async (req, res = response) => {
       ok: true,
       msg,
       resumen,
+      advertenciasEstado,
       recepcionadas: recepcionadas.map((muestra) => ({
         muestraLaboratorioId: muestra._id,
         codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
@@ -4424,6 +4823,14 @@ const aceptarMuestrasMasivamente = async (req, res = response) => {
       });
     }
 
+    // ====== Reflejar la actividad masiva en cada solicitud afectada ======
+    const advertenciasEstado = await sincronizarEstadosDeLotes({
+      candidatas,
+      idsConfirmados: idsAceptados,
+      uid,
+      nombreUsuario,
+    });
+
     // ====== Respuesta ======
 
     const resumen = {
@@ -4444,6 +4851,7 @@ const aceptarMuestrasMasivamente = async (req, res = response) => {
       ok: true,
       msg,
       resumen,
+      advertenciasEstado,
       aceptadas: aceptadas.map((muestra) => ({
         muestraLaboratorioId: muestra._id,
         codigoEtiqueta: muestra.codigoEtiqueta ?? muestra.codMuestra,
@@ -4614,6 +5022,14 @@ const aceptarMuestra = async (req, res = response) => {
     // ====== Guardar ======
 
     await muestra.save({
+      session,
+    });
+
+    // ====== Sincronizar el estado principal con la actividad clínica ======
+    await sincronizarEstadosSolicitudLaboratorio({
+      solicitud,
+      uid,
+      nombreUsuario,
       session,
     });
 
@@ -4838,6 +5254,14 @@ const rechazarMuestra = async (req, res = response) => {
       uid,
       nombreUsuario,
       motivoInvalidacion: "MUESTRA_RECHAZADA",
+    });
+
+    // ====== Sincronizar el estado principal con la actividad clínica ======
+    await sincronizarEstadosSolicitudLaboratorio({
+      solicitud,
+      uid,
+      nombreUsuario,
+      session,
     });
 
     await session.commitTransaction();
@@ -5227,6 +5651,14 @@ const corregirEvaluacionMuestra = async (req, res = response) => {
           : "CORRECCION_A_ACEPTADA",
     });
 
+    // ====== Sincronizar el estado principal con la actividad clínica ======
+    await sincronizarEstadosSolicitudLaboratorio({
+      solicitud,
+      uid,
+      nombreUsuario,
+      session,
+    });
+
     await session.commitTransaction();
 
     evidenciaPersistida = Boolean(evidencia);
@@ -5424,6 +5856,14 @@ const anularMuestra = async (req, res = response) => {
       uid,
       nombreUsuario,
       motivoInvalidacion: "MUESTRA_ANULADA",
+    });
+
+    // ====== Sincronizar el estado principal con la actividad clínica ======
+    await sincronizarEstadosSolicitudLaboratorio({
+      solicitud,
+      uid,
+      nombreUsuario,
+      session,
     });
 
     await session.commitTransaction();
@@ -5678,6 +6118,14 @@ const generarReintentoMuestra = async (req, res = response) => {
     });
 
     await nuevaMuestra.save({
+      session,
+    });
+
+    // ====== Sincronizar el estado principal con la actividad clínica ======
+    await sincronizarEstadosSolicitudLaboratorio({
+      solicitud,
+      uid,
+      nombreUsuario,
       session,
     });
 
@@ -6937,8 +7385,10 @@ const obtenerEvidenciasMuestra = async (req, res = response) => {
 };
 
 module.exports = {
+  prepararMuestrasSolicitud,
   inicializarMuestrasSolicitud,
   recolectarMuestra,
+  tomarYRecibirMuestra,
   obtenerMuestrasRecoleccionMasiva,
   recolectarMuestrasMasivamente,
   recibirMuestra,

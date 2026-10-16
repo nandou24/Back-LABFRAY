@@ -10,6 +10,12 @@ const EntregaResultadoLaboratorioSchema = new Schema(
       required: true,
       index: true,
     },
+    despachoResultadoId: {
+      type: Schema.Types.ObjectId,
+      ref: "despachoResultadoLaboratorioCollection",
+      default: null,
+      index: true,
+    },
     codSolicitud: { type: String, required: true },
     codigoLaboratorio: { type: String, default: "" },
     tipoEntrega: {
@@ -23,6 +29,8 @@ const EntregaResultadoLaboratorioSchema = new Schema(
       default: "PRESENCIAL",
     },
     receptorNombre: { type: String, default: "", trim: true },
+    receptorCorreo: { type: String, default: null, trim: true, lowercase: true },
+    receptorTelefono: { type: String, default: null, trim: true },
     observacion: { type: String, default: "", trim: true },
     resultados: { type: [Schema.Types.Mixed], required: true },
     totalPruebasActivas: { type: Number, required: true },
@@ -34,6 +42,13 @@ const EntregaResultadoLaboratorioSchema = new Schema(
 );
 
 EntregaResultadoLaboratorioSchema.index({ solicitudAtencionId: 1, fechaEntrega: -1 });
+EntregaResultadoLaboratorioSchema.index(
+  { despachoResultadoId: 1, solicitudAtencionId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { despachoResultadoId: { $type: "objectId" } },
+  },
+);
 
 module.exports = mongoose.model(
   "entregaResultadoLaboratorioCollection",

@@ -5,6 +5,7 @@ const Servicio = require("../../models/Mantenimiento/Servicio");
 const PruebaLab = require("../../models/Mantenimiento/PruebaLab");
 const Paciente = require("../../models/Mantenimiento/Paciente");
 const CorrelativoLaboratorio = require("../../models/Gestion/CorrelativoLaboratorio");
+const { prepararMuestrasSolicitud } = require("./muestraLaboratorioController");
 // ====== Registrar maestros de muestra ======
 require("../../models/Mantenimiento/TipoMuestra");
 require("../../models/Mantenimiento/TuboEnvase");
@@ -1537,7 +1538,7 @@ const crearSolicitudesAtencion = async ({
 
       fechaEmision: ahora,
 
-      estado: "GENERADO",
+      estado: "PENDIENTE",
 
       // ====== Auditoría ======
 
@@ -1637,6 +1638,17 @@ const crearSolicitudesAtencion = async ({
     await nuevaSolicitud.save({
       session,
     });
+
+    // ====== Inicializar muestras al crear la solicitud ======
+
+    if (tipo === "Laboratorio") {
+      await prepararMuestrasSolicitud({
+        solicitud: nuevaSolicitud,
+        uid,
+        nombreUsuario,
+        session,
+      });
+    }
 
     // ====== Congelar plazos que ya tienen fecha base ======
 
@@ -1904,7 +1916,7 @@ const completarAtencionArea = async (req, res = response) => {
     // 3. VALIDAR ESTADO ACTUAL
     // ========================================
 
-    if (!["GENERADO", "EN PROCESO"].includes(solicitud.estado)) {
+    if (!["PENDIENTE", "EN PROCESO"].includes(solicitud.estado)) {
       await session.abortTransaction();
 
       return res.status(409).json({

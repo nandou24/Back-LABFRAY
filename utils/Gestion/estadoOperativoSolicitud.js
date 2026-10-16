@@ -320,12 +320,26 @@ const construirEstadoOperativoLaboratorio = ({
     descripcion = "Muestras aceptadas";
   }
 
+  // ====== La inicialización técnica no inicia la atención ======
+  const actividadEnMuestras = obtenerLista(muestras).some(
+    (muestra) => muestra?.estadoMuestra !== "PENDIENTE",
+  );
+
+  const actividadEnResultados = resultadosUnidadesActivas.some(
+    (resultado) => resultado?.estadoResultado !== "PENDIENTE",
+  );
+
+  const actividadEnUnidades = unidadesActivas.some((unidad) =>
+    ["EN PROCESO", "TERMINADO"].includes(unidad?.estado),
+  );
+
   const actividadIniciada =
-    obtenerLista(muestras).length > 0 ||
-    resultadosUnidadesActivas.length > 0 ||
+    actividadEnMuestras ||
+    actividadEnResultados ||
+    actividadEnUnidades ||
     ["EN PROCESO", "ATENDIDO"].includes(solicitud?.estado);
 
-  let estadoPrincipalSugerido = "GENERADO";
+  let estadoPrincipalSugerido = "PENDIENTE";
 
   if (solicitud?.estado === "ANULADO") {
     estadoPrincipalSugerido = "ANULADO";
@@ -528,11 +542,9 @@ const sincronizarEstadosSolicitudLaboratorio = async ({
 
   if (estadoOperativo.estadoPrincipalSugerido === "ATENDIDO") {
     nuevoEstadoSolicitud = "ATENDIDO";
-  } else if (
-    estadoAnteriorSolicitud === "GENERADO" &&
-    estadoOperativo.estadoPrincipalSugerido === "EN PROCESO"
-  ) {
-    nuevoEstadoSolicitud = "EN PROCESO";
+  } else if (["GENERADO", "PENDIENTE"].includes(estadoAnteriorSolicitud)) {
+    // ====== NORMALIZAR documentos legacy y solicitudes nuevas ======
+    nuevoEstadoSolicitud = estadoOperativo.estadoPrincipalSugerido;
   }
 
   const estadoSolicitudModificado = nuevoEstadoSolicitud !== estadoAnteriorSolicitud;

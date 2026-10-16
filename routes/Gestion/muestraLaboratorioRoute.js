@@ -3,6 +3,7 @@ const { Router } = require("express");
 const {
   inicializarMuestrasSolicitud,
   recolectarMuestra,
+  tomarYRecibirMuestra,
   obtenerMuestrasRecoleccionMasiva,
   recolectarMuestrasMasivamente,
   recibirMuestra,
@@ -54,6 +55,15 @@ router.put(
   recolectarMuestrasMasivamente,
 );
 
+// ====== Toma y recepción masiva unificadas ======
+
+router.put(
+  "/masiva/tomar-recibir",
+  validarJWT,
+  cargarEvidenciaMuestra,
+  recolectarMuestrasMasivamente,
+);
+
 // ====== Recepción masiva ======
 
 router.get(
@@ -83,6 +93,10 @@ router.put(
   cargarEvidenciaMuestra,
   aceptarMuestrasMasivamente,
 );
+
+// ====== Toma y recepción individual ======
+
+router.put("/:muestraLaboratorioId/tomar-recibir", validarJWT, tomarYRecibirMuestra);
 
 // ====== Registrar recolección ======
 
