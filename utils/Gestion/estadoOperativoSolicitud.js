@@ -374,6 +374,88 @@ const construirEstadoOperativoLaboratorio = ({
   };
 };
 
+// ====== Seguimiento operativo independiente por servicio ======
+
+const construirSeguimientoServiciosLaboratorio = ({
+  solicitud,
+  muestras = [],
+  resultados = [],
+}) => {
+  const servicios = obtenerLista(solicitud?.servicios);
+  const unidades = obtenerLista(solicitud?.unidadesLaboratorio);
+
+  return servicios.map((servicio) => {
+    const unidadesServicio = unidades.filter((unidad) => {
+      const mismoServicio =
+        String(unidad?.servicioId ?? "") === String(servicio?.servicioId ?? "") &&
+        String(unidad?.codServicio ?? "") === String(servicio?.codServicio ?? "");
+
+      if (!mismoServicio) return false;
+
+      // ====== Diferenciar el mismo servicio presente en dos líneas ======
+      if (servicio?.lineaCotizacion != null && unidad?.lineaCotizacion != null) {
+        return Number(servicio.lineaCotizacion) === Number(unidad.lineaCotizacion);
+      }
+
+      return true;
+    });
+
+    if (!unidadesServicio.length) {
+      return {
+        ...servicio,
+        estadoSeguimiento: servicio.estado,
+        estadoOperativo: null,
+      };
+    }
+
+    const clavesUnidad = new Set(
+      unidadesServicio.map((unidad) => String(unidad?.claveUnidad ?? "")),
+    );
+
+    const muestrasServicio = obtenerLista(muestras).filter((muestra) =>
+      obtenerLista(muestra?.coberturas).some((cobertura) =>
+        clavesUnidad.has(String(cobertura?.claveUnidad ?? "")),
+      ),
+    );
+
+    const resultadosServicio = obtenerLista(resultados).filter((resultado) =>
+      clavesUnidad.has(String(resultado?.claveUnidad ?? "")),
+    );
+
+    const todasUnidadesAnuladas = unidadesServicio.every(
+      (unidad) => unidad?.estado === "ANULADO",
+    );
+
+    // ====== No heredar el cierre de otros servicios de la solicitud ======
+    const seguimiento = construirEstadoOperativoLaboratorio({
+      solicitud: {
+        tipo: "Laboratorio",
+        estado:
+          solicitud?.estado === "ANULADO" || todasUnidadesAnuladas
+            ? "ANULADO"
+            : "PENDIENTE",
+        unidadesLaboratorio: unidadesServicio,
+      },
+      muestras: muestrasServicio,
+      resultados: resultadosServicio,
+    });
+
+    const estadoSeguimiento =
+      seguimiento.estadoPrincipalSugerido === "ATENDIDO"
+        ? "TERMINADO"
+        : seguimiento.estadoPrincipalSugerido;
+
+    return {
+      ...servicio,
+      estadoSeguimiento,
+      estadoOperativo: {
+        codigo: seguimiento.codigo,
+        descripcion: seguimiento.descripcion,
+      },
+    };
+  });
+};
+
 // ====== Obtener datos operativos de Laboratorio ======
 
 const obtenerDatosOperativosLaboratorio = async ({
@@ -586,6 +668,7 @@ const sincronizarEstadosSolicitudLaboratorio = async ({
 
 module.exports = {
   construirEstadoOperativoLaboratorio,
+  construirSeguimientoServiciosLaboratorio,
   resolverEstadoOperativoSolicitud,
   sincronizarEstadosSolicitudLaboratorio,
 };

@@ -1,5 +1,11 @@
 const mongoose = require("mongoose");
 const SolicitudAtencion = require("../../models/Gestion/SolicitudAtencion");
+const MuestraLaboratorio = require("../../models/Gestion/MuestraLaboratorio");
+const ResultadoLaboratorio = require("../../models/Gestion/ResultadoLaboratorio");
+const {
+  construirEstadoOperativoLaboratorio,
+  construirSeguimientoServiciosLaboratorio,
+} = require("../../utils/Gestion/estadoOperativoSolicitud");
 const ProgramacionPacienteEmpresa = require("../../models/Gestion/programacionPacienteEmpresa");
 const Servicio = require("../../models/Mantenimiento/Servicio");
 const PruebaLab = require("../../models/Mantenimiento/PruebaLab");
@@ -1694,12 +1700,10 @@ exports.actualizarEstado = async (req, res) => {
   }
 };
 
-// Traer solicitudes por rango de fechas
+// ====== Consultar solicitudes con seguimiento operativo ======
 const obtenerPorRangoFechas = async (req, res) => {
   try {
-    const { fechaInicio, fechaFin, terminoBusqueda } = req.query;
-    console.log("Fechas recibidas:", fechaInicio, fechaFin);
-    console.log("Término de búsqueda:", terminoBusqueda);
+    const { fechaInicio, fechaFin, terminoBusqueda = "" } = req.query;
 
     const filtro = {
       fechaEmision: {
@@ -1708,8 +1712,8 @@ const obtenerPorRangoFechas = async (req, res) => {
       },
     };
 
-    if (terminoBusqueda.trim() !== "") {
-      const regex = new RegExp(terminoBusqueda.trim(), "i"); // 'i' = case-insensitive
+    if (String(terminoBusqueda).trim() !== "") {
+      const regex = new RegExp(String(terminoBusqueda).trim(), "i");
       filtro.$or = [
         { pacienteNombre: regex },
         { codCotizacion: regex },
@@ -1724,13 +1728,69 @@ const obtenerPorRangoFechas = async (req, res) => {
       )
       .populate("pagoId", "subTotalFacturar")
       .populate("programacionEmpresaId")
-      .sort({ fechaEmision: -1 });
+      .sort({ fechaEmision: -1 })
+      .lean();
 
-    console.log("Solicitudes encontradas:", solicitudes.length);
+    // ====== Consultar muestras y resultados de Laboratorio en bloque ======
+    const laboratorioIds = solicitudes
+      .filter((solicitud) => solicitud.tipo === "Laboratorio")
+      .map((solicitud) => solicitud._id);
 
-    res.json(solicitudes);
+    if (!laboratorioIds.length) {
+      return res.json(solicitudes);
+    }
+
+    const [muestras, resultados] = await Promise.all([
+      MuestraLaboratorio.find({ solicitudAtencionId: { $in: laboratorioIds } })
+        .select("solicitudAtencionId claveMuestraPlan numeroIntento estadoMuestra createdAt coberturas.claveUnidad")
+        .lean(),
+      ResultadoLaboratorio.find({ solicitudAtencionId: { $in: laboratorioIds } })
+        .select("solicitudAtencionId claveUnidad estadoResultado")
+        .lean(),
+    ]);
+
+    const agruparPorSolicitud = (documentos) => {
+      const mapa = new Map();
+      for (const documento of documentos) {
+        const id = String(documento.solicitudAtencionId ?? "");
+        if (!mapa.has(id)) mapa.set(id, []);
+        mapa.get(id).push(documento);
+      }
+      return mapa;
+    };
+
+    const muestrasPorSolicitud = agruparPorSolicitud(muestras);
+    const resultadosPorSolicitud = agruparPorSolicitud(resultados);
+
+    const respuesta = solicitudes.map((solicitud) => {
+      if (solicitud.tipo !== "Laboratorio") return solicitud;
+
+      const id = String(solicitud._id);
+      const muestrasSolicitud = muestrasPorSolicitud.get(id) ?? [];
+      const resultadosSolicitud = resultadosPorSolicitud.get(id) ?? [];
+      const estadoOperativo = construirEstadoOperativoLaboratorio({
+        solicitud,
+        muestras: muestrasSolicitud,
+        resultados: resultadosSolicitud,
+      });
+
+      return {
+        ...solicitud,
+        estadoOperativo: {
+          codigo: estadoOperativo.codigo,
+          descripcion: estadoOperativo.descripcion,
+        },
+        servicios: construirSeguimientoServiciosLaboratorio({
+          solicitud,
+          muestras: muestrasSolicitud,
+          resultados: resultadosSolicitud,
+        }),
+      };
+    });
+
+    return res.json(respuesta);
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    return res.status(400).json({ error: error.message });
   }
 };
 
