@@ -106,6 +106,12 @@ const OpcionMuestraSnapshotSchema = new Schema(
       type: TuboEnvaseSnapshotSchema,
       required: true,
     },
+
+    // ====== Preferencia conservada en el snapshot ======
+    esPredeterminada: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     _id: false,
@@ -442,6 +448,30 @@ const CorreccionEvaluacionMuestraSchema = new Schema(
   },
 );
 
+// ====== Historial de reversiones de toma / recepción ======
+const ReversionTomaRecepcionSchema = new Schema(
+  {
+    motivo: { type: String, required: true, trim: true },
+    revertidoPor: { type: String, required: true },
+    usuarioReversion: { type: String, default: null },
+    fechaReversion: { type: Date, required: true, default: Date.now },
+    fechaRecoleccion: { type: Date, default: null },
+    fechaRegistroRecoleccion: { type: Date, default: null },
+    fechaRecepcion: { type: Date, default: null },
+    usuarioRecoleccion: { type: String, default: null },
+    usuarioRecepcion: { type: String, default: null },
+    tipoMuestraId: { type: Schema.Types.ObjectId, default: null },
+    tipoMuestra: { type: TipoMuestraSnapshotSchema, default: null },
+    tuboEnvaseId: { type: Schema.Types.ObjectId, default: null },
+    tuboEnvase: { type: TuboEnvaseSnapshotSchema, default: null },
+    volumenRecolectado: { type: Number, default: null },
+    unidadVolumenRecolectado: { type: String, default: null },
+    observacionRecoleccion: { type: String, default: '' },
+    observacionRecepcion: { type: String, default: '' },
+  },
+  { _id: true },
+);
+
 // ====== Muestra física ======
 
 const MuestraLaboratorioSchema = new Schema(
@@ -595,6 +625,12 @@ const MuestraLaboratorioSchema = new Schema(
 
     correccionesEvaluacion: {
       type: [CorreccionEvaluacionMuestraSchema],
+      default: [],
+    },
+
+    // ====== Reversiones conservadas para auditoría ======
+    reversionesTomaRecepcion: {
+      type: [ReversionTomaRecepcionSchema],
       default: [],
     },
 
@@ -764,6 +800,7 @@ const MuestraLaboratorioSchema = new Schema(
   },
   {
     timestamps: true,
+    optimisticConcurrency: true,
   },
 );
 

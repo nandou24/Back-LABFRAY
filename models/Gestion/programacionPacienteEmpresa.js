@@ -66,7 +66,7 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
     rucEmpresa: { type: String, required: true, trim: true },
     razonSocialEmpresa: { type: String, required: true, trim: true },
     nombreComercialEmpresa: { type: String, trim: true },
-    tipoDoc: { type: String, enum: ["DNI", "CE", "PASAPORTE"] },
+    tipoDoc: { type: String, enum: ["DNI", "CE", "PASAPORTE", null] },
     nroDoc: { type: String, trim: true },
     nombreCliente: {
       type: String,
@@ -142,6 +142,15 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
     fechaUltimaAtencion: { type: Date, default: null },
     fechaFinalizacion: { type: Date, default: null },
     observaciones: { type: String, trim: true },
+    // ====== Trazabilidad e idempotencia de importación Excel ======
+    importacionId: { type: String, trim: true, default: null },
+    filaExcelImportacion: { type: Number, default: null },
+    huellaImportacion: { type: String, trim: true, default: null },
+    revisionImportacion: {
+      advertencias: { type: [String], default: [] },
+      confirmadoPor: { type: String, default: null },
+      fechaConfirmacion: { type: Date, default: null },
+    },
     origenRegistro: {
       type: String,
       enum: ["MANUAL", "IMPORTACION_EXCEL"],
@@ -154,6 +163,12 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
     fechaActualizacion: { type: Date },
   },
   { timestamps: true },
+);
+
+// ====== Evitar importar dos veces la misma fila ======
+ProgramacionPacienteEmpresaSchema.index(
+  { importacionId: 1, filaExcelImportacion: 1 },
+  { unique: true, partialFilterExpression: { importacionId: { $type: 'string' } } },
 );
 
 // ProgramacionPacienteEmpresaSchema.index({ empresaId: 1, fechaProgramada: 1 });

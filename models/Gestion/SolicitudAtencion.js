@@ -280,6 +280,12 @@ const OpcionMuestraSnapshotSchema = new Schema(
       type: TuboEnvaseSnapshotSchema,
       required: true,
     },
+
+    // ====== Preferencia conservada en el snapshot ======
+    esPredeterminada: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     _id: false,
@@ -1226,8 +1232,19 @@ const SolicitudAtencionSchema = new Schema(
       ref: "pacientesCollection",
       required: true,
     },
-    tipoDoc: { type: String, required: true },
-    nroDoc: { type: String, required: true },
+    // ====== Documento pendiente permitido para atención de Empresa ======
+    tipoDoc: {
+      type: String,
+      trim: true,
+      default: null,
+      required: function () { return this.origenAtencion === "PARTICULAR"; },
+    },
+    nroDoc: {
+      type: String,
+      trim: true,
+      default: null,
+      required: function () { return this.origenAtencion === "PARTICULAR"; },
+    },
     nombreCliente: {
       type: String,
       required: true,

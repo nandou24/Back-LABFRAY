@@ -66,6 +66,17 @@ const PacienteSchema = Schema(
     direcCliente: { type: String },
     mailCliente: { type: String },
     phones: [telefonoSchema],
+    // ====== Historial de correcciones de documento ======
+    historialDocumentos: [{
+      tipoDoc: { type: String, default: null },
+      nroDoc: { type: String, default: null },
+      tipoDocNuevo: { type: String, required: true },
+      nroDocNuevo: { type: String, required: true },
+      motivo: { type: String, required: true, trim: true },
+      fecha: { type: Date, required: true },
+      uid: { type: String, required: true },
+      nombreUsuario: { type: String, default: null },
+    }],
     // 🔍 Campos de auditoría:
     createdBy: { type: String, required: true }, // uid
     usuarioRegistro: { type: String }, // nombre de usuario

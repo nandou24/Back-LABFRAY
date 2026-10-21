@@ -180,6 +180,18 @@ const validarMuestrasPruebaLab = async (datos, pruebaActual = null) => {
       };
     }
 
+    // ====== Validar una sola opción predeterminada ======
+    const totalPredeterminadas = opciones.filter(
+      (opcion) => opcion?.esPredeterminada === true,
+    ).length;
+
+    if (totalPredeterminadas !== 1) {
+      return {
+        ok: false,
+        msg: `El requerimiento ${numero} debe tener exactamente una opción predeterminada.`,
+      };
+    }
+
     for (let j = 0; j < opciones.length; j++) {
       const opcion = opciones[j];
 

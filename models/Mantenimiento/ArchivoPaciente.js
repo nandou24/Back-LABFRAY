@@ -100,16 +100,35 @@ const ArchivoPacienteSchema = Schema(
     // AUDITORÍA
     // ==========================================
 
+    // ====== Auditoría con código RH del JWT ======
     createdBy: {
-      type: Schema.Types.ObjectId,
-      ref: "Usuario",
+      type: String,
       required: false,
     },
 
+    usuarioRegistro: {
+      type: String,
+      default: null,
+    },
+
+    fechaRegistro: {
+      type: Date,
+      default: Date.now,
+    },
+
     updatedBy: {
-      type: Schema.Types.ObjectId,
-      ref: "Usuario",
-      required: false,
+      type: String,
+      default: null,
+    },
+
+    usuarioActualizacion: {
+      type: String,
+      default: null,
+    },
+
+    fechaActualizacion: {
+      type: Date,
+      default: null,
     },
   },
   {

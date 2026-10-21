@@ -124,6 +124,12 @@ const OpcionMuestraSchema = new Schema(
       ref: "tuboEnvaseCollection",
       required: true,
     },
+
+    // ====== Opción predeterminada del requerimiento ======
+    esPredeterminada: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     _id: false,

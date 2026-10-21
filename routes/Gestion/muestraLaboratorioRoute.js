@@ -4,6 +4,7 @@ const {
   inicializarMuestrasSolicitud,
   recolectarMuestra,
   tomarYRecibirMuestra,
+  revertirTomaRecepcion,
   obtenerMuestrasRecoleccionMasiva,
   recolectarMuestrasMasivamente,
   recibirMuestra,
@@ -97,6 +98,9 @@ router.put(
 // ====== Toma y recepción individual ======
 
 router.put("/:muestraLaboratorioId/tomar-recibir", validarJWT, tomarYRecibirMuestra);
+
+// ====== Revertir toma / recepción individual ======
+router.put("/:muestraLaboratorioId/revertir-toma", validarJWT, revertirTomaRecepcion);
 
 // ====== Registrar recolección ======
 

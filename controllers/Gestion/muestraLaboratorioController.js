@@ -32,6 +32,60 @@ const obtenerId = (valor) => {
   return valor._id ?? valor;
 };
 
+// ====== Controlar versión visible antes de operar ======
+
+const validarVersionVisibleMuestra = (req, muestra) => {
+  const cabecera = req.get("If-Match");
+  if (cabecera == null) return; // Clientes antiguos siguen validando estado en backend
+  if (!/^(0|[1-9]\d*)$/.test(cabecera) || !Number.isSafeInteger(Number(cabecera))) {
+    const error = new Error("La versión de la muestra enviada no es válida");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (Number(cabecera) !== muestra.__v) {
+    const error = new Error("La muestra fue actualizada por otro usuario");
+    error.statusCode = 409;
+    error.code = "MUESTRA_DESACTUALIZADA";
+    throw error;
+  }
+};
+
+// ====== Traducir conflictos concurrentes a HTTP 409 ======
+
+const esConflictoConcurrenteMuestra = (error) =>
+  error?.statusCode === 409 ||
+  error?.name === "VersionError" ||
+  error?.code === 112 ||
+  error?.code === 11000 ||
+  error?.codeName === "WriteConflict" ||
+  error?.hasErrorLabel?.("TransientTransactionError") === true;
+
+const responderErrorOperacionMuestra = async ({ res, error, id, mensaje }) => {
+  if (esConflictoConcurrenteMuestra(error)) {
+    let actual = null;
+    try {
+      if (mongoose.Types.ObjectId.isValid(id)) {
+        actual = await MuestraLaboratorio.findById(id)
+          .select("estadoMuestra __v codigoEtiqueta")
+          .lean();
+      }
+    } catch (errorConsulta) {
+      console.error("No se pudo consultar el estado después del conflicto:", errorConsulta);
+    }
+    return res.status(409).json({
+      ok: false,
+      code: "MUESTRA_DESACTUALIZADA",
+      msg: "La muestra cambió mientras la gestionabas. Se actualizará el recipiente; revisa su estado antes de repetir la acción.",
+      estadoActual: actual?.estadoMuestra ?? null,
+      versionActual: actual?.__v ?? null,
+    });
+  }
+  return res.status(error?.statusCode ?? 400).json({
+    ok: false,
+    msg: error?.message || mensaje,
+  });
+};
+
 // ====== Normalizar ruta de permiso ======
 
 const normalizarRutaPermiso = (valor) =>
@@ -225,7 +279,42 @@ const normalizarOpcionMuestra = (opcion) => {
 
       estadoTuboEnvase: opcion.tuboEnvase.estadoTuboEnvase ?? "ACTIVO",
     },
+
+    esPredeterminada: opcion.esPredeterminada === true,
   };
+};
+
+// ====== Resolver preferencia compatible entre coberturas ======
+const marcarPreferenciaComun = (coberturas, opciones) => {
+  const puntajes = new Map();
+
+  for (const cobertura of coberturas) {
+    const preferida = (cobertura.opcionesPermitidas ?? []).find(
+      (opcion) => opcion.esPredeterminada === true,
+    );
+    const clave = preferida ? construirClaveOpcion(preferida) : null;
+
+    if (clave) {
+      puntajes.set(clave, (puntajes.get(clave) ?? 0) + 1);
+    }
+  }
+
+  const clavesCompatibles = new Set(opciones.map(construirClaveOpcion));
+  let mejorClave = null;
+  let mejorPuntaje = 0;
+
+  // ====== Descartar preferencias incompatibles con el recipiente compartido ======
+  for (const [clave, puntaje] of puntajes) {
+    if (clavesCompatibles.has(clave) && puntaje > mejorPuntaje) {
+      mejorClave = clave;
+      mejorPuntaje = puntaje;
+    }
+  }
+
+  return opciones.map((opcion) => ({
+    ...opcion,
+    esPredeterminada: mejorClave !== null && construirClaveOpcion(opcion) === mejorClave,
+  }));
 };
 
 // ====== Obtener opción válida para todas las coberturas ======
@@ -335,9 +424,11 @@ const obtenerOpcionesComunesMuestra = (muestra) => {
     );
   }
 
-  return [...clavesComunes]
+  const opcionesCompatibles = [...clavesComunes]
     .sort()
     .map((clave) => normalizarOpcionMuestra(opcionesPorClave.get(clave)));
+
+  return marcarPreferenciaComun(coberturas, opcionesCompatibles);
 };
 
 // ====== Normalizar volumen para recolección masiva ======
@@ -845,9 +936,11 @@ const obtenerOpcionesComunesPlan = (plan) => {
     });
   });
 
-  return [...opcionesPorClave.entries()]
+  const opcionesCompatibles = [...opcionesPorClave.entries()]
     .sort(([claveA], [claveB]) => claveA.localeCompare(claveB))
     .map(([, opcion]) => opcion);
+
+  return marcarPreferenciaComun(coberturas, opcionesCompatibles);
 };
 
 // ====== Construir exámenes de un recipiente ======
@@ -1786,6 +1879,8 @@ const tomarYRecibirMuestra = async (req, res = response) => {
     if (!muestra) {
       throw new Error("La muestra de laboratorio no existe");
     }
+
+    validarVersionVisibleMuestra(req, muestra);
     if (muestra.estadoMuestra !== "PENDIENTE") {
       throw new Error(
         `No se puede registrar la toma de una muestra en estado ${muestra.estadoMuestra}`,
@@ -1878,9 +1973,138 @@ const tomarYRecibirMuestra = async (req, res = response) => {
       await session.abortTransaction();
     }
     console.error("Error al registrar toma y recepción:", error);
-    return res.status(400).json({
-      ok: false,
-      msg: error.message || "No se pudo registrar la toma y recepción",
+    return responderErrorOperacionMuestra({
+      res, error, id: req.params.muestraLaboratorioId,
+      mensaje: "No se pudo registrar la toma y recepción",
+    });
+  } finally {
+    await session.endSession();
+  }
+};
+
+// ====== Revertir una toma / recepción registrada por error ======
+const revertirTomaRecepcion = async (req, res = response) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { muestraLaboratorioId } = req.params;
+    const { uid, nombreUsuario } = req.user;
+    const motivo = typeof req.body?.motivoReversion === "string"
+      ? req.body.motivoReversion.trim()
+      : "";
+
+    if (!mongoose.Types.ObjectId.isValid(muestraLaboratorioId)) {
+      throw new Error("El id de la muestra no es válido");
+    }
+    if (!motivo) {
+      throw new Error("Debe indicar el motivo para revertir la toma / recepción");
+    }
+
+    const muestra = await MuestraLaboratorio.findById(muestraLaboratorioId)
+      .session(session);
+    if (!muestra) throw new Error("La muestra de laboratorio no existe");
+    if (req.get('If-Match') == null) {
+      const error = new Error('Actualiza el recipiente antes de revertir la toma');
+      error.statusCode = 428;
+      throw error;
+    }
+    validarVersionVisibleMuestra(req, muestra);
+
+    if (muestra.estadoMuestra !== "RECEPCIONADA") {
+      throw new Error("Solo se puede revertir una toma / recepción pendiente de evaluación");
+    }
+    if (muestra.fechaAceptacion || muestra.fechaRechazo ||
+        (muestra.correccionesEvaluacion ?? []).length) {
+      throw new Error("La muestra ya tiene evaluación y no puede revertirse");
+    }
+
+    const solicitud = await SolicitudAtencion.findById(
+      muestra.solicitudAtencionId,
+    ).session(session);
+    if (!solicitud || solicitud.tipo !== "Laboratorio" || solicitud.estado === "ANULADO") {
+      throw new Error("La solicitud no permite revertir la toma / recepción");
+    }
+
+    const ahora = new Date();
+    // ====== Conservar los datos originales antes de restablecer el estado ======
+    muestra.reversionesTomaRecepcion.push({
+      motivo,
+      revertidoPor: uid,
+      usuarioReversion: nombreUsuario ?? null,
+      fechaReversion: ahora,
+      fechaRecoleccion: muestra.fechaRecoleccion,
+      fechaRegistroRecoleccion: muestra.fechaRegistroRecoleccion,
+      fechaRecepcion: muestra.fechaRecepcion,
+      usuarioRecoleccion: muestra.usuarioRecoleccion,
+      usuarioRecepcion: muestra.usuarioRecepcion,
+      tipoMuestraId: muestra.tipoMuestraId,
+      tipoMuestra: muestra.tipoMuestra,
+      tuboEnvaseId: muestra.tuboEnvaseId,
+      tuboEnvase: muestra.tuboEnvase,
+      volumenRecolectado: muestra.volumenRecolectado,
+      unidadVolumenRecolectado: muestra.unidadVolumenRecolectado,
+      observacionRecoleccion: muestra.observacionRecoleccion,
+      observacionRecepcion: muestra.observacionRecepcion,
+    });
+
+    // ====== Las fotografías antiguas siguen auditables, pero dejan de estar activas ======
+    for (const evidencia of muestra.evidenciasFotograficas ?? []) {
+      if (["RECOLECCION", "RECEPCION"].includes(evidencia.etapa) &&
+          evidencia.estadoEvidencia === "ACTIVA") {
+        evidencia.estadoEvidencia = "ANULADA";
+        evidencia.anuladaPor = uid;
+        evidencia.usuarioAnulacion = nombreUsuario ?? null;
+        evidencia.fechaAnulacion = ahora;
+        evidencia.motivoAnulacion = `Toma/recepción revertida: ${motivo}`;
+      }
+    }
+
+    muestra.estadoMuestra = "PENDIENTE";
+    muestra.tipoMuestraId = null;
+    muestra.tipoMuestra = null;
+    muestra.tuboEnvaseId = null;
+    muestra.tuboEnvase = null;
+    muestra.volumenRecolectado = null;
+    muestra.unidadVolumenRecolectado = null;
+    muestra.recolectadoPor = null;
+    muestra.usuarioRecoleccion = null;
+    muestra.fechaRecoleccion = null;
+    muestra.fechaRegistroRecoleccion = null;
+    muestra.observacionRecoleccion = "";
+    muestra.recibidoPor = null;
+    muestra.usuarioRecepcion = null;
+    muestra.fechaRecepcion = null;
+    muestra.observacionRecepcion = "";
+    muestra.updatedBy = uid;
+    muestra.usuarioActualizacion = nombreUsuario ?? null;
+    muestra.fechaActualizacion = ahora;
+
+    await muestra.save({ session });
+    await sincronizarCompromisosSolicitud({
+      solicitudAtencionId: muestra.solicitudAtencionId,
+      session,
+      uid,
+      nombreUsuario,
+      motivoInvalidacion: "REVERSION_TOMA_RECEPCION",
+    });
+    await sincronizarEstadosSolicitudLaboratorio({
+      solicitud, uid, nombreUsuario, session,
+    });
+
+    await session.commitTransaction();
+    return res.status(200).json({
+      ok: true,
+      msg: "Toma / recepción revertida. El recipiente está pendiente nuevamente.",
+      muestra,
+      estadoMuestra: muestra.estadoMuestra,
+    });
+  } catch (error) {
+    if (session.inTransaction()) await session.abortTransaction();
+    console.error("Error al revertir toma / recepción:", error);
+    return responderErrorOperacionMuestra({
+      res, error, id: req.params.muestraLaboratorioId,
+      mensaje: "No se pudo revertir la toma / recepción",
     });
   } finally {
     await session.endSession();
@@ -4207,6 +4431,9 @@ const obtenerMuestrasAceptacionMasiva = async (req, res = response) => {
             .lean()
         : [];
 
+    // ====== Resolver responsables de toma / recepción ======
+    const usuariosRecepcion = await obtenerNombresUsuariosHistorial(muestras);
+
     // ====== Mapear solicitudes ======
 
     const solicitudesPorId = new Map(
@@ -4292,6 +4519,9 @@ const obtenerMuestrasAceptacionMasiva = async (req, res = response) => {
           recibidoPor: muestra.recibidoPor ?? null,
 
           usuarioRecepcion: muestra.usuarioRecepcion ?? null,
+
+          usuarioRecepcionNombre:
+            usuariosRecepcion[String(muestra.usuarioRecepcion ?? "").trim()] ?? null,
 
           fechaRecepcion: muestra.fechaRecepcion ?? null,
 
@@ -4946,6 +5176,8 @@ const aceptarMuestra = async (req, res = response) => {
       throw new Error("La muestra de laboratorio no existe");
     }
 
+    validarVersionVisibleMuestra(req, muestra);
+
     // ====== Validar estado ======
 
     if (muestra.estadoMuestra !== "RECEPCIONADA") {
@@ -5051,10 +5283,9 @@ const aceptarMuestra = async (req, res = response) => {
 
     console.error("Error al registrar aceptación de muestra:", error);
 
-    return res.status(400).json({
-      ok: false,
-
-      msg: error.message || "No se pudo registrar la aceptación de muestra",
+    return responderErrorOperacionMuestra({
+      res, error, id: req.params.muestraLaboratorioId,
+      mensaje: "No se pudo registrar la aceptación de muestra",
     });
   } finally {
     await session.endSession();
@@ -5126,6 +5357,8 @@ const rechazarMuestra = async (req, res = response) => {
     if (!muestra) {
       throw new Error("La muestra de laboratorio no existe");
     }
+
+    validarVersionVisibleMuestra(req, muestra);
 
     // ====== Validar estado ======
 
@@ -5321,10 +5554,9 @@ const rechazarMuestra = async (req, res = response) => {
 
     console.error("Error al registrar rechazo de muestra:", error);
 
-    return res.status(400).json({
-      ok: false,
-
-      msg: error.message || "No se pudo registrar el rechazo de muestra",
+    return responderErrorOperacionMuestra({
+      res, error, id: req.params.muestraLaboratorioId,
+      mensaje: "No se pudo registrar el rechazo de muestra",
     });
   } finally {
     await session.endSession();
@@ -5374,6 +5606,8 @@ const corregirEvaluacionMuestra = async (req, res = response) => {
     if (!muestra) {
       throw new Error("La muestra de laboratorio no existe");
     }
+
+    validarVersionVisibleMuestra(req, muestra);
 
     // ====== Validar estado corregible ======
 
@@ -5725,12 +5959,9 @@ const corregirEvaluacionMuestra = async (req, res = response) => {
 
     console.error("Error al corregir evaluación de muestra:", error);
 
-    return res.status(error.statusCode ?? 400).json({
-      ok: false,
-
-      msg:
-        error.message ||
-        "No se pudo corregir la evaluación de la muestra de laboratorio",
+    return responderErrorOperacionMuestra({
+      res, error, id: req.params.muestraLaboratorioId,
+      mensaje: "No se pudo corregir la evaluación de la muestra",
     });
   } finally {
     await session.endSession();
@@ -5777,6 +6008,8 @@ const anularMuestra = async (req, res = response) => {
     if (!muestra) {
       throw new Error("La muestra de laboratorio no existe");
     }
+
+    validarVersionVisibleMuestra(req, muestra);
 
     // ====== Validar estado ======
 
@@ -5888,10 +6121,9 @@ const anularMuestra = async (req, res = response) => {
 
     console.error("Error al anular muestra de laboratorio:", error);
 
-    return res.status(400).json({
-      ok: false,
-
-      msg: error.message || "No se pudo anular la muestra de laboratorio",
+    return responderErrorOperacionMuestra({
+      res, error, id: req.params.muestraLaboratorioId,
+      mensaje: "No se pudo anular la muestra",
     });
   } finally {
     await session.endSession();
@@ -5924,6 +6156,8 @@ const generarReintentoMuestra = async (req, res = response) => {
     if (!muestraAnterior) {
       throw new Error("La muestra de laboratorio no existe");
     }
+
+    validarVersionVisibleMuestra(req, muestraAnterior);
 
     // ====== Validar estado ======
 
@@ -6117,6 +6351,23 @@ const generarReintentoMuestra = async (req, res = response) => {
       fechaRegistro: ahora,
     });
 
+    // ====== Reservar el reintento con control atómico del intento anterior ======
+
+    const reserva = await MuestraLaboratorio.updateOne(
+      {
+        _id: muestraAnterior._id,
+        estadoMuestra: muestraAnterior.estadoMuestra,
+        __v: muestraAnterior.__v,
+      },
+      { $inc: { __v: 1 } },
+      { session },
+    );
+    if (reserva.modifiedCount !== 1) {
+      const error = new Error("El intento anterior cambió durante el procesamiento");
+      error.statusCode = 409;
+      throw error;
+    }
+
     await nuevaMuestra.save({
       session,
     });
@@ -6160,10 +6411,9 @@ const generarReintentoMuestra = async (req, res = response) => {
 
     console.error("Error al generar reintento de muestra:", error);
 
-    return res.status(400).json({
-      ok: false,
-
-      msg: error.message || "No se pudo generar el reintento de muestra",
+    return responderErrorOperacionMuestra({
+      res, error, id: req.params.muestraLaboratorioId,
+      mensaje: "No se pudo generar el reintento de la muestra",
     });
   } finally {
     await session.endSession();
@@ -6479,6 +6729,54 @@ const obtenerBandejaTomaMuestras = async (req, res = response) => {
   }
 };
 
+// ====== Resolver nombres completos para el historial ======
+const obtenerNombresUsuariosHistorial = async (muestras) => {
+  const usuarios = new Set();
+  const agregarUsuario = (valor) => {
+    if (typeof valor === "string" && valor.trim()) usuarios.add(valor.trim());
+  };
+
+  for (const muestra of muestras) {
+    [
+      muestra.usuarioRegistro, muestra.usuarioRecoleccion,
+      muestra.usuarioRecepcion, muestra.usuarioAceptacion,
+      muestra.usuarioRechazo, muestra.usuarioAnulacion,
+      ...(muestra.reversionesTomaRecepcion ?? []).flatMap(r =>
+        [r.usuarioReversion, r.usuarioRecoleccion, r.usuarioRecepcion]),
+    ].forEach(agregarUsuario);
+
+    for (const correccion of muestra.correccionesEvaluacion ?? []) {
+      agregarUsuario(correccion.usuarioEjecucion);
+      agregarUsuario(correccion.usuarioAutorizacion);
+    }
+    for (const evidencia of muestra.evidenciasFotograficas ?? []) {
+      agregarUsuario(evidencia.usuarioRegistro);
+      agregarUsuario(evidencia.usuarioAnulacion);
+    }
+  }
+
+  if (!usuarios.size) return {};
+
+  const recursos = await RecurHumano.find({
+    "datosLogueo.nombreUsuario": { $in: [...usuarios] },
+  })
+    .select("datosLogueo.nombreUsuario nombreRecHumano apePatRecHumano apeMatRecHumano")
+    .lean();
+
+  const nombres = {};
+  for (const recurso of recursos) {
+    const usuario = recurso.datosLogueo?.nombreUsuario?.trim();
+    const nombreCompleto = [
+      recurso.nombreRecHumano,
+      recurso.apePatRecHumano,
+      recurso.apeMatRecHumano,
+    ].filter(valor => typeof valor === "string" && valor.trim())
+      .map(valor => valor.trim()).join(" ");
+    if (usuario && nombreCompleto) nombres[usuario] = nombreCompleto;
+  }
+  return nombres;
+};
+
 // ====== Consultar muestras por solicitud ======
 
 const obtenerMuestrasPorSolicitud = async (req, res = response) => {
@@ -6521,6 +6819,7 @@ const obtenerMuestrasPorSolicitud = async (req, res = response) => {
     const planes = construirPlanesConsultaMuestra(muestras);
 
     const resumen = construirResumenOperativoMuestras(muestras, planes);
+    const usuariosHistorial = await obtenerNombresUsuariosHistorial(muestras);
 
     // ====== Resolver estado operativo ======
 
@@ -6543,6 +6842,7 @@ const obtenerMuestrasPorSolicitud = async (req, res = response) => {
       },
 
       resumen,
+      usuariosHistorial,
 
       planes,
     });
@@ -6607,6 +6907,7 @@ const obtenerMuestrasPorCodigoLaboratorio = async (req, res = response) => {
     const planes = construirPlanesConsultaMuestra(muestras);
 
     const resumen = construirResumenOperativoMuestras(muestras, planes);
+    const usuariosHistorial = await obtenerNombresUsuariosHistorial(muestras);
 
     // ====== Resolver estado operativo ======
 
@@ -6629,6 +6930,7 @@ const obtenerMuestrasPorCodigoLaboratorio = async (req, res = response) => {
       },
 
       resumen,
+      usuariosHistorial,
 
       planes,
     });
@@ -7389,6 +7691,7 @@ module.exports = {
   inicializarMuestrasSolicitud,
   recolectarMuestra,
   tomarYRecibirMuestra,
+  revertirTomaRecepcion,
   obtenerMuestrasRecoleccionMasiva,
   recolectarMuestrasMasivamente,
   recibirMuestra,

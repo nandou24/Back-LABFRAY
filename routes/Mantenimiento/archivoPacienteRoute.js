@@ -1,6 +1,7 @@
 const { Router } = require("express");
 const {
   subirFotoPerfilPaciente,
+  obtenerFotoPerfilPaciente,
 } = require("../../controllers/Mantenimiento/archivoPacienteController");
 const uploadArchivoPaciente = require("../../middlewares/uploadArchivoPaciente");
 const { validarJWT } = require("../../middlewares/validar-token");
@@ -15,6 +16,13 @@ router.post(
   validarJWT,
   uploadArchivoPaciente.single("archivo"),
   subirFotoPerfilPaciente,
+);
+
+// ====== Consultar foto de identificación ======
+router.get(
+  "/:pacienteId/foto-perfil",
+  validarJWT,
+  obtenerFotoPerfilPaciente,
 );
 
 module.exports = router;

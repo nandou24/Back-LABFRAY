@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const Paciente = require("../../models/Mantenimiento/Paciente");
 const ArchivoPaciente = require("../../models/Mantenimiento/ArchivoPaciente");
 const ProgramacionPacienteEmpresa = require("../../models/Gestion/programacionPacienteEmpresa");
-const { subirArchivo, eliminarArchivo } = require("../../utils/aws/s3Storage");
+const { subirArchivo, eliminarArchivo, generarUrlTemporal } = require("../../utils/aws/s3Storage");
 
 // ==========================================
 // SUBIR FOTO DE PERFIL DEL PACIENTE
@@ -17,7 +17,7 @@ const subirFotoPerfilPaciente = async (req, res = response) => {
   try {
     const { pacienteId } = req.params;
     const { programacionEmpresaId } = req.body;
-    const { uid } = req.user;
+    const { uid, nombreUsuario } = req.user;
 
     // ==========================================
     // 1. VALIDAR PACIENTE ID
@@ -126,6 +126,8 @@ const subirFotoPerfilPaciente = async (req, res = response) => {
         $set: {
           estadoArchivo: "REEMPLAZADO",
           updatedBy: uid,
+          usuarioActualizacion: nombreUsuario ?? null,
+          fechaActualizacion: new Date(),
         },
       },
       {
@@ -151,6 +153,8 @@ const subirFotoPerfilPaciente = async (req, res = response) => {
       estadoArchivo: "ACTIVO",
       programacionEmpresaId: programacionEmpresaId || undefined,
       createdBy: uid,
+      usuarioRegistro: nombreUsuario ?? null,
+      fechaRegistro: new Date(),
     });
 
     await nuevaFoto.save({
@@ -219,6 +223,60 @@ const subirFotoPerfilPaciente = async (req, res = response) => {
   }
 };
 
+// ====== Consultar fotografía activa del paciente ======
+
+const obtenerFotoPerfilPaciente = async (req, res = response) => {
+  try {
+    const { pacienteId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(pacienteId)) {
+      return res.status(400).json({
+        ok: false,
+        msg: "El ID del paciente no es válido",
+      });
+    }
+
+    // ====== Consultar únicamente la fotografía activa ======
+    const foto = await ArchivoPaciente.findOne({
+      pacienteId,
+      tipoArchivo: "FOTO_PERFIL",
+      estadoArchivo: "ACTIVO",
+    })
+      .sort({ fechaCaptura: -1, createdAt: -1 })
+      .select("storageKey storageVersionId fechaCaptura")
+      .lean();
+
+    if (!foto) {
+      return res.status(200).set("Cache-Control", "no-store").json({
+        ok: true,
+        disponible: false,
+        urlTemporal: null,
+      });
+    }
+
+    // ====== Reutilizar URL firmada de S3 ======
+    const urlTemporal = await generarUrlTemporal(
+      foto.storageKey,
+      180,
+      foto.storageVersionId ?? undefined,
+    );
+
+    return res.status(200).set("Cache-Control", "no-store").json({
+      ok: true,
+      disponible: true,
+      urlTemporal,
+      fechaCaptura: foto.fechaCaptura ?? null,
+    });
+  } catch (error) {
+    console.error("Error al consultar fotografía del paciente:", error);
+    return res.status(500).json({
+      ok: false,
+      msg: "No se pudo obtener la fotografía del paciente",
+    });
+  }
+};
+
 module.exports = {
   subirFotoPerfilPaciente,
+  obtenerFotoPerfilPaciente,
 };

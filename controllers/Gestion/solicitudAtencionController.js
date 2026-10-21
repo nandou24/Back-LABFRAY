@@ -1068,6 +1068,9 @@ const construirSnapshotPruebaLab = (pruebaDocumento) => {
                   tuboEnvaseId: tuboEnvase._id,
 
                   tuboEnvase: construirSnapshotTuboEnvase(tuboEnvase),
+
+                  // ====== Respetar el predeterminado al emitir la solicitud ======
+                  esPredeterminada: opcion.esPredeterminada === true,
                 };
               })
             : [],
@@ -1349,14 +1352,21 @@ const crearSolicitudesAtencion = async ({
   if (
     !paciente?.clienteId ||
     !paciente?.hc ||
-    !paciente?.tipoDoc ||
-    !paciente?.nroDoc ||
     !paciente?.nombreCliente ||
     !paciente?.apePatCliente
   ) {
     throw new Error(
       "Faltan datos obligatorios del paciente para generar las solicitudes",
     );
+  }
+
+  // ====== Identificación opcional solo en Empresa ======
+  const tieneTipoDoc = Boolean(String(paciente.tipoDoc ?? "").trim());
+  const tieneNroDoc = Boolean(String(paciente.nroDoc ?? "").trim());
+
+  if (tieneTipoDoc !== tieneNroDoc ||
+      (origenAtencion === "PARTICULAR" && !tieneTipoDoc)) {
+    throw new Error("Se requiere un documento de identidad completo para generar las solicitudes");
   }
 
   // ====== Obtener contexto demográfico ======
@@ -1371,6 +1381,14 @@ const crearSolicitudesAtencion = async ({
 
   if (!pacienteMaestro) {
     throw new Error("El paciente asociado a la atención no existe");
+  }
+
+  if (!tieneTipoDoc && (
+      origenAtencion !== "EMPRESA" ||
+      pacienteMaestro.estadoIdentificacion !== "PENDIENTE" ||
+      pacienteMaestro.tipoDoc || pacienteMaestro.nroDoc
+    )) {
+    throw new Error("Solo se permiten solicitudes empresariales sin documento para pacientes con identificación pendiente");
   }
 
   const sexoPaciente =
