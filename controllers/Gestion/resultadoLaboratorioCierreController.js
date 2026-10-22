@@ -536,6 +536,9 @@ const reabrirResultadoLaboratorio = async (req, res = response) => {
     resultadoLaboratorio.observacionValidacion = "";
     resultadoLaboratorio.confirmoAlertasCriticasValidacion = false;
 
+    // ====== Invalidar designación de firma en un nuevo ciclo ======
+    resultadoLaboratorio.responsableInforme = null;
+
     resultadoLaboratorio.liberadoPor = null;
     resultadoLaboratorio.usuarioLiberacion = null;
     resultadoLaboratorio.fechaLiberacion = null;

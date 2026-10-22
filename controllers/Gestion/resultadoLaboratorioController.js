@@ -12,6 +12,8 @@ const {
 const {
   registrarEventoHistorialResultado,
 } = require("../../utils/Gestion/historialResultadoLaboratorio");
+const { resolverResponsableInformeLaboratorio } = require('../../utils/Gestion/responsableInformeLaboratorio');
+const { validarIdentidadesParaLiberar } = require('../../utils/Gestion/validarIdentidadLiberacion');
 
 
 // ====== Escapar búsqueda regex ======
@@ -3411,6 +3413,9 @@ const liberarResultadosMasivamente = async (req, res = response) => {
       throw new Error("No se encontraron todas las solicitudes asociadas");
     }
 
+    // ====== Bloquear lote si alguna solicitud no tiene identidad definitiva ======
+    await validarIdentidadesParaLiberar(solicitudes, { session });
+
     const solicitudesPorId = new Map(
       solicitudes.map((solicitud) => [String(solicitud._id), solicitud]),
     );
@@ -3509,6 +3514,15 @@ const liberarResultadosMasivamente = async (req, res = response) => {
         (alerta) => alerta.nivelAlerta === "CRITICA",
       ).length;
 
+      // ====== Vincular responsable autorizado sin modificar al validador ======
+      resultado.responsableInforme = await resolverResponsableInformeLaboratorio({
+        validadoPor: resultado.validadoPor,
+        session,
+        fecha: ahora,
+        liberadoPor: uid,
+        usuarioLiberacion: nombreUsuario,
+      });
+
       resultado.estadoResultado = "LIBERADO";
       resultado.liberadoPor = uid;
       resultado.usuarioLiberacion = nombreUsuario ?? null;
@@ -3531,6 +3545,8 @@ const liberarResultadosMasivamente = async (req, res = response) => {
           liberacionMasiva: true,
           confirmoAlertasCriticas:
             resultado.confirmoAlertasCriticasLiberacion === true,
+          responsableInformeId: resultado.responsableInforme?.recursoHumanoId ?? null,
+          origenFirma: resultado.responsableInforme?.origenAsignacion ?? null,
         },
       });
 
@@ -3580,7 +3596,7 @@ const liberarResultadosMasivamente = async (req, res = response) => {
 
     console.error("Error al liberar resultados masivamente:", error);
 
-    return res.status(error.statusCode ?? 400).json({
+    return res.status(error.statusCode ?? error.status ?? 400).json({
       ok: false,
       msg: error.message || "No se pudieron liberar los resultados",
       ...(error.codigo ? { codigo: error.codigo } : {}),
@@ -3679,9 +3695,21 @@ const liberarResultadoLaboratorio = async (req, res = response) => {
       );
     }
 
+    // ====== Exigir HC y documento definitivo antes de liberar ======
+    await validarIdentidadesParaLiberar([solicitud], { session });
+
     const ahora = new Date();
 
     // ====== Liberar resultado ======
+
+    // ====== Vincular responsable autorizado sin modificar al validador ======
+    resultadoLaboratorio.responsableInforme = await resolverResponsableInformeLaboratorio({
+      validadoPor: resultadoLaboratorio.validadoPor,
+      session,
+      fecha: ahora,
+      liberadoPor: uid,
+      usuarioLiberacion: nombreUsuario,
+    });
 
     resultadoLaboratorio.estadoResultado = "LIBERADO";
 
@@ -3735,6 +3763,8 @@ const liberarResultadoLaboratorio = async (req, res = response) => {
       metadatos: {
         confirmoAlertasCriticas:
           resultadoLaboratorio.confirmoAlertasCriticasLiberacion === true,
+        responsableInformeId: resultadoLaboratorio.responsableInforme?.recursoHumanoId ?? null,
+        origenFirma: resultadoLaboratorio.responsableInforme?.origenAsignacion ?? null,
       },
     });
 
@@ -3786,9 +3816,9 @@ const liberarResultadoLaboratorio = async (req, res = response) => {
 
     console.error("Error al liberar resultado de laboratorio:", error);
 
-    return res.status(400).json({
+    return res.status(error.statusCode ?? error.status ?? 400).json({
       ok: false,
-
+      codigo: error.codigo ?? null,
       msg: error.message || "No se pudo liberar el resultado de laboratorio",
     });
   } finally {

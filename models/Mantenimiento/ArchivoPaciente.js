@@ -14,6 +14,7 @@ const ArchivoPacienteSchema = Schema(
       required: true,
       enum: [
         "FOTO_PERFIL",
+        "FOTO_EVALUACION",
         "DOCUMENTO_IDENTIDAD_ANVERSO",
         "DOCUMENTO_IDENTIDAD_REVERSO",
         "SOLICITUD_MEDICA",
@@ -96,6 +97,12 @@ const ArchivoPacienteSchema = Schema(
       required: false,
     },
 
+    // ====== Solicitudes vinculadas a la evaluación ======
+    solicitudAtencionIds: [{
+      type: Schema.Types.ObjectId,
+      ref: 'SolicitudAtencion',
+    }],
+
     // ==========================================
     // AUDITORÍA
     // ==========================================
@@ -143,6 +150,10 @@ ArchivoPacienteSchema.index({
   pacienteId: 1,
   tipoArchivo: 1,
   estadoArchivo: 1,
+});
+// ====== Recuperar foto de evaluación por programación ======
+ArchivoPacienteSchema.index({
+  programacionEmpresaId: 1, pacienteId: 1, tipoArchivo: 1, estadoArchivo: 1, fechaCaptura: -1,
 });
 
 module.exports = model("ArchivoPaciente", ArchivoPacienteSchema);

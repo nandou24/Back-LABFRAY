@@ -8,12 +8,44 @@ const {
   obtenerSolicitantes,
   obtenerProfesionalesConsultas,
   obtenerProfesionalesQueAtiendenConsultas,
+  obtenerFirmantesLaboratorio,
+  obtenerCandidatosFirmantesLaboratorio,
+  configurarFirmanteLaboratorio,
+  guardarImagenFirmaLaboratorio,
+  verImagenFirmaLaboratorio,
 } = require("../../controllers/Mantenimiento/recursoHumanoController");
 const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
+const { validarPermisoAccion } = require("../../middlewares/validar-permiso-accion");
+const { PERMISOS_ACCION } = require("../../utils/permisosAccion");
+const multer = require("multer");
+const subirFirma = multer({ storage: multer.memoryStorage(), limits: { fileSize: 300 * 1024, files: 1 } });
 
 //Rutas
 const router = Router();
+
+// ====== Consultar y configurar firmantes de laboratorio ======
+router.get(
+  "/firmantes-laboratorio/candidatos",
+  validarJWT,
+  validarPermisoAccion(PERMISOS_ACCION.RESULTADOS_GESTIONAR_FIRMANTES),
+  obtenerCandidatosFirmantesLaboratorio,
+);
+router.get("/firmantes-laboratorio", validarJWT, obtenerFirmantesLaboratorio);
+router.put(
+  "/firmantes-laboratorio/:codRecHumano",
+  validarJWT,
+  validarPermisoAccion(PERMISOS_ACCION.RESULTADOS_GESTIONAR_FIRMANTES),
+  configurarFirmanteLaboratorio,
+);
+
+// ====== Firma PNG protegida ======
+router.put("/firmantes-laboratorio/:codRecHumano/imagen", validarJWT,
+  validarPermisoAccion(PERMISOS_ACCION.RESULTADOS_GESTIONAR_FIRMANTES),
+  subirFirma.single("firma"), guardarImagenFirmaLaboratorio);
+router.get("/firmantes-laboratorio/:codRecHumano/imagen", validarJWT,
+  validarPermisoAccion(PERMISOS_ACCION.RESULTADOS_GESTIONAR_FIRMANTES),
+  verImagenFirmaLaboratorio);
 
 //POST
 //controlador de esa ruta

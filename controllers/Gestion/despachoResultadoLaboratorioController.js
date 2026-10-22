@@ -6,6 +6,8 @@ const DespachoResultado = require("../../models/Gestion/DespachoResultadoLaborat
 const EntregaResultado = require("../../models/Gestion/EntregaResultadoLaboratorio");
 const SolicitudAtencion = require("../../models/Gestion/SolicitudAtencion");
 const ResultadoLaboratorio = require("../../models/Gestion/ResultadoLaboratorio");
+const { validarIdentidadesParaLiberar } = require('../../utils/Gestion/validarIdentidadLiberacion');
+
 const {
   validarConfiguracionDespacho,
   puedeTransicionarDespacho,
@@ -258,6 +260,9 @@ const crearDespachoSolicitud = async (req, res = response) => {
       });
     }
 
+    // ====== No preparar despachos sin identidad definitiva ======
+    await validarIdentidadesParaLiberar([solicitud]);
+
     const nombrePaciente = construirNombrePaciente(solicitud) || "PACIENTE";
     const destinatarioEntrada = {
       ...(destinatario ?? {}),
@@ -418,6 +423,18 @@ const crearDespachoSolicitud = async (req, res = response) => {
 // ====== Validar versiones antes de enviar ======
 const obtenerResultadosVigentesDespacho = async (despacho) => {
   const solicitud = despacho.solicitudes?.[0];
+  // ====== Revalidar identidad antes de enviar un despacho existente ======
+  const solicitudVigente = solicitud?.solicitudAtencionId
+    ? await SolicitudAtencion.findById(solicitud.solicitudAtencionId)
+        .select('_id codSolicitud hc clienteId tipoDoc nroDoc').lean()
+    : null;
+  if (!solicitudVigente) {
+    const error = new Error('La solicitud del despacho ya no está disponible');
+    error.statusCode = 409;
+    error.codigo = 'SOLICITUD_NO_DISPONIBLE';
+    throw error;
+  }
+  await validarIdentidadesParaLiberar([solicitudVigente]);
   const esperados = Array.isArray(solicitud?.resultados)
     ? solicitud.resultados
     : [];

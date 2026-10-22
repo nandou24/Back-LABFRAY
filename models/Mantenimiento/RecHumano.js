@@ -58,6 +58,32 @@ const RecursoHumanoSchema = Schema(
     mailRecHumano: { type: String },
     phones: [telefonoSchema],
     atiendeConsultas: { type: Boolean, default: false },
+    // ====== Presentaciones de firma por profesión y servicio ======
+    firmaLaboratorio: {
+      habilitado: { type: Boolean, default: false },
+      profesionRecursoId: { type: Schema.Types.ObjectId, default: null },
+      serviciosAutorizados: { type: [String], default: [] },
+      predeterminadoLaboratorio: { type: Boolean, default: false },
+      referenciaAutorizacion: { type: String, default: '' },
+      presentaciones: [{
+        perfilId: { type: String, required: true },
+        etiqueta: { type: String, default: 'Firma profesional' },
+        tratamiento: { type: String, default: '' },
+        profesionRecursoId: { type: Schema.Types.ObjectId, required: true },
+        especialidadId: { type: Schema.Types.ObjectId, default: null },
+        mostrarProfesion: { type: Boolean, default: true },
+        mostrarEspecialidad: { type: Boolean, default: true },
+        mostrarColegiatura: { type: Boolean, default: true },
+        mostrarRne: { type: Boolean, default: true },
+        siglaColegiatura: { type: String, default: 'Colegiatura' },
+        siglaEspecialidad: { type: String, default: 'RNE' },
+        serviciosAutorizados: { type: [String], default: ['Laboratorio'] },
+        esPrincipal: { type: Boolean, default: false },
+      }],
+      fechaActualizacion: { type: Date, default: null },
+      actualizadoPor: { type: String, default: null },
+      usuarioActualizacion: { type: String, default: null },
+    },
     gradoInstruccion: { type: String },
     profesionesRecurso: [profesionesSchema],
     usuarioSistema: { type: Boolean },
@@ -83,6 +109,12 @@ const RecursoHumanoSchema = Schema(
   {
     timestamps: true,
   }
+);
+
+// ====== Único firmante predeterminado de Laboratorio ======
+RecursoHumanoSchema.index(
+  { "firmaLaboratorio.predeterminadoLaboratorio": 1 },
+  { unique: true, partialFilterExpression: { "firmaLaboratorio.predeterminadoLaboratorio": true } },
 );
 
 //aquí se define o elige la colección/tabla en la que queremos que se guarde

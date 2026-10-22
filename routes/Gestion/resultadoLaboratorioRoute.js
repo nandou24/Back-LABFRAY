@@ -23,6 +23,8 @@ const {
   obtenerBandejaEntregaResultados,
 } = require("../../controllers/Gestion/entregaResultadoLaboratorioController");
 
+const { obtenerComparacionHistoricaResultado } = require("../../controllers/Gestion/resultadoLaboratorioHistoricoController");
+
 const { validarJWT } = require("../../middlewares/validar-token");
 const {
   validarPermisoAccion,
@@ -73,6 +75,14 @@ router.get(
   "/solicitud/:solicitudAtencionId/liberados",
   validarJWT,
   obtenerResultadosLiberadosPorSolicitud,
+);
+
+// ====== Comparar con resultados anteriores ======
+
+router.get(
+  "/:resultadoLaboratorioId/historico",
+  validarJWT,
+  obtenerComparacionHistoricaResultado,
 );
 
 // ====== Obtener resultado por id ======

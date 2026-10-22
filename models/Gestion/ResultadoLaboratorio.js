@@ -496,6 +496,35 @@ const ResultadoLaboratorioSchema = new Schema(
       default: false,
     },
 
+    // ====== Profesional responsable documentado al liberar ======
+    responsableInforme: {
+      recursoHumanoId: { type: Schema.Types.ObjectId, default: null },
+      firmaArchivoId: { type: Schema.Types.ObjectId, default: null },
+      hashFirma: { type: String, default: null },
+      perfilId: { type: String, default: null },
+      tratamiento: { type: String, default: null },
+      siglaColegiatura: { type: String, default: null },
+      siglaEspecialidad: { type: String, default: null },
+      mostrarProfesion: { type: Boolean, default: true },
+      mostrarEspecialidad: { type: Boolean, default: true },
+      mostrarColegiatura: { type: Boolean, default: true },
+      mostrarRne: { type: Boolean, default: true },
+      nombreCompleto: { type: String, default: null },
+      nombres: { type: String, default: null },
+      apellidoPaterno: { type: String, default: null },
+      apellidoMaterno: { type: String, default: null },
+      sexo: { type: String, default: null },
+      profesion: { type: String, default: null },
+      especialidad: { type: String, default: null },
+      nroColegiatura: { type: String, default: null },
+      rne: { type: String, default: null },
+      origenAsignacion: { type: String, default: null },
+      referenciaAutorizacion: { type: String, default: null },
+      fechaDesignacion: { type: Date, default: null },
+      liberadoPor: { type: String, default: null },
+      usuarioLiberacion: { type: String, default: null },
+    },
+
     // ====== Liberación ======
 
     liberadoPor: {

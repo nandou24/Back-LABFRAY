@@ -432,6 +432,8 @@ const encontrarTerminoCotizaicon = async (req, res = response) => {
 
 const actualizarPaciente = async (req, res = response) => {
   const { tipoDoc, nroDoc, ...datosActualizables } = req.body;
+  // ====== Impedir cambio del estado de identificación por edición genérica ======
+  delete datosActualizables.estadoIdentificacion;
   const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
   console.log("Datos a actualizar:", datosActualizables);
 
@@ -466,11 +468,100 @@ const actualizarPaciente = async (req, res = response) => {
   }
 };
 
+// ====== Actualizar datos complementarios sin alterar identidad ======
+const actualizarDatosComplementarios = async (req, res = response) => {
+  try {
+    const pacienteId = String(req.params?.id ?? "").trim();
+    if (!mongoose.Types.ObjectId.isValid(pacienteId)) {
+      return res.status(400).json({ ok: false, msg: "ID de paciente no válido" });
+    }
+
+    const datos = req.body;
+    if (!datos || typeof datos !== "object" || Array.isArray(datos)) {
+      return res.status(400).json({ ok: false, msg: "Datos complementarios no válidos" });
+    }
+
+    const camposPermitidos = new Set(["sexoCliente", "fechaNacimiento", "phones"]);
+    const campos = Object.keys(datos);
+    if (!campos.length || campos.some((campo) => !camposPermitidos.has(campo))) {
+      return res.status(400).json({
+        ok: false,
+        msg: "Solo se pueden actualizar sexo, fecha de nacimiento y teléfonos",
+      });
+    }
+
+    const cambios = {};
+
+    if (Object.prototype.hasOwnProperty.call(datos, "sexoCliente")) {
+      const sexo = datos.sexoCliente == null || datos.sexoCliente === ""
+        ? null : String(datos.sexoCliente).trim();
+      if (sexo !== null && !["Masculino", "Femenino"].includes(sexo)) {
+        return res.status(400).json({ ok: false, msg: "Sexo del paciente no válido" });
+      }
+      cambios.sexoCliente = sexo;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(datos, "fechaNacimiento")) {
+      const valor = datos.fechaNacimiento;
+      if (valor == null || valor === "") {
+        cambios.fechaNacimiento = null;
+      } else {
+        if (typeof valor !== "string" && !(valor instanceof Date)) {
+          return res.status(400).json({ ok: false, msg: "Fecha de nacimiento no válida" });
+        }
+        const fecha = new Date(valor);
+        if (Number.isNaN(fecha.getTime()) || fecha > new Date()) {
+          return res.status(400).json({ ok: false, msg: "Fecha de nacimiento no válida" });
+        }
+        cambios.fechaNacimiento = fecha;
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(datos, "phones")) {
+      if (!Array.isArray(datos.phones) || datos.phones.length > 20 ||
+          datos.phones.some((telefono) =>
+            !telefono || typeof telefono !== "object" || Array.isArray(telefono) ||
+            typeof telefono.phoneNumber !== "string" || !telefono.phoneNumber.trim() ||
+            typeof telefono.descriptionPhone !== "string" || !telefono.descriptionPhone.trim())) {
+        return res.status(400).json({ ok: false, msg: "Teléfonos del paciente no válidos" });
+      }
+      cambios.phones = datos.phones.map((telefono) => ({
+        phoneNumber: telefono.phoneNumber.trim(),
+        descriptionPhone: telefono.descriptionPhone.trim(),
+      }));
+    }
+
+    const paciente = await Paciente.findByIdAndUpdate(
+      pacienteId,
+      { $set: {
+        ...cambios,
+        updatedBy: req.user.uid,
+        usuarioActualizacion: req.user.nombreUsuario,
+        fechaActualizacion: new Date(),
+      } },
+      { new: true, runValidators: true },
+    );
+
+    if (!paciente) {
+      return res.status(404).json({ ok: false, msg: "Paciente no encontrado" });
+    }
+
+    return res.json({ ok: true, paciente });
+  } catch (error) {
+    console.error("Error al actualizar datos complementarios:", error);
+    return res.status(error.name === "ValidationError" ? 400 : 500).json({
+      ok: false,
+      msg: "No se pudieron actualizar los datos complementarios",
+    });
+  }
+};
+
 module.exports = {
   crearPaciente,
   mostrarUltimosPacientes,
   encontrarTermino,
   actualizarPaciente,
+  actualizarDatosComplementarios,
   encontrarTerminoCotizaicon,
   mostrarUltimosPacientesCotizacion,
   encontrarTerminoporId,

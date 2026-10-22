@@ -1,7 +1,10 @@
 const { Router } = require("express");
 const {
   subirFotoPerfilPaciente,
+  subirFotoEvaluacionPaciente,
+  obtenerImagenEvaluacionPaciente,
   obtenerFotoPerfilPaciente,
+  obtenerFotoIdentificacionPaciente,
 } = require("../../controllers/Mantenimiento/archivoPacienteController");
 const uploadArchivoPaciente = require("../../middlewares/uploadArchivoPaciente");
 const { validarJWT } = require("../../middlewares/validar-token");
@@ -17,6 +20,20 @@ router.post(
   uploadArchivoPaciente.single("archivo"),
   subirFotoPerfilPaciente,
 );
+
+// ====== Evaluación: subir imagen vinculada a programación y solicitudes ======
+router.post(
+  '/:pacienteId/foto-evaluacion',
+  validarJWT,
+  uploadArchivoPaciente.single('archivo'),
+  subirFotoEvaluacionPaciente,
+);
+
+// ====== Lectura autenticada en lugar de URL pública S3 ======
+router.get('/foto-evaluacion/imagen', validarJWT, obtenerImagenEvaluacionPaciente);
+
+// ====== Consulta de identificación por HC, paciente o programación ======
+router.get("/foto-identificacion", validarJWT, obtenerFotoIdentificacionPaciente);
 
 // ====== Consultar foto de identificación ======
 router.get(

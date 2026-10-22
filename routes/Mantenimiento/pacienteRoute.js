@@ -5,6 +5,7 @@ const {
   mostrarUltimosPacientes,
   encontrarTermino,
   actualizarPaciente,
+  actualizarDatosComplementarios,
   encontrarTerminoCotizaicon,
   mostrarUltimosPacientesCotizacion,
   registrarPacienteSinnHC,
@@ -114,5 +115,12 @@ router.get(
 //PUT
 //! Actualizar Paciente
 router.put("/updatePatient", [validarJWT], actualizarPaciente);
+
+// ====== Datos complementarios del paciente desde programación empresarial ======
+router.patch(
+  "/datosComplementarios/:id",
+  [validarJWT],
+  actualizarDatosComplementarios,
+);
 
 module.exports = router;

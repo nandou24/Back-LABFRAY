@@ -1,4 +1,7 @@
 const { response } = require("express");
+const crypto = require('crypto');
+const FirmaProfesionalLaboratorioVersion = require('../../models/Mantenimiento/FirmaProfesionalLaboratorioVersion');
+const { obtenerBufferFirma, esPng } = require('../../utils/Gestion/responsableInformeLaboratorio');
 const mongoose = require("mongoose");
 const SolicitudAtencion = require("../../models/Gestion/SolicitudAtencion");
 const ResultadoLaboratorio = require("../../models/Gestion/ResultadoLaboratorio");
@@ -140,6 +143,68 @@ const construirMuestrasPorUnidad = (muestras = []) => {
       [...valores].sort((a, b) => a.localeCompare(b, "es")),
     ]),
   );
+};
+
+// ====== Resolver el intento vigente de cada recipiente ======
+const seleccionarIntentosVigentesInforme = (muestras = []) => {
+  const intentosVigentes = new Map();
+
+  for (const muestra of Array.isArray(muestras) ? muestras : []) {
+    const clavePlan = String(muestra?.claveMuestraPlan ?? muestra?._id ?? "");
+    if (!clavePlan) continue;
+
+    const anterior = intentosVigentes.get(clavePlan);
+    const intento = Number(muestra?.numeroIntento ?? 1);
+    const intentoAnterior = Number(anterior?.numeroIntento ?? 0);
+    const fecha = new Date(muestra?.fechaRegistro ?? muestra?.createdAt ?? 0).getTime();
+    const fechaAnterior = new Date(anterior?.fechaRegistro ?? anterior?.createdAt ?? 0).getTime();
+
+    if (!anterior || intento > intentoAnterior ||
+        (intento === intentoAnterior && fecha > fechaAnterior)) {
+      intentosVigentes.set(clavePlan, muestra);
+    }
+  }
+
+  return [...intentosVigentes.values()];
+};
+
+// ====== Fechas de las muestras vigentes por unidad clínica ======
+const construirFechasMuestrasPorUnidad = (muestras = []) => {
+  const porUnidad = new Map();
+  for (const muestra of muestras) {
+    // ====== Nunca reutilizar una muestra reemplazada, rechazada o anulada ======
+    if (muestra?.estadoMuestra !== "ACEPTADA") continue;
+
+    const nombreMuestra = String(muestra?.tipoMuestra?.nombreTipoMuestra ?? "").trim();
+    // ====== Distinguir el registro simultáneo de una toma histórica ======
+    const registroToma = muestra.fechaRegistroRecoleccion
+      ? new Date(muestra.fechaRegistroRecoleccion).getTime() : NaN;
+    const registroRecepcion = muestra.fechaRecepcion
+      ? new Date(muestra.fechaRecepcion).getTime() : NaN;
+    const tomaRecepcionUnificada = Number.isFinite(registroToma) &&
+      Number.isFinite(registroRecepcion) && registroToma === registroRecepcion;
+
+    const dato = {
+      nombreMuestra: nombreMuestra || "Muestra",
+      fechaRecoleccion: muestra.fechaRecoleccion ?? null,
+      fechaRecepcion: muestra.fechaRecepcion ?? null,
+      tomaRecepcionUnificada,
+      fechaTomaRecepcion: tomaRecepcionUnificada ? muestra.fechaRecepcion : null,
+    };
+
+    // ====== Conservar solo fechas efectivamente registradas ======
+    if (!dato.fechaRecoleccion && !dato.fechaRecepcion) continue;
+
+    const claves = new Set((muestra?.coberturas ?? [])
+      .map((cobertura) => String(cobertura?.claveUnidad ?? "").trim())
+      .filter(Boolean));
+    for (const claveUnidad of claves) {
+      if (!porUnidad.has(claveUnidad)) porUnidad.set(claveUnidad, []);
+      porUnidad.get(claveUnidad).push(dato);
+    }
+  }
+
+  return porUnidad;
 };
 
 // ====== Preparar datos del paciente ======
@@ -1029,14 +1094,14 @@ const construirInformeEntregableSeleccionado = async ({
     throw error;
   }
 
-  const muestrasAceptadas = await MuestraLaboratorio.find({
-    solicitudAtencionId,
-    estadoMuestra: "ACEPTADA",
-  })
-    .select("tipoMuestra coberturas.claveUnidad")
+  const muestrasSolicitud = await MuestraLaboratorio.find({ solicitudAtencionId })
+    .select("claveMuestraPlan numeroIntento estadoMuestra fechaRegistro createdAt tipoMuestra coberturas.claveUnidad fechaRecoleccion fechaRegistroRecoleccion fechaRecepcion")
     .lean();
 
+  const intentosVigentes = seleccionarIntentosVigentesInforme(muestrasSolicitud);
+  const muestrasAceptadas = intentosVigentes.filter((muestra) => muestra.estadoMuestra === "ACEPTADA");
   const muestrasPorUnidad = construirMuestrasPorUnidad(muestrasAceptadas);
+  const fechasMuestrasPorUnidad = construirFechasMuestrasPorUnidad(muestrasAceptadas);
   const resultados = liberados.map((resultado) => ({
     _id: String(resultado._id),
     codPruebaLab: resultado.codPruebaLab,
@@ -1049,6 +1114,7 @@ const construirInformeEntregableSeleccionado = async ({
     usuarioLiberacion: resultado.usuarioLiberacion,
     observacionGeneral: resultado.observacionGeneral,
     muestras: muestrasPorUnidad.get(String(resultado.claveUnidad ?? "")) ?? [],
+    fechasMuestras: fechasMuestrasPorUnidad.get(String(resultado.claveUnidad ?? "")) ?? [],
     items: obtenerItemsEntregables(resultado.resultadosItems).map((item) => {
       const metadata = obtenerMetadataItemInforme({ solicitud, resultado, item });
 
@@ -1149,14 +1215,14 @@ const obtenerInformeEntregable = async (req, res = response) => {
       .sort({ numeroInstancia: 1, createdAt: 1 })
       .lean();
 
-    const muestrasAceptadas = await MuestraLaboratorio.find({
-      solicitudAtencionId,
-      estadoMuestra: "ACEPTADA",
-    })
-      .select("tipoMuestra coberturas.claveUnidad")
+    const muestrasSolicitud = await MuestraLaboratorio.find({ solicitudAtencionId })
+      .select("claveMuestraPlan numeroIntento estadoMuestra fechaRegistro createdAt tipoMuestra coberturas.claveUnidad fechaRecoleccion fechaRegistroRecoleccion fechaRecepcion")
       .lean();
 
+    const intentosVigentes = seleccionarIntentosVigentesInforme(muestrasSolicitud);
+    const muestrasAceptadas = intentosVigentes.filter((muestra) => muestra.estadoMuestra === "ACEPTADA");
     const muestrasPorUnidad = construirMuestrasPorUnidad(muestrasAceptadas);
+    const fechasMuestrasPorUnidad = construirFechasMuestrasPorUnidad(muestrasAceptadas);
 
     // ====== No enviar información interna del laboratorio ======
     const resultados = liberados.map((resultado) => ({
@@ -1171,6 +1237,7 @@ const obtenerInformeEntregable = async (req, res = response) => {
       usuarioLiberacion: resultado.usuarioLiberacion,
       observacionGeneral: resultado.observacionGeneral,
       muestras: muestrasPorUnidad.get(String(resultado.claveUnidad ?? "")) ?? [],
+    fechasMuestras: fechasMuestrasPorUnidad.get(String(resultado.claveUnidad ?? "")) ?? [],
       items: obtenerItemsEntregables(resultado.resultadosItems).map((item) => {
         const metadata = obtenerMetadataItemInforme({
           solicitud,
@@ -1366,7 +1433,112 @@ const registrarEntregaResultados = async (req, res = response) => {
   }
 };
 
+// ====== Recuperar firmas históricas solo para pruebas liberadas ======
+const obtenerFirmasInformePdf = async (req, res = response) => {
+  try {
+    const solicitudAtencionId = String(req.params.solicitudAtencionId ?? '');
+    const seleccion = req.body?.resultados;
+    const ids = Array.isArray(seleccion) ? seleccion.map((item) => item?._id) : null;
+    if (!mongoose.isValidObjectId(solicitudAtencionId) || !Array.isArray(ids) ||
+        ids.length < 1 || ids.length > 100 ||
+        new Set(ids.map(String)).size !== ids.length ||
+        !ids.every((id) => mongoose.isValidObjectId(id)) ||
+        !seleccion.every((item) => Number.isSafeInteger(Number(item?.versionResultado)) && Number(item.versionResultado) >= 1)) {
+      return res.status(400).json({ ok: false, msg: 'Selección de resultados inválida' });
+    }
+
+    const resultados = await ResultadoLaboratorio.find({
+      _id: { $in: ids }, solicitudAtencionId, estadoResultado: 'LIBERADO',
+    }).select('_id codPruebaLab nombrePruebaLab versionResultado responsableInforme').lean();
+    if (resultados.length !== ids.length) {
+      return res.status(409).json({ ok: false,
+        msg: 'Alguna prueba dejó de estar liberada; vuelva a cargar el informe' });
+    }
+
+    // ====== Impedir firmas para información desactualizada ======
+    const versionesEsperadas = new Map(seleccion.map((item) => [String(item._id), Number(item.versionResultado)]));
+    if (resultados.some((item) => Number(item.versionResultado ?? 1) !== versionesEsperadas.get(String(item._id)))) {
+      return res.status(409).json({ ok: false, codigo: 'RESULTADOS_DESACTUALIZADOS',
+        msg: 'El informe cambió durante la generación; vuelva a abrirlo' });
+    }
+
+    const solicitud = await SolicitudAtencion.findById(solicitudAtencionId)
+      .select('estado tipo').lean();
+    if (!solicitud || solicitud.tipo !== 'Laboratorio' || solicitud.estado === 'ANULADO') {
+      return res.status(409).json({ ok: false, msg: 'El informe no está disponible' });
+    }
+
+    const firmasPorArchivo = new Map();
+    const sinFirma = [];
+    for (const resultado of resultados) {
+      const info = resultado.responsableInforme;
+      if (!info?.firmaArchivoId || !info?.hashFirma) {
+        sinFirma.push(resultado.codPruebaLab);
+        continue;
+      }
+      // ====== No mezclar presentaciones históricas aunque compartan PNG ======
+      const clavePresentacion = JSON.stringify({
+        archivoId: String(info.firmaArchivoId), perfilId: info.perfilId ?? 'legacy',
+        tratamiento: info.tratamiento ?? '', profesion: info.profesion ?? '',
+        especialidad: info.especialidad ?? '', colegiatura: info.nroColegiatura ?? '',
+        rne: info.rne ?? '', siglaColegiatura: info.siglaColegiatura ?? '',
+        siglaEspecialidad: info.siglaEspecialidad ?? '',
+        mostrarProfesion: info.mostrarProfesion !== false,
+        mostrarEspecialidad: info.mostrarEspecialidad !== false,
+        mostrarColegiatura: info.mostrarColegiatura !== false,
+        mostrarRne: info.mostrarRne !== false,
+      });
+      if (!firmasPorArchivo.has(clavePresentacion)) {
+        firmasPorArchivo.set(clavePresentacion, { info, pruebas: [] });
+      }
+      firmasPorArchivo.get(clavePresentacion).pruebas.push(resultado.codPruebaLab);
+    }
+
+    const firmas = [];
+    for (const dato of firmasPorArchivo.values()) {
+      const registro = await FirmaProfesionalLaboratorioVersion.findById(dato.info.firmaArchivoId)
+        .select('+imagen hashSha256 recursoHumanoId');
+      const png = obtenerBufferFirma(registro?.imagen);
+      const hash = png ? crypto.createHash('sha256').update(png).digest('hex') : null;
+      if (!registro || !esPng(png) || hash !== registro.hashSha256 ||
+          hash !== dato.info.hashFirma ||
+          String(registro.recursoHumanoId) !== String(dato.info.recursoHumanoId)) {
+        return res.status(409).json({ ok: false, codigo: 'FIRMA_NO_DISPONIBLE',
+          msg: 'Una firma histórica no pudo verificarse; no se generará un PDF incompleto' });
+      }
+      firmas.push({
+        recursoHumanoId: String(dato.info.recursoHumanoId),
+        nombreCompleto: dato.info.nombreCompleto,
+        tratamiento: dato.info.tratamiento ?? '',
+        perfilId: dato.info.perfilId ?? 'legacy',
+        siglaColegiatura: dato.info.siglaColegiatura ?? 'Colegiatura',
+        siglaEspecialidad: dato.info.siglaEspecialidad ?? 'RNE',
+        mostrarProfesion: dato.info.mostrarProfesion !== false,
+        mostrarEspecialidad: dato.info.mostrarEspecialidad !== false,
+        mostrarColegiatura: dato.info.mostrarColegiatura !== false,
+        mostrarRne: dato.info.mostrarRne !== false,
+        nombres: dato.info.nombres || null,
+        apellidoPaterno: dato.info.apellidoPaterno || null,
+        apellidoMaterno: dato.info.apellidoMaterno || null,
+        sexo: dato.info.sexo || null,
+        profesion: dato.info.profesion,
+        especialidad: dato.info.especialidad || null,
+        nroColegiatura: dato.info.nroColegiatura,
+        rne: dato.info.rne || null,
+        pruebas: dato.pruebas,
+        imagenPngBase64: png.toString('base64'),
+      });
+    }
+    return res.set('Cache-Control', 'private, no-store')
+      .json({ ok: true, firmas, pruebasSinFirma: sinFirma });
+  } catch (error) {
+    console.error('Error obteniendo firmas de informe:', error);
+    return res.status(500).json({ ok: false, msg: 'No se pudieron verificar las firmas del informe' });
+  }
+};
+
 module.exports = {
+  obtenerFirmasInformePdf,
   obtenerBandejaEntregaResultados,
   obtenerInformeEntregable,
   construirInformeEntregableSeleccionado,

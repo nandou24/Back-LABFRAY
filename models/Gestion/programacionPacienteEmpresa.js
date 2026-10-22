@@ -99,6 +99,20 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
       default: null,
     },
     hc: { type: String, default: null, trim: true },
+    // ====== Auditoría de vínculos de identidad ======
+    historialVinculaciones: {
+      type: [{
+        tipo: {type:String,required:true},
+        pacienteIdAnterior: {type:Schema.Types.ObjectId,default:null},
+        hcAnterior: {type:String,default:null},
+        pacienteIdNuevo: {type:Schema.Types.ObjectId,default:null},
+        hcNueva: {type:String,default:null},
+        fecha: {type:Date,default:Date.now},
+        ejecutadoPor: {type:String,required:true},
+        usuario: {type:String,default:null},
+        origenDocumento: {type:String,default:'EMPRESA'}
+      }], default: []
+    },
     protocoloId: { type: Schema.Types.ObjectId, required: true },
     codProtocolo: { type: String, required: true, trim: true },
     nombreProtocolo: { type: String, required: true, trim: true },

@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const { response } = require("express");
 
 const SolicitudAtencion = require("../../models/Gestion/SolicitudAtencion");
+const Paciente = require("../../models/Mantenimiento/Paciente");
 const RecurHumano = require("../../models/Mantenimiento/RecHumano");
 const ResultadoLaboratorio = require("../../models/Gestion/ResultadoLaboratorio");
 
@@ -520,41 +521,49 @@ const obtenerClaveFechaPeru = (fecha = new Date()) => {
 const normalizarFechaRecoleccion = (valor, ahora = new Date()) => {
   const hoyPeru = obtenerClaveFechaPeru(ahora);
 
-  if (!hoyPeru) {
+  if (!hoyPeru || !Number.isFinite(ahora.getTime())) {
     throw new Error("No se pudo resolver la fecha actual");
   }
 
-  const texto =
-    valor === undefined || valor === null || String(valor).trim() === ""
-      ? hoyPeru
-      : String(valor).trim();
+  const texto = String(valor ?? "").trim();
 
-  const coincidencia = /^(\d{4})-(\d{2})-(\d{2})$/.exec(texto);
+  // ====== La toma actual conserva la hora real del servidor ======
+  if (!texto || texto === hoyPeru) {
+    return new Date(ahora.getTime());
+  }
 
-  if (!coincidencia) {
+  // ====== Fechas pasadas requieren una hora real explícita ======
+  if (/^\d{4}-\d{2}-\d{2}$/.test(texto)) {
+    const [anio, mes, dia] = texto.split("-").map(Number);
+    const validacion = new Date(Date.UTC(anio, mes - 1, dia));
+
+    if (validacion.getUTCFullYear() !== anio ||
+        validacion.getUTCMonth() !== mes - 1 ||
+        validacion.getUTCDate() !== dia) {
+      throw new Error("La fecha de toma no es válida");
+    }
+
+    if (texto > hoyPeru) {
+      throw new Error("La fecha de toma no puede ser futura");
+    }
+
+    throw new Error(
+      "Para registrar una toma de fecha anterior debe indicar también la hora real con zona horaria",
+    );
+  }
+
+  // ====== Registrar eventos anteriores solo con fecha y hora verificables ======
+  const formatoFechaHora = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/i;
+  if (!formatoFechaHora.test(texto)) {
     throw new Error("La fecha de toma no es válida");
   }
 
-  const anio = Number(coincidencia[1]);
-  const mes = Number(coincidencia[2]);
-  const dia = Number(coincidencia[3]);
-
-  const validacion = new Date(Date.UTC(anio, mes - 1, dia));
-
-  if (
-    validacion.getUTCFullYear() !== anio ||
-    validacion.getUTCMonth() !== mes - 1 ||
-    validacion.getUTCDate() !== dia
-  ) {
-    throw new Error("La fecha de toma no es válida");
+  const fecha = new Date(texto);
+  if (!Number.isFinite(fecha.getTime()) || fecha.getTime() > ahora.getTime()) {
+    throw new Error("La fecha y hora de toma no son válidas o son futuras");
   }
 
-  if (texto > hoyPeru) {
-    throw new Error("La fecha de toma no puede ser futura");
-  }
-
-  // ====== Guardar al mediodía de Lima para evitar desplazamientos de fecha ======
-  return new Date(`${texto}T12:00:00-05:00`);
+  return fecha;
 };
 
 // ====== Obtener Items de unidad ======
@@ -6616,6 +6625,12 @@ const obtenerBandejaTomaMuestras = async (req, res = response) => {
       resultadosPorSolicitud.get(clave).push(resultado);
     });
 
+    // ====== Consultar tipo de HC en un solo lote ======
+    const idsHC = [...new Set(solicitudes.map((s) => String(s.clienteId ?? s.programacionEmpresaId?.pacienteId ?? '')).filter((id) => mongoose.isValidObjectId(id)))];
+    const pacientesHC = idsHC.length ? await Paciente.find({ _id: { $in: idsHC } })
+      .select('_id tipoHC estadoConciliacion').lean() : [];
+    const mapaHC = new Map(pacientesHC.map((p) => [String(p._id), p]));
+
     // ====== Construir bandeja ======
 
     const bandeja = solicitudes.map((solicitud) => {
@@ -6657,9 +6672,14 @@ const obtenerBandejaTomaMuestras = async (req, res = response) => {
         planToma.disponible === true &&
         planToma.totalRecipientes > 0;
 
+      const solicitudBandeja = construirSolicitudBandejaMuestraResponse(solicitud);
+      const clasificacion = mapaHC.get(String(solicitudBandeja.paciente.clienteId ?? ''));
       return {
         solicitud: {
-          ...construirSolicitudBandejaMuestraResponse(solicitud),
+          ...solicitudBandeja,
+          paciente: { ...solicitudBandeja.paciente,
+            tipoHC: clasificacion?.tipoHC ?? null,
+            estadoConciliacion: clasificacion?.estadoConciliacion ?? null },
           estadoOperativo,
         },
 

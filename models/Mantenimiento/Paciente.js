@@ -9,6 +9,28 @@ const telefonoSchema = new mongoose.Schema({
 const PacienteSchema = Schema(
   {
     hc: { type: String, unique: true },
+    // ====== Clasificación de HC: sin asignar estados a registros históricos ======
+    tipoHC: { type: String, enum: ['PRINCIPAL', 'PROVISIONAL'], default: undefined },
+    estadoConciliacion: {
+      type: String,
+      enum: ['NO_APLICA', 'SIN_CONCILIAR', 'EN_REVISION', 'CONCILIADA'],
+      default: undefined,
+    },
+    pacientePrincipalId: { type: Schema.Types.ObjectId, ref: 'pacientesCollection', default: null },
+    revisionConciliacion: { type: Number, default: 0, min: 0 },
+    origenCreacionHC: {
+      type: String,
+      enum: ['MAESTRO', 'EMPRESA_SIN_DOCUMENTO', 'EMPRESA_CON_DOCUMENTO'],
+      default: undefined,
+    },
+    // ====== Registro del control manual cuando coinciden nombres ======
+    revisionCreacionProvisional: {
+      motivo: { type: String, trim: true },
+      candidatosId: [{ type: Schema.Types.ObjectId, ref: 'pacientesCollection' }],
+      uid: String,
+      nombreUsuario: String,
+      fecha: Date,
+    },
     estadoIdentificacion: {
       type: String,
       required: true,
@@ -76,6 +98,15 @@ const PacienteSchema = Schema(
       fecha: { type: Date, required: true },
       uid: { type: String, required: true },
       nombreUsuario: { type: String, default: null },
+      tipoOperacion: { type: String, enum: ['REGULARIZACION', 'CORRECCION_AUTORIZADA'], default: 'REGULARIZACION' },
+      cambios: [{
+        campo: { type: String, required: true },
+        valorAnterior: { type: String, default: null },
+        valorNuevo: { type: String, default: null },
+      }],
+      autorizadoPor: { type: String, default: null },
+      usuarioAutorizacion: { type: String, default: null },
+      rolAutorizacion: { type: String, default: null },
     }],
     // 🔍 Campos de auditoría:
     createdBy: { type: String, required: true }, // uid
