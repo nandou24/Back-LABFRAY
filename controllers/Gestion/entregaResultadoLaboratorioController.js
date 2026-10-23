@@ -1121,6 +1121,7 @@ const construirInformeEntregableSeleccionado = async ({
       return {
         nombreInforme: item.nombreInforme,
         codItemLab: item.codItemLab,
+        itemLabId: item.itemLabId ? String(item.itemLabId) : null,
         tipoResultado: metadata.tipoResultado,
         metodo: metadata.metodo,
         nombreGrupo: metadata.nombreGrupo,
@@ -1248,6 +1249,7 @@ const obtenerInformeEntregable = async (req, res = response) => {
         return {
           nombreInforme: item.nombreInforme,
           codItemLab: item.codItemLab,
+        itemLabId: item.itemLabId ? String(item.itemLabId) : null,
           tipoResultado: metadata.tipoResultado,
           metodo: metadata.metodo,
           nombreGrupo: metadata.nombreGrupo,
