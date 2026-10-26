@@ -38,6 +38,7 @@ const identificarCandidato = (programacion, paciente, validarCoincidenciaIdentid
     fechaNacimiento: paciente.fechaNacimiento ?? null,
     sexoCliente: paciente.sexoCliente ?? null,
     documentoExacto, nombresExactos,
+    identificacionPendiente: paciente.estadoIdentificacion === 'PENDIENTE',
     vinculacionPermitida: Boolean(documentoExacto && nombresExactos && paciente.hc &&
       paciente.estadoIdentificacion !== 'PENDIENTE'),
     tipoCoincidencia: documentoExacto
@@ -45,7 +46,10 @@ const identificarCandidato = (programacion, paciente, validarCoincidenciaIdentid
   };
 };
 
-const buscarCoincidenciasVinculacion = async (Paciente, programacion, validarCoincidenciaIdentidad) => {
+const buscarCoincidenciasVinculacion = async (Paciente, programacion, validarCoincidenciaIdentidad, session = null) => {
+  const conSesion = (consulta) => session && typeof consulta.session === 'function'
+    ? consulta.session(session) : consulta;
+
   const tipoDoc = normalizarDocumento(programacion.tipoDoc);
   const nroDoc = normalizarDocumento(programacion.nroDoc);
   let documentos = [];
@@ -53,10 +57,10 @@ const buscarCoincidenciasVinculacion = async (Paciente, programacion, validarCoi
 
   // ====== Buscar documentos en todo el maestro, sin limitar resultados ======
   if (tipoDoc && nroDoc) {
-    documentos = await Paciente.find({
+    documentos = await conSesion(Paciente.find({
       tipoDoc: new RegExp(`^\\s*${escaparRegex(tipoDoc)}\\s*$`, 'i'),
       nroDoc: new RegExp(`^\\s*${escaparRegex(nroDoc)}\\s*$`, 'i'),
-    }).select(CAMPOS_PACIENTE).lean();
+    }).select(CAMPOS_PACIENTE)).lean();
   }
 
   // ====== Nombres y apellidos: buscar la combinación, no palabras sueltas ======
@@ -66,24 +70,30 @@ const buscarCoincidenciasVinculacion = async (Paciente, programacion, validarCoi
     .filter(item => normalizarDocumento(item.valor))
     .map(item => ({ [item.campo]: expresionCampo(item.valor) }));
   if (primerNombre && apellidos.length) {
-    nombres = await Paciente.find({
+    nombres = await conSesion(Paciente.find({
       nombreCliente: primerNombre, $or: apellidos,
-    }).select(CAMPOS_PACIENTE).lean();
+    }).select(CAMPOS_PACIENTE)).lean();
   }
 
   const porDocumento = documentos
     .map(p => identificarCandidato(programacion, p, validarCoincidenciaIdentidad));
-  const idsDocumento = new Set(porDocumento.map(p => p.pacienteId));
+  // ====== Los criterios son independientes: el mismo paciente cuenta en ambos ======
   const porNombres = nombres
-    .map(p => identificarCandidato(programacion, p, validarCoincidenciaIdentidad))
-    .filter(p => !idsDocumento.has(p.pacienteId));
+    .map(p => identificarCandidato(programacion, p, validarCoincidenciaIdentidad));
+
+  // ====== Lista consolidada sin duplicar HC, solo para consumidores generales ======
+  const candidatosUnicos = new Map();
+  for (const candidato of [...porDocumento, ...porNombres]) {
+    if (!candidatosUnicos.has(candidato.pacienteId)) {
+      candidatosUnicos.set(candidato.pacienteId, candidato);
+    }
+  }
 
   return {
     porDocumento, porNombres,
-    // ====== Compatibilidad con el frontend V3: ya no hay resultados ocultos ======
     masPorDocumento: false,
     masPorNombres: false,
-    candidatos: [...porDocumento, ...porNombres],
+    candidatos: [...candidatosUnicos.values()],
   };
 };
 

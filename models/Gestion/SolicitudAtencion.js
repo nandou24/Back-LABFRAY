@@ -1221,16 +1221,23 @@ const SolicitudAtencionSchema = new Schema(
       default: [],
     },
 
+    // ====== La atención temporal de empresa aún no tiene HC ======
+    identidadAtencion: {
+      type: String, enum: ['VINCULADA', 'TEMPORAL'], default: 'VINCULADA',
+      required: true,
+    },
     hc: {
       type: String,
-      required: true,
+      required: function () { return this.identidadAtencion !== 'TEMPORAL'; },
+      default: null,
       trim: true,
     },
 
     clienteId: {
       type: Schema.Types.ObjectId,
       ref: "pacientesCollection",
-      required: true,
+      required: function () { return this.identidadAtencion !== 'TEMPORAL'; },
+      default: null,
     },
     // ====== Documento pendiente permitido para atención de Empresa ======
     tipoDoc: {
@@ -1364,6 +1371,15 @@ const SolicitudAtencionSchema = new Schema(
     timestamps: true,
   },
 );
+
+// ====== Evitar identidad temporal fuera de una programación empresarial ======
+SolicitudAtencionSchema.pre('validate', function () {
+  if (this.identidadAtencion !== 'TEMPORAL') return;
+  if (this.origenAtencion !== 'EMPRESA' || !this.programacionEmpresaId ||
+      this.clienteId || this.hc || this.tipoDoc || this.nroDoc) {
+    this.invalidate('identidadAtencion', 'La identidad temporal solo se permite en solicitudes empresariales sin HC ni documento.');
+  }
+});
 
 // ====== Índice código laboratorio ======
 

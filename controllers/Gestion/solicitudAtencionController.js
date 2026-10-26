@@ -1347,57 +1347,56 @@ const crearSolicitudesAtencion = async ({
     throw new Error("Origen de atención no válido");
   }
 
-  // ====== Validar paciente ======
-
-  if (
-    !paciente?.clienteId ||
-    !paciente?.hc ||
-    !paciente?.nombreCliente ||
-    !paciente?.apePatCliente
-  ) {
-    throw new Error(
-      "Faltan datos obligatorios del paciente para generar las solicitudes",
-    );
+  // ====== Permitir identidad temporal SOLO en programación empresarial sin documento ======
+  const temporal = origenAtencion === 'EMPRESA' && datosOrigen?.identidadTemporal === true;
+  if (!paciente?.nombreCliente || !paciente?.apePatCliente) {
+    throw new Error('Faltan los nombres y apellidos del trabajador');
+  }
+  const tieneTipoDoc = Boolean(String(paciente.tipoDoc ?? '').trim());
+  const tieneNroDoc = Boolean(String(paciente.nroDoc ?? '').trim());
+  if (tieneTipoDoc !== tieneNroDoc || (origenAtencion === 'PARTICULAR' && !tieneTipoDoc)) {
+    throw new Error('Documento incompleto para la solicitud');
+  }
+  if (temporal && (paciente.clienteId || paciente.hc || tieneTipoDoc || tieneNroDoc)) {
+    throw new Error('La identidad temporal no puede contener paciente, HC ni documento');
+  }
+  if (!temporal && (!paciente.clienteId || !paciente.hc ||
+      !mongoose.Types.ObjectId.isValid(paciente.clienteId))) {
+    throw new Error('Se requiere paciente y HC válidos para esta atención');
   }
 
-  // ====== Identificación opcional solo en Empresa ======
-  const tieneTipoDoc = Boolean(String(paciente.tipoDoc ?? "").trim());
-  const tieneNroDoc = Boolean(String(paciente.nroDoc ?? "").trim());
-
-  if (tieneTipoDoc !== tieneNroDoc ||
-      (origenAtencion === "PARTICULAR" && !tieneTipoDoc)) {
-    throw new Error("Se requiere un documento de identidad completo para generar las solicitudes");
+  // ====== Obtener identidad y datos demográficos desde su fuente válida ======
+  let sexoPaciente = null;
+  let fechaNacimientoPaciente = null;
+  if (temporal) {
+    if (!mongoose.Types.ObjectId.isValid(datosOrigen?.programacionEmpresaId)) {
+      throw new Error('La identidad temporal exige una programación empresarial');
+    }
+    const programacionTemporal = await ProgramacionPacienteEmpresa
+      .findById(datosOrigen.programacionEmpresaId).session(session).lean();
+    if (!programacionTemporal || !programacionTemporal.identidadTemporalActiva ||
+        programacionTemporal.pacienteId || programacionTemporal.hc ||
+        programacionTemporal.tipoDoc || programacionTemporal.nroDoc ||
+        String(programacionTemporal.nombreCliente).trim() !== String(paciente.nombreCliente).trim() ||
+        String(programacionTemporal.apePatCliente).trim() !== String(paciente.apePatCliente).trim()) {
+      throw new Error('La programación no autoriza la creación de una solicitud temporal');
+    }
+    sexoPaciente = programacionTemporal.sexoCliente
+      ? String(programacionTemporal.sexoCliente).trim().toUpperCase() : null;
+    fechaNacimientoPaciente = programacionTemporal.fechaNacimiento ?? null;
+  } else {
+    const pacienteMaestro = await Paciente.findById(paciente.clienteId)
+      .session(session).lean();
+    if (!pacienteMaestro) throw new Error('El paciente asociado a la atención no existe');
+    if (!tieneTipoDoc && (origenAtencion !== 'EMPRESA' ||
+        pacienteMaestro.estadoIdentificacion !== 'PENDIENTE' ||
+        pacienteMaestro.tipoDoc || pacienteMaestro.nroDoc)) {
+      throw new Error('La solicitud sin documento requiere identificación empresarial pendiente');
+    }
+    sexoPaciente = pacienteMaestro.sexoCliente
+      ? String(pacienteMaestro.sexoCliente).trim().toUpperCase() : null;
+    fechaNacimientoPaciente = pacienteMaestro.fechaNacimiento ?? null;
   }
-
-  // ====== Obtener contexto demográfico ======
-
-  if (!mongoose.Types.ObjectId.isValid(paciente.clienteId)) {
-    throw new Error("El id del paciente no es válido");
-  }
-
-  const pacienteMaestro = await Paciente.findById(paciente.clienteId)
-    .session(session)
-    .lean();
-
-  if (!pacienteMaestro) {
-    throw new Error("El paciente asociado a la atención no existe");
-  }
-
-  if (!tieneTipoDoc && (
-      origenAtencion !== "EMPRESA" ||
-      pacienteMaestro.estadoIdentificacion !== "PENDIENTE" ||
-      pacienteMaestro.tipoDoc || pacienteMaestro.nroDoc
-    )) {
-    throw new Error("Solo se permiten solicitudes empresariales sin documento para pacientes con identificación pendiente");
-  }
-
-  const sexoPaciente =
-    typeof pacienteMaestro.sexoCliente === "string" &&
-    pacienteMaestro.sexoCliente.trim()
-      ? pacienteMaestro.sexoCliente.trim().toUpperCase()
-      : null;
-
-  const fechaNacimientoPaciente = pacienteMaestro.fechaNacimiento ?? null;
 
   // ====== Validar origen particular ======
 
@@ -1536,11 +1535,12 @@ const crearSolicitudesAtencion = async ({
         }),
       })),
 
-      // ====== Paciente ======
+      // ====== Identidad de atención ======
 
-      hc: paciente.hc,
+      identidadAtencion: temporal ? 'TEMPORAL' : 'VINCULADA',
+      hc: temporal ? null : paciente.hc,
 
-      clienteId: paciente.clienteId,
+      clienteId: temporal ? null : paciente.clienteId,
 
       tipoDoc: paciente.tipoDoc,
 

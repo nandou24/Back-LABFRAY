@@ -7,10 +7,13 @@ const ProgramacionPacienteEmpresa = require("../../models/Gestion/programacionPa
 const Empresa = require("../../models/Mantenimiento/Empresa");
 const Paciente = require("../../models/Mantenimiento/Paciente");
 const SolicitudAtencion = require("../../models/Gestion/SolicitudAtencion");
+const ArchivoPaciente = require("../../models/Mantenimiento/ArchivoPaciente");
 const { crearSolicitudesAtencion } = require("./solicitudAtencionController");
 
 const { registrarPaciente } = require("../Mantenimiento/pacienteController");
 const { buscarCoincidenciasVinculacion } = require("../../utils/Gestion/buscarCoincidenciasVinculacion");
+const { obtenerConflictoRevisionIdentidad } = require("../../utils/Gestion/obtenerConflictoRevisionIdentidad");
+const { evaluarIdentidadParaNuevaHC, obtenerUltimasDecisiones } = require("../../utils/Gestion/evaluarIdentidadParaNuevaHC");
 
 const construirRangoDia = (fecha) => {
   const base = new Date(fecha);
@@ -683,6 +686,14 @@ const iniciarAtencionProgramacion = async (req, res = response) => {
       });
     }
 
+    // ====== No ignorar una decisión documental anterior no resuelta ======
+    const conflictoVigente = obtenerConflictoRevisionIdentidad(programacion);
+    if (!programacion.pacienteId && programacion.nroDoc && conflictoVigente) {
+      await session.abortTransaction();
+      return res.status(409).json({ ok:false, codigo:'REVISION_IDENTIDAD_PENDIENTE',
+        msg:'Esta programación tiene una revisión de identidad pendiente de resolver. No puede iniciar atención por vinculación automática.' });
+    }
+
     // ==========================================
     // 4. RESOLVER PACIENTE
     // ==========================================
@@ -741,171 +752,44 @@ const iniciarAtencionProgramacion = async (req, res = response) => {
       }
 
       if (!tipoDoc && !nroDoc) {
-        // ====== Evitar crear otra HC ante coincidencias de identidad ======
-        const filtroNombre = {
-          nombreCliente: expresionNombre(programacion.nombreCliente),
-          apePatCliente: expresionNombre(programacion.apePatCliente),
-          apeMatCliente: String(programacion.apeMatCliente ?? "").trim()
-            ? expresionNombre(programacion.apeMatCliente)
-            : { $in: [null, ""] },
-        };
-        const candidatos = await Paciente.find(filtroNombre)
-          .select("_id hc tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente")
-          .limit(5)
-          .session(session)
-          .lean();
-
-        // ====== Advertir primero y permitir excepción confirmada con auditoría ======
-        const confirmaNuevaHC = req.body?.confirmarNuevaHC === true;
-        const motivoNuevaHC = String(req.body?.motivoNuevaHC ?? '').trim();
-        if (candidatos.length && !confirmaNuevaHC) {
-          await session.abortTransaction();
-          return res.status(409).json({
-            ok: false,
-            codigo: "POSIBLE_PACIENTE_EXISTENTE",
-            msg: "Hay HC con nombres y apellidos coincidentes. Verifique que no sea el mismo paciente antes de continuar.",
-            indicacion: "Seleccione al paciente existente si corresponde o confirme el registro de una nueva historia clínica indicando un motivo.",
-            candidatos: candidatos.map(({ _id, hc, tipoDoc, nroDoc }) => ({
-              pacienteId: _id,
-              hc,
-              tipoDoc: tipoDoc ?? null,
-              nroDoc: nroDoc ?? null,
-            })),
-          });
-        }
-        if (candidatos.length && (motivoNuevaHC.length < 10 || motivoNuevaHC.length > 300)) {
-          await session.abortTransaction();
-          return res.status(400).json({
-            ok: false,
-            codigo: 'MOTIVO_NUEVA_HC_REQUERIDO',
-            msg: 'Para continuar con nombres coincidentes, indique un motivo de 10 a 300 caracteres.',
-          });
-        }
-
-        const datosPaciente = {
-          tipoDoc: null,
-          nroDoc: null,
-          nombreCliente: programacion.nombreCliente,
-          apePatCliente: programacion.apePatCliente,
-          apeMatCliente: programacion.apeMatCliente || "",
-          fechaNacimiento: programacion.fechaNacimiento || null,
-          sexoCliente: programacion.sexoCliente || null,
-        };
-
-        paciente = await registrarPaciente({
-          datosPaciente,
-          estadoIdentificacion: "PENDIENTE",
-          session,
-          uid,
-          nombreUsuario,
-        });
-
-        programacion.pacienteId = paciente._id;
-        programacion.hc = paciente.hc;
-        formaResolucion = "PACIENTE_SIN_DOCUMENTO";
+        // ====== Sin DNI: solicitud temporal, NO crear paciente ni HC ======
+        programacion.pacienteId = null;
+        programacion.hc = null;
+        programacion.identidadTemporalActiva = true;
+        programacion.fechaInicioIdentidadTemporal = new Date();
+        formaResolucion = 'IDENTIDAD_TEMPORAL';
       } else {
-        // ====== Buscar paciente por documento ======
-        paciente = await Paciente.findOne({ tipoDoc, nroDoc }).session(session);
-      }
-
-      // ========================================
-      // 4.2.1. EL PACIENTE NO EXISTE
-      // CREAR PACIENTE + HC
-      // ========================================
-
-      if (tipoDoc && nroDoc && !paciente) {
+        // ====== Reevaluar todo el maestro antes de crear la HC ======
+        const coincidencias = await buscarCoincidenciasVinculacion(
+          Paciente, programacion, validarCoincidenciaIdentidad, session,
+        );
+        const evaluacion = evaluarIdentidadParaNuevaHC(programacion, coincidencias);
+        if (!evaluacion.permiteCrear) {
+          await session.abortTransaction();
+          return res.status(409).json({
+            ok: false, codigo: evaluacion.codigo, msg: evaluacion.msg,
+            candidatos: evaluacion.candidatos.map(item => ({ pacienteId: item.pacienteId, hc: item.hc })),
+          });
+        }
+        // ====== Sin coincidencias ni pendientes: crear alta documentada de empresa ======
         const datosPaciente = {
-          tipoDoc,
-          nroDoc,
+          tipoDoc, nroDoc,
           nombreCliente: programacion.nombreCliente,
           apePatCliente: programacion.apePatCliente,
-          apeMatCliente: programacion.apeMatCliente || "",
+          apeMatCliente: programacion.apeMatCliente || '',
           fechaNacimiento: programacion.fechaNacimiento || null,
           sexoCliente: programacion.sexoCliente || null,
+          origenAlta: 'CAMPANA_EMPRESA',
         };
-
         paciente = await registrarPaciente({
-          datosPaciente,
-          estadoIdentificacion: "PENDIENTE",
-          session,
-          uid,
-          nombreUsuario,
+          datosPaciente, estadoIdentificacion: 'REGISTRADA',
+          session, uid, nombreUsuario,
         });
-
-        // ======================================
-        // VINCULAR NUEVO PACIENTE
-        // ======================================
-
         programacion.pacienteId = paciente._id;
         programacion.hc = paciente.hc;
-        formaResolucion = "PACIENTE_CREADO";
+        formaResolucion = 'PACIENTE_CREADO';
       }
 
-      // ========================================
-      // 4.2.2. EL PACIENTE YA EXISTE
-      // ========================================
-      else if (tipoDoc && nroDoc) {
-        // Aquí conservamos TODA la validación
-        // de inconsistencia de identidad
-        // que acabamos de implementar.
-
-        const validacionIdentidad = validarCoincidenciaIdentidad(
-          programacion,
-          paciente,
-        );
-
-        if (!validacionIdentidad.coincide) {
-          await session.abortTransaction();
-
-          return res.status(409).json({
-            ok: false,
-            codigo: "INCONSISTENCIA_IDENTIDAD",
-            msg: "El documento indicado pertenece a un paciente registrado, pero los datos de identidad no coinciden con la programación.",
-            indicacion:
-              "Verifique los datos y edite la programación antes de iniciar la atención.",
-
-            programacionPaciente: {
-              tipoDoc: programacion.tipoDoc,
-              nroDoc: programacion.nroDoc,
-              nombreCliente: programacion.nombreCliente,
-              apePatCliente: programacion.apePatCliente,
-              apeMatCliente: programacion.apeMatCliente,
-            },
-
-            pacienteRegistrado: {
-              hc: paciente.hc,
-              tipoDoc: paciente.tipoDoc,
-              nroDoc: paciente.nroDoc,
-              nombreCliente: paciente.nombreCliente,
-              apePatCliente: paciente.apePatCliente,
-              apeMatCliente: paciente.apeMatCliente,
-            },
-
-            diferencias: validacionIdentidad.diferencias,
-          });
-        }
-
-        // ========================================
-        // VALIDAR HC
-        // ========================================
-
-        if (!paciente.hc) {
-          await session.abortTransaction();
-
-          return res.status(409).json({
-            ok: false,
-            msg: "El paciente encontrado no cuenta con historia clínica",
-          });
-        }
-
-        // ========================================
-        // VINCULAR PACIENTE A LA PROGRAMACIÓN
-        // ========================================
-
-        programacion.pacienteId = paciente._id;
-        programacion.hc = paciente.hc;
-        formaResolucion = "DOCUMENTO";
-      }
     }
 
     // ==========================================
@@ -918,10 +802,12 @@ const iniciarAtencionProgramacion = async (req, res = response) => {
       programacion.historialVinculaciones = [];
     }
     if (paciente?._id && !programacion.historialVinculaciones.some(item => item.tipo === 'VINCULACION_INICIAL')) {
+      const nombreCompletoUsuario = await obtenerNombreCompletoOperador({ uid, nombreUsuario, session });
       programacion.historialVinculaciones.push({
         tipo:'VINCULACION_INICIAL', pacienteIdAnterior:null, hcAnterior:null,
         pacienteIdNuevo:paciente._id, hcNueva:paciente.hc, fecha:ahora,
-        ejecutadoPor:uid, usuario:nombreUsuario, origenDocumento:'EMPRESA'
+        ejecutadoPor:uid, usuario:nombreUsuario, nombreCompletoUsuario, origenDocumento:'EMPRESA',
+        tipoResolucion: formaResolucion === 'PACIENTE_CREADO' ? 'ALTA_NUEVA_EMPRESA' : 'COINCIDENCIA_EXACTA'
       });
     }
     programacion.estadoProgramacion = "EN ATENCION";
@@ -957,14 +843,17 @@ const iniciarAtencionProgramacion = async (req, res = response) => {
       // PACIENTE
       // ======================================
 
-      paciente: {
-        clienteId: paciente._id,
-        hc: paciente.hc,
-        tipoDoc: paciente.tipoDoc,
-        nroDoc: paciente.nroDoc,
+      paciente: formaResolucion === 'IDENTIDAD_TEMPORAL' ? {
+        clienteId: null, hc: null, tipoDoc: null, nroDoc: null,
+        nombreCliente: programacion.nombreCliente,
+        apePatCliente: programacion.apePatCliente,
+        apeMatCliente: programacion.apeMatCliente || '',
+      } : {
+        clienteId: paciente._id, hc: paciente.hc,
+        tipoDoc: paciente.tipoDoc, nroDoc: paciente.nroDoc,
         nombreCliente: paciente.nombreCliente,
         apePatCliente: paciente.apePatCliente,
-        apeMatCliente: paciente.apeMatCliente || "",
+        apeMatCliente: paciente.apeMatCliente || '',
       },
 
       // ======================================
@@ -980,6 +869,7 @@ const iniciarAtencionProgramacion = async (req, res = response) => {
         codProtocolo: programacion.codProtocolo,
         nombreProtocolo: programacion.nombreProtocolo,
         plazoResultados: programacion.plazoResultados ?? null,
+        identidadTemporal: formaResolucion === 'IDENTIDAD_TEMPORAL',
       },
 
       session,
@@ -997,17 +887,14 @@ const iniciarAtencionProgramacion = async (req, res = response) => {
       PACIENTE_ID: "Paciente existente resuelto correctamente",
       DOCUMENTO: "Paciente encontrado por documento y vinculado correctamente",
       PACIENTE_CREADO: "Paciente registrado y vinculado correctamente",
-      PACIENTE_SIN_DOCUMENTO: "Paciente con identificación pendiente registrado y vinculado correctamente",
+      IDENTIDAD_TEMPORAL: "Atención temporal iniciada sin crear paciente ni HC. La liberación quedará bloqueada hasta resolver el documento.",
     };
 
     return res.status(200).json({
       ok: true,
-      msg: "Atención iniciada correctamente",
+      msg: mensajesResolucion[formaResolucion] ?? 'Atención iniciada correctamente',
       formaResolucion,
-      paciente: {
-        _id: paciente._id,
-        hc: paciente.hc,
-      },
+      paciente: paciente ? { _id: paciente._id, hc: paciente.hc } : null,
       programacion: {
         ...programacion.toObject(),
         accionDocumentoPaciente: obtenerAccionDocumentoPaciente(paciente),
@@ -1416,24 +1303,68 @@ const corregirDocumentoProgramacion = async (req, res = response) => {
 };
 
 
-// ====== Consulta de candidatos sin alterar pacientes ======
+// ====== Buscar coincidencias independientes y fotografía de evaluación disponible ======
 const consultarCoincidenciasVinculacion = async (req, res = response) => {
   try {
     const programacion = await ProgramacionPacienteEmpresa.findById(req.params.id).lean();
-    if (!programacion) return res.status(404).json({ ok: false, msg: 'Programación no encontrada' });
-    const coincidencias = await buscarCoincidenciasVinculacion(
-      Paciente, programacion, validarCoincidenciaIdentidad);
-    return res.json({ ok: true, vinculada: Boolean(programacion.pacienteId), ...coincidencias });
+    if (!programacion) return res.status(404).json({ ok:false, msg:'Programación no encontrada' });
+    const coincidencias = await buscarCoincidenciasVinculacion(Paciente, programacion, validarCoincidenciaIdentidad);
+    const ids = [...new Set(coincidencias.candidatos.map(item => item.pacienteId))];
+    const fotos = ids.length ? await ArchivoPaciente.find({
+      pacienteId: { $in: ids }, tipoArchivo: 'FOTO_EVALUACION',
+      estadoArchivo: 'ACTIVO',
+      $or: [{ programacionEmpresaId: { $ne: null } }, { 'solicitudAtencionIds.0': { $exists: true } }],
+    }).select('pacienteId programacionEmpresaId solicitudAtencionIds fechaCaptura')
+      .sort({ fechaCaptura: -1 }).lean() : [];
+    const ultimaPorPaciente = new Map();
+    for (const foto of fotos) {
+      const clave = String(foto.pacienteId);
+      if (!ultimaPorPaciente.has(clave)) ultimaPorPaciente.set(clave, {
+        programacionEmpresaId: foto.programacionEmpresaId ? String(foto.programacionEmpresaId) : null,
+        solicitudAtencionId: foto.programacionEmpresaId ? null :
+          (foto.solicitudAtencionIds?.[0] ? String(foto.solicitudAtencionIds[0]) : null),
+        fechaCaptura: foto.fechaCaptura,
+      });
+    }
+    const agregarFoto = item => ({ ...item, fotoReferencia: ultimaPorPaciente.get(item.pacienteId) ?? null });
+    return res.json({ ok:true, vinculada:Boolean(programacion.pacienteId),
+      porDocumento:coincidencias.porDocumento.map(agregarFoto),
+      porNombres:coincidencias.porNombres.map(agregarFoto),
+      masPorDocumento:false, masPorNombres:false });
   } catch (error) {
-    console.error('Error al consultar coincidencias de vinculación:', error);
-    return res.status(500).json({ ok: false, msg: 'No se pudieron consultar las coincidencias' });
+    console.error('Error al consultar coincidencias:', error);
+    return res.status(500).json({ ok:false, msg:'No se pudieron consultar las coincidencias' });
   }
+};
+
+// ====== Nombre completo del operador desde el maestro de personal ======
+const nombreCompletoRecurso = (recurso) => [
+  recurso?.nombreRecHumano,
+  recurso?.apePatRecHumano,
+  recurso?.apeMatRecHumano,
+].map(valor => String(valor ?? '').trim()).filter(Boolean).join(' ');
+
+const obtenerNombreCompletoOperador = async ({ uid, nombreUsuario, session = null }) => {
+  const filtros = [];
+  if (uid) filtros.push({ codRecHumano: String(uid) });
+  if (nombreUsuario) filtros.push({ 'datosLogueo.nombreUsuario': String(nombreUsuario) });
+  if (!filtros.length) return null;
+  const consulta = RecursoHumano.find({ $or: filtros })
+    .select('codRecHumano nombreRecHumano apePatRecHumano apeMatRecHumano datosLogueo.nombreUsuario')
+    .lean();
+  if (session) consulta.session(session);
+  const recursos = await consulta;
+  const recurso = recursos.find(item => String(item.codRecHumano) === String(uid))
+    ?? recursos.find(item => String(item.datosLogueo?.nombreUsuario ?? '').toLowerCase() === String(nombreUsuario ?? '').toLowerCase());
+  return recurso ? (nombreCompletoRecurso(recurso) || null) : null;
 };
 
 // ====== Primera vinculación con paciente existente ======
 const vincularPacienteInicial = async (req, res = response) => {
   try {
     const pacienteId = String(req.body?.pacienteId ?? '');
+    const motivoDecision = String(req.body?.motivoDecision ?? '').trim();
+    const confirmacionExpresa = req.body?.confirmacionExpresa === true;
     if (!mongoose.isValidObjectId(pacienteId)) return res.status(400).json({ ok:false, msg:'Paciente inválido' });
     const programacion = await ProgramacionPacienteEmpresa.findById(req.params.id).lean();
     if (!programacion) return res.status(404).json({ ok:false, msg:'Programación no encontrada' });
@@ -1448,11 +1379,25 @@ const vincularPacienteInicial = async (req, res = response) => {
     const identidad = validarCoincidenciaIdentidad(programacion, paciente);
     const mismoDocumento = String(programacion.tipoDoc ?? '').toUpperCase() === String(paciente.tipoDoc).toUpperCase()
       && String(programacion.nroDoc ?? '').toUpperCase() === String(paciente.nroDoc).toUpperCase();
-    if (!mismoDocumento || !identidad.coincide)
-      return res.status(409).json({ ok:false, msg:'Los nombres y el documento deben coincidir. Una discrepancia requiere revisión, no vinculación directa.' });
+    if (!mismoDocumento)
+      return res.status(409).json({ok:false, codigo:'DOCUMENTO_DISCREPANTE',
+        msg:'No se puede vincular una HC con documento diferente. Primero debe resolverse la identidad.' });
+    if (motivoDecision.length > 300)
+      return res.status(400).json({ok:false, codigo:'MOTIVO_DECISION_INVALIDO',
+        msg:'El motivo opcional no puede superar los 300 caracteres.' });
+    // ====== Exigir confirmación expresa cuando existen diferencias ======
+    if (!identidad.coincide && !confirmacionExpresa)
+      return res.status(400).json({ok:false, codigo:'CONFIRMACION_IDENTIDAD_REQUERIDA',
+        msg:'Confirme expresamente que revisó las diferencias y se trata del mismo paciente.' });
+    const nombreCompletoUsuario = await obtenerNombreCompletoOperador({
+      uid: req.user.uid, nombreUsuario: req.user.nombreUsuario,
+    });
     const evento = { tipo:'VINCULACION_INICIAL', pacienteIdAnterior:null, hcAnterior:null,
       pacienteIdNuevo: paciente._id, hcNueva: paciente.hc, fecha:new Date(),
-      ejecutadoPor:req.user.uid, usuario:req.user.nombreUsuario, origenDocumento:'EMPRESA' };
+      ejecutadoPor:req.user.uid, usuario:req.user.nombreUsuario,
+      nombreCompletoUsuario, origenDocumento:'EMPRESA',
+      tipoResolucion: identidad.coincide ? 'COINCIDENCIA_EXACTA' : 'DISCREPANCIA_DOCUMENTO_COINCIDENTE',
+      motivoDecision: motivoDecision || null };
     const actualizado = await ProgramacionPacienteEmpresa.findOneAndUpdate(
       { _id:programacion._id, pacienteId:null, estadoProgramacion:'PROGRAMADO',
         $or:[{hc:null},{hc:{$exists:false}}] },
@@ -1467,19 +1412,115 @@ const vincularPacienteInicial = async (req, res = response) => {
   }
 };
 
+// ====== Registrar decisión sin vincular ni crear una HC ======
+const registrarRevisionCoincidencia = async (req, res = response) => {
+  try {
+    const pacienteId = String(req.body?.pacienteId ?? '');
+    const decision = String(req.body?.decision ?? '').trim().toUpperCase();
+    const motivo = String(req.body?.motivo ?? '').trim();
+    if (!mongoose.isValidObjectId(req.params.id) || !mongoose.isValidObjectId(pacienteId) ||
+        !['DISTINTO', 'PENDIENTE'].includes(decision) || motivo.length > 300) {
+      return res.status(400).json({ ok:false, msg:'Candidato o decisión inválidos, o motivo opcional mayor a 300 caracteres.' });
+    }
+    const programacion = await ProgramacionPacienteEmpresa.findById(req.params.id).lean();
+    if (!programacion) return res.status(404).json({ ok:false, msg:'Programación no encontrada' });
+    if (programacion.pacienteId || programacion.hc || programacion.estadoProgramacion !== 'PROGRAMADO') {
+      return res.status(409).json({ ok:false, msg:'La programación ya tiene un vínculo o atención iniciada.' });
+    }
+    const haySolicitudes = await SolicitudAtencion.exists({ programacionEmpresaId: programacion._id });
+    if (haySolicitudes) return res.status(409).json({ ok:false, msg:'Existen solicitudes; la revisión ordinaria no está permitida.' });
+    const paciente = await Paciente.findById(pacienteId).lean();
+    if (!paciente) return res.status(404).json({ ok:false, msg:'Paciente candidato no encontrado' });
+    const identidad = validarCoincidenciaIdentidad(programacion, paciente);
+    const mismoDoc = String(programacion.tipoDoc ?? '').toUpperCase() === String(paciente.tipoDoc ?? '').toUpperCase() &&
+      Boolean(programacion.nroDoc) && String(programacion.nroDoc).toUpperCase() === String(paciente.nroDoc ?? '').toUpperCase();
+    if (!mismoDoc && !identidad.coincide) {
+      // ====== Comprobar pertenencia real a búsqueda nominal antes de registrar ======
+      const candidatos = await buscarCoincidenciasVinculacion(Paciente, programacion, validarCoincidenciaIdentidad);
+      if (!candidatos.candidatos.some(item => item.pacienteId === pacienteId)) {
+        return res.status(409).json({ ok:false, msg:'Este paciente no figura entre las coincidencias.' });
+      }
+    }
+    const nombreCompletoUsuario = await obtenerNombreCompletoOperador(req.user);
+    const actualizado = await ProgramacionPacienteEmpresa.findOneAndUpdate(
+      { _id:programacion._id, pacienteId:null, estadoProgramacion:'PROGRAMADO',
+        $or:[{hc:null},{hc:{$exists:false}}] },
+      { $push:{ historialRevisionIdentidad:{ decision, pacienteIdCandidato:paciente._id,
+        hcCandidata:paciente.hc ?? null, documentoCoincidente:mismoDoc, motivo: motivo || null,
+        tipoDocProgramacion:programacion.tipoDoc ?? null, nroDocProgramacion:programacion.nroDoc ?? null,
+        nombreClienteProgramacion:programacion.nombreCliente,
+        apePatClienteProgramacion:programacion.apePatCliente,
+        apeMatClienteProgramacion:programacion.apeMatCliente ?? '',
+        fecha:new Date(), ejecutadoPor:req.user.uid, usuario:req.user.nombreUsuario,
+        nombreCompletoUsuario } } },
+      { new:true, runValidators:true });
+    if (!actualizado) return res.status(409).json({ok:false,msg:'La programación cambió. Actualice la pantalla.'});
+    return res.json({ ok:true, decision, requiereRevision:mismoDoc,
+      msg: mismoDoc ? 'Decisión registrada. El DNI coincidente requiere resolver el conflicto antes de crear otra HC.'
+        : 'Decisión registrada. La programación continúa sin HC vinculada.' });
+  } catch (error) {
+    console.error('Error al registrar revisión de identidad:', error);
+    return res.status(500).json({ok:false,msg:'No se pudo registrar la revisión de identidad.'});
+  }
+};
+
 // ====== Historial de vinculación de una programación ======
 const obtenerHistorialVinculaciones = async (req, res = response) => {
   try {
     const programacion = await ProgramacionPacienteEmpresa.findById(req.params.id)
-      .select('codProgramacion historialVinculaciones').lean();
+      .select('codProgramacion pacienteId hc tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente estadoProgramacion historialVinculaciones historialRevisionIdentidad').lean();
     if (!programacion) return res.status(404).json({ok:false,msg:'Programación no encontrada'});
-    return res.json({ok:true,historial:programacion.historialVinculaciones ?? []});
+    // ====== Completar eventos antiguos sin cambiar la auditoría guardada ======
+    const historial = programacion.historialVinculaciones ?? [];
+    const sinNombre = [...historial, ...(programacion.historialRevisionIdentidad ?? [])].filter(evento => !evento.nombreCompletoUsuario);
+    const ids = [...new Set(sinNombre.map(evento => String(evento.ejecutadoPor ?? '').trim()).filter(Boolean))];
+    const usuarios = [...new Set(sinNombre.map(evento => String(evento.usuario ?? '').trim()).filter(Boolean))];
+    let recursos = [];
+    if (ids.length || usuarios.length) {
+      const filtros = [];
+      if (ids.length) filtros.push({ codRecHumano: { $in: ids } });
+      if (usuarios.length) filtros.push({ 'datosLogueo.nombreUsuario': { $in: usuarios } });
+      recursos = await RecursoHumano.find({ $or: filtros })
+        .select('codRecHumano nombreRecHumano apePatRecHumano apeMatRecHumano datosLogueo.nombreUsuario').lean();
+    }
+    const respuesta = historial.map(evento => {
+      if (evento.nombreCompletoUsuario) return evento;
+      const recurso = recursos.find(item => String(item.codRecHumano) === String(evento.ejecutadoPor ?? ''))
+        ?? recursos.find(item => String(item.datosLogueo?.nombreUsuario ?? '').toLowerCase() === String(evento.usuario ?? '').toLowerCase());
+      return { ...evento, nombreCompletoUsuario: recurso ? (nombreCompletoRecurso(recurso) || null) : null };
+    });
+    const revisiones = (programacion.historialRevisionIdentidad ?? []).map(evento => {
+      if (evento.nombreCompletoUsuario) return evento;
+      const recurso = recursos.find(item => String(item.codRecHumano) === String(evento.ejecutadoPor ?? ''))
+        ?? recursos.find(item => String(item.datosLogueo?.nombreUsuario ?? '').toLowerCase() === String(evento.usuario ?? '').toLowerCase());
+      return { ...evento, nombreCompletoUsuario: recurso ? (nombreCompletoRecurso(recurso) || null) : null };
+    });
+    // ====== Estado operativo vigente por candidato, sin alterar eventos ======
+    let estadosCandidatos = [];
+    if (!programacion.pacienteId && programacion.estadoProgramacion === 'PROGRAMADO') {
+      const coincidencias = await buscarCoincidenciasVinculacion(Paciente, programacion, validarCoincidenciaIdentidad);
+      const ultimas = obtenerUltimasDecisiones(programacion);
+      estadosCandidatos = (coincidencias.candidatos ?? []).map(item => {
+        const vigente = ultimas.get(String(item.pacienteId));
+        return {
+          pacienteId: item.pacienteId, hc: item.hc,
+          nombreCompleto: [item.apePatCliente, item.apeMatCliente, item.nombreCliente].filter(Boolean).join(' '),
+          documentoCoincidente: item.documentoExacto,
+          estado: item.documentoExacto && vigente?.decision === 'DISTINTO'
+            ? 'CONFLICTO_DOCUMENTAL' : vigente?.decision === 'DISTINTO'
+              ? 'PERSONA_DISTINTA' : vigente?.decision === 'PENDIENTE' ? 'PENDIENTE' : 'SIN_REVISAR',
+        };
+      });
+    }
+    return res.json({ok:true, codProgramacion:programacion.codProgramacion,
+      historial:respuesta, revisiones, estadosCandidatos});
   } catch (error) { return res.status(500).json({ok:false,msg:'No se pudo consultar el historial'}); }
 };
 
 module.exports = {
   consultarCoincidenciasVinculacion,
   vincularPacienteInicial,
+  registrarRevisionCoincidencia,
   obtenerHistorialVinculaciones,
   crearProgramacion,
   listarProgramaciones,

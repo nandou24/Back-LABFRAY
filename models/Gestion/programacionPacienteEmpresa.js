@@ -83,7 +83,7 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
     apeMatCliente: {
       type: String,
       trim: true,
-      set: (value) => value.toUpperCase(),
+      set: (value) => String(value ?? "").toUpperCase(),
     },
     sexoCliente: {
       type: String,
@@ -99,6 +99,9 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
       default: null,
     },
     hc: { type: String, default: null, trim: true },
+    // ====== Identidad transaccional hasta resolver documento ======
+    identidadTemporalActiva: { type: Boolean, default: false },
+    fechaInicioIdentidadTemporal: { type: Date, default: null },
     // ====== Auditoría de vínculos de identidad ======
     historialVinculaciones: {
       type: [{
@@ -110,8 +113,30 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
         fecha: {type:Date,default:Date.now},
         ejecutadoPor: {type:String,required:true},
         usuario: {type:String,default:null},
-        origenDocumento: {type:String,default:'EMPRESA'}
+        nombreCompletoUsuario: {type:String,default:null},
+        origenDocumento: {type:String,default:'EMPRESA'},
+        tipoResolucion: {type:String,default:'COINCIDENCIA_EXACTA'},
+        motivoDecision: {type:String,default:null}
       }], default: []
+    },
+    // ====== Decisiones de revisión de identidad antes de la primera vinculación ======
+    historialRevisionIdentidad: {
+      type: [{
+        decision: { type: String, enum: ['DISTINTO', 'PENDIENTE'], required: true },
+        pacienteIdCandidato: { type: Schema.Types.ObjectId, required: true },
+        hcCandidata: { type: String, default: null },
+        documentoCoincidente: { type: Boolean, default: false },
+        tipoDocProgramacion: { type: String, default: null },
+        nroDocProgramacion: { type: String, default: null },
+        nombreClienteProgramacion: { type: String },
+        apePatClienteProgramacion: { type: String },
+        apeMatClienteProgramacion: { type: String },
+        motivo: { type: String, default: null, trim: true, maxlength: 300 },
+        fecha: { type: Date, default: Date.now },
+        ejecutadoPor: { type: String, required: true },
+        usuario: { type: String, default: null },
+        nombreCompletoUsuario: { type: String, default: null },
+      }], default: [],
     },
     protocoloId: { type: Schema.Types.ObjectId, required: true },
     codProtocolo: { type: String, required: true, trim: true },

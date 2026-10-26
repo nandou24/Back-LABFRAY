@@ -9,6 +9,7 @@ const {
   iniciarAtencionProgramacion,
   consultarCoincidenciasVinculacion,
   vincularPacienteInicial,
+  registrarRevisionCoincidencia,
   obtenerHistorialVinculaciones,
 } = require("../../controllers/Gestion/programacionPacienteEmpresaController");
 const { validarCampos } = require("../../middlewares/validar-campo");
@@ -22,11 +23,23 @@ const validarProgramacion = [
   check("razonSocialEmpresa", "La razón social es obligatoria")
     .trim()
     .notEmpty(),
-  check("tipoDoc", "El tipo de documento no es válido").isIn([
-    "DNI",
-    "CE",
-    "PASAPORTE",
-  ]),
+  // ====== Validar documento opcional de Empresa ======
+  check("tipoDoc").custom((valor, { req }) => {
+    const tipoDoc = String(valor ?? "").trim().toUpperCase();
+    const nroDoc = String(req.body?.nroDoc ?? "").trim().toUpperCase();
+
+    if (!tipoDoc && !nroDoc) return true;
+
+    if (!tipoDoc || !nroDoc) {
+      throw new Error("El tipo y número de documento deben registrarse juntos");
+    }
+
+    if (!["DNI", "CE", "PASAPORTE"].includes(tipoDoc)) {
+      throw new Error("El tipo de documento no es válido");
+    }
+
+    return true;
+  }),
   check("nombreCliente", "El nombre del paciente es obligatorio")
     .trim()
     .notEmpty(),
@@ -71,6 +84,7 @@ router.get("/", validarJWT, listarProgramaciones);
 // ====== Consulta, primera vinculación e historial ======
 router.get('/:id/coincidencias-vinculacion', validarJWT, consultarCoincidenciasVinculacion);
 router.post('/:id/vincular-paciente', validarJWT, vincularPacienteInicial);
+router.post('/:id/revisar-coincidencia', validarJWT, registrarRevisionCoincidencia);
 router.get('/:id/historial-vinculaciones', validarJWT, obtenerHistorialVinculaciones);
 router.get(
   "/:id",
@@ -132,6 +146,7 @@ router.post(
   iniciarAtencionProgramacion,
   consultarCoincidenciasVinculacion,
   vincularPacienteInicial,
+  registrarRevisionCoincidencia,
   obtenerHistorialVinculaciones,
 );
 

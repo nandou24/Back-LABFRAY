@@ -31,6 +31,12 @@ const PacienteSchema = Schema(
       nombreUsuario: String,
       fecha: Date,
     },
+    // ====== Alta desde campaña con documento declarado por empresa ======
+    origenAlta: {
+      type: String,
+      enum: ["GENERAL", "CAMPANA_EMPRESA"],
+      default: "GENERAL",
+    },
     estadoIdentificacion: {
       type: String,
       required: true,
@@ -67,21 +73,21 @@ const PacienteSchema = Schema(
     departamentoCliente: {
       type: String,
       required: function () {
-        return this.estadoIdentificacion === "REGISTRADA";
+        return this.estadoIdentificacion === "REGISTRADA" && this.origenAlta !== "CAMPANA_EMPRESA";
       },
       default: null,
     },
     provinciaCliente: {
       type: String,
       required: function () {
-        return this.estadoIdentificacion === "REGISTRADA";
+        return this.estadoIdentificacion === "REGISTRADA" && this.origenAlta !== "CAMPANA_EMPRESA";
       },
       default: null,
     },
     distritoCliente: {
       type: String,
       required: function () {
-        return this.estadoIdentificacion === "REGISTRADA";
+        return this.estadoIdentificacion === "REGISTRADA" && this.origenAlta !== "CAMPANA_EMPRESA";
       },
       default: null,
     },
