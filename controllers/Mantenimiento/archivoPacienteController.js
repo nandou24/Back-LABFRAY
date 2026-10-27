@@ -4,9 +4,10 @@ const Paciente = require("../../models/Mantenimiento/Paciente");
 const ArchivoPaciente = require("../../models/Mantenimiento/ArchivoPaciente");
 const ProgramacionPacienteEmpresa = require("../../models/Gestion/programacionPacienteEmpresa");
 const SolicitudAtencion = require("../../models/Gestion/SolicitudAtencion");
+const FotoEvaluacionTemporal = require("../../models/Gestion/FotoEvaluacionTemporal");
 const { GetObjectCommand } = require('@aws-sdk/client-s3');
 const { s3Client } = require('../../utils/aws/s3Client');
-const { subirArchivo, eliminarArchivo, generarUrlTemporal } = require("../../utils/aws/s3Storage");
+const { subirArchivo, subirArchivoStorage, eliminarArchivo, generarUrlTemporal } = require("../../utils/aws/s3Storage");
 
 // ==========================================
 // SUBIR FOTO DE PERFIL DEL PACIENTE
@@ -332,6 +333,159 @@ const subirFotoEvaluacionPaciente = async (req, res = response) => {
   }
 };
 
+// ====== MC.2: guardar foto temporal sin crear paciente ni HC ======
+const subirFotoEvaluacionTemporal = async (req, res = response) => {
+  let archivoS3 = null;
+  let session = null;
+  let confirmado = false;
+  try {
+    const programacionId = String(req.params.programacionEmpresaId || '').trim();
+    if (!mongoose.Types.ObjectId.isValid(programacionId)) {
+      return res.status(400).json({ ok: false, msg: 'Programación inválida' });
+    }
+    if (!req.file || !['image/jpeg', 'image/png', 'image/webp'].includes(req.file.mimetype)) {
+      return res.status(400).json({ ok: false, msg: 'Fotografía JPEG, PNG o WEBP requerida' });
+    }
+
+    const programacion = await ProgramacionPacienteEmpresa.findById(programacionId)
+      .select('_id pacienteId hc nroDoc tipoDoc estadoProgramacion').lean();
+    if (!programacion) {
+      return res.status(404).json({ ok: false, msg: 'Programación no encontrada' });
+    }
+    if (programacion.estadoProgramacion !== 'EN ATENCION' ||
+        programacion.pacienteId || programacion.hc || programacion.nroDoc || programacion.tipoDoc) {
+      return res.status(409).json({ ok: false, codigo: 'IDENTIDAD_NO_TEMPORAL',
+        msg: 'Solo se admite una fotografía temporal para una atención iniciada sin documento ni HC' });
+    }
+    const solicitudes = await SolicitudAtencion.find({ programacionEmpresaId: programacion._id })
+      .select('_id').lean();
+    if (!solicitudes.length) {
+      return res.status(409).json({ ok: false, msg: 'La atención aún no tiene solicitudes vinculadas' });
+    }
+
+    // ====== Prefijo independiente del paciente maestro ======
+    archivoS3 = await subirArchivoStorage({
+      keyPrefix: `evaluaciones-temporales/${programacionId}`,
+      buffer: req.file.buffer,
+      mimeType: req.file.mimetype,
+    });
+
+    session = await mongoose.startSession();
+    session.startTransaction();
+    // ====== Registrar sucesión sin borrar el objeto S3 anterior ======
+    const anterior = await FotoEvaluacionTemporal.findOne({
+      programacionEmpresaId: programacion._id, estadoArchivo: 'ACTIVO',
+    }).session(session).select('_id');
+    const foto = new FotoEvaluacionTemporal({
+      programacionEmpresaId: programacion._id,
+      solicitudAtencionIds: solicitudes.map(item => item._id),
+      storageBucket: process.env.AWS_S3_BUCKET,
+      storageKey: archivoS3.key,
+      storageVersionId: archivoS3.versionId ?? null,
+      etag: archivoS3.etag ?? null,
+      mimeType: req.file.mimetype,
+      tamanioBytes: req.file.size,
+      reemplazaA: anterior?._id ?? null,
+      createdBy: String(req.user?.uid || ''),
+      usuarioRegistro: req.user?.nombreUsuario ?? null,
+    });
+    if (anterior) {
+      const cambio = await FotoEvaluacionTemporal.updateOne({
+        _id: anterior._id, programacionEmpresaId: programacion._id, estadoArchivo: 'ACTIVO',
+      }, { $set: {
+        estadoArchivo: 'REEMPLAZADO', reemplazadoPor: foto._id,
+        fechaReemplazo: new Date(),
+        reemplazadoPorUsuario: String(req.user?.uid || ''),
+        reemplazadoPorNombre: req.user?.nombreUsuario ?? null,
+      } }, { session });
+      if (cambio.modifiedCount !== 1) {
+        const conflicto = new Error('La fotografía activa cambió durante el reemplazo');
+        conflicto.status = 409;
+        throw conflicto;
+      }
+    }
+    await foto.save({ session });
+    await session.commitTransaction();
+    confirmado = true;
+
+    return res.status(201).json({ ok: true, msg: 'Fotografía temporal guardada en la programación',
+      archivo: { _id: foto._id, storageKey: foto.storageKey,
+        programacionEmpresaId: foto.programacionEmpresaId, solicitudAtencionIds: foto.solicitudAtencionIds,
+        fechaCaptura: foto.fechaCaptura },
+    });
+  } catch (error) {
+    if (session?.inTransaction()) await session.abortTransaction();
+    if (archivoS3 && !confirmado) {
+      try { await eliminarArchivo(archivoS3.key, archivoS3.versionId); }
+      catch (errorRollback) { console.error('Rollback foto temporal S3:', errorRollback); }
+    }
+    console.error('Error guardando fotografía temporal:', error);
+    if (error?.status === 409 || error?.code === 11000) {
+      return res.status(409).json({ ok: false, codigo: 'FOTO_ACTIVA_MODIFICADA',
+        msg: 'La fotografía cambió; actualiza el historial e inténtalo nuevamente' });
+    }
+    return res.status(500).json({ ok: false, msg: 'No se pudo guardar la fotografía temporal' });
+  } finally {
+    if (session) await session.endSession();
+  }
+};
+
+// ====== MC.3.2: historial de fotografías de una programación ======
+const listarHistorialFotosTemporales = async (req, res = response) => {
+  try {
+    const id = String(req.params.programacionEmpresaId || '');
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ ok: false, msg: 'Programación inválida' });
+    }
+    const programacion = await ProgramacionPacienteEmpresa.findById(id).select('_id').lean();
+    if (!programacion) return res.status(404).json({ ok: false, msg: 'Programación no encontrada' });
+    const fotos = await FotoEvaluacionTemporal.find({ programacionEmpresaId: programacion._id })
+      .select('_id estadoArchivo fechaCaptura createdAt createdBy usuarioRegistro reemplazaA reemplazadoPor fechaReemplazo reemplazadoPorUsuario reemplazadoPorNombre')
+      .sort({ createdAt: -1, _id: -1 }).lean();
+    return res.status(200).set('Cache-Control', 'no-store').json({
+      ok: true, fotos,
+    });
+  } catch (error) {
+    console.error('Error consultando historial de fotos temporales:', error);
+    return res.status(500).json({ ok: false, msg: 'No se pudo consultar el historial fotográfico' });
+  }
+};
+
+// ====== Imagen histórica por ID, vinculada a su propia programación ======
+const obtenerImagenHistoricaTemporal = async (req, res = response) => {
+  try {
+    const id = String(req.params.programacionEmpresaId || '');
+    const fotoId = String(req.params.fotoId || '');
+    if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(fotoId)) {
+      return res.status(400).json({ ok: false, msg: 'Identificadores inválidos' });
+    }
+    const programacion = await ProgramacionPacienteEmpresa.findById(id).select('_id').lean();
+    if (!programacion) return res.status(404).json({ ok: false, msg: 'Programación no encontrada' });
+    const foto = await FotoEvaluacionTemporal.findOne({
+      _id: fotoId, programacionEmpresaId: programacion._id,
+      estadoArchivo: { $in: ['ACTIVO', 'REEMPLAZADO'] },
+    }).select('storageBucket storageKey mimeType').lean();
+    if (!foto) return res.status(404).json({ ok: false, msg: 'Fotografía no encontrada en esta programación' });
+    const objeto = await s3Client.send(new GetObjectCommand({
+      Bucket: foto.storageBucket || process.env.AWS_S3_BUCKET, Key: foto.storageKey,
+    }));
+    const partes = [];
+    for await (const parte of objeto.Body) partes.push(Buffer.from(parte));
+    res.set({
+      'Content-Type': foto.mimeType || objeto.ContentType || 'image/jpeg',
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Disposition': 'inline',
+    });
+    return res.status(200).send(Buffer.concat(partes));
+  } catch (error) {
+    console.error('Error leyendo fotografía histórica temporal:', error?.name, error?.message);
+    if (error?.name === 'NoSuchKey') return res.status(404).json({ ok: false, msg: 'Objeto S3 no encontrado' });
+    if (error?.name === 'AccessDenied') return res.status(403).json({ ok: false, msg: 'Sin permiso de lectura de fotografías temporales en S3' });
+    return res.status(500).json({ ok: false, msg: 'No se pudo recuperar la fotografía histórica' });
+  }
+};
+
 // ====== Resolver paciente para identificación fotográfica ======
 const resolverPacienteIdentificacion = async ({ pacienteId, hc, programacionEmpresaId }) => {
   const hcNormalizada = String(hc ?? '').trim();
@@ -384,6 +538,24 @@ const buscarFotoEvaluacion = async (req) => {
   }
   if (programacionId && !mongoose.Types.ObjectId.isValid(programacionId)) {
     return { error: 'PROGRAMACION_INVALIDA', status: 400 };
+  }
+
+  // ====== La foto temporal solo es consultable por su evaluación sin HC ======
+  if (programacionId) {
+    const programacion = await ProgramacionPacienteEmpresa.findById(programacionId)
+      .select('pacienteId hc nroDoc tipoDoc estadoProgramacion').lean();
+    if (!programacion) return { error: 'PROGRAMACION_NO_ENCONTRADA', status: 404 };
+    const temporal = !programacion.pacienteId && !programacion.hc &&
+      !programacion.nroDoc && !programacion.tipoDoc &&
+      programacion.estadoProgramacion === 'EN ATENCION';
+    if (temporal) {
+      if (pacienteId || hc) return { error: 'IDENTIDAD_INCONSISTENTE', status: 409 };
+      const foto = await FotoEvaluacionTemporal.findOne({
+        programacionEmpresaId: programacionId, estadoArchivo: 'ACTIVO',
+      }).sort({ fechaCaptura: -1, createdAt: -1 })
+        .select('storageBucket storageKey storageVersionId fechaCaptura mimeType tipoArchivo').lean();
+      return foto ? { disponible: true, foto } : { disponible: false, motivo: 'SIN_FOTOGRAFIA' };
+    }
   }
   const { paciente, inconsistente } = await resolverPacienteIdentificacion({
     pacienteId, hc, programacionEmpresaId: programacionId,
@@ -497,6 +669,9 @@ const obtenerFotoPerfilPaciente = async (req, res = response) => {
 module.exports = {
   subirFotoPerfilPaciente,
   subirFotoEvaluacionPaciente,
+  subirFotoEvaluacionTemporal,
+  listarHistorialFotosTemporales,
+  obtenerImagenHistoricaTemporal,
   obtenerFotoPerfilPaciente,
   obtenerFotoIdentificacionPaciente,
   obtenerImagenEvaluacionPaciente,

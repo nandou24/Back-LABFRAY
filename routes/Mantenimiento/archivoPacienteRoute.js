@@ -2,6 +2,9 @@ const { Router } = require("express");
 const {
   subirFotoPerfilPaciente,
   subirFotoEvaluacionPaciente,
+  subirFotoEvaluacionTemporal,
+  listarHistorialFotosTemporales,
+  obtenerImagenHistoricaTemporal,
   obtenerImagenEvaluacionPaciente,
   obtenerFotoPerfilPaciente,
   obtenerFotoIdentificacionPaciente,
@@ -28,6 +31,20 @@ router.post(
   uploadArchivoPaciente.single('archivo'),
   subirFotoEvaluacionPaciente,
 );
+
+// ====== MC.2: fotografía temporal por programación, nunca por paciente ======
+router.post(
+  '/programaciones/:programacionEmpresaId/foto-evaluacion-temporal',
+  validarJWT,
+  uploadArchivoPaciente.single('archivo'),
+  subirFotoEvaluacionTemporal,
+);
+
+// ====== MC.3.2: consultar historial y fotografía original ======
+router.get('/programaciones/:programacionEmpresaId/fotos-temporales',
+  validarJWT, listarHistorialFotosTemporales);
+router.get('/programaciones/:programacionEmpresaId/fotos-temporales/:fotoId/imagen',
+  validarJWT, obtenerImagenHistoricaTemporal);
 
 // ====== Lectura autenticada en lugar de URL pública S3 ======
 router.get('/foto-evaluacion/imagen', validarJWT, obtenerImagenEvaluacionPaciente);
