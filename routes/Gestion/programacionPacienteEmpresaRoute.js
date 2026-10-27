@@ -12,6 +12,7 @@ const {
   registrarRevisionCoincidencia,
   obtenerHistorialVinculaciones,
 } = require("../../controllers/Gestion/programacionPacienteEmpresaController");
+const { previsualizarRegularizacionTemporal } = require("../../controllers/Gestion/previsualizarRegularizacionTemporalController");
 const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
 
@@ -81,6 +82,10 @@ const validarProgramacion = [
 
 router.post("/", [validarJWT, ...validarProgramacion], crearProgramacion);
 router.get("/", validarJWT, listarProgramaciones);
+// ====== B.2.1A Verificación documental temporal (solo lectura) ======
+router.post("/:id/previsualizar-regularizacion", [
+  validarJWT, check("id", "ID inválido").isMongoId(), validarCampos,
+], previsualizarRegularizacionTemporal);
 // ====== Consulta, primera vinculación e historial ======
 router.get('/:id/coincidencias-vinculacion', validarJWT, consultarCoincidenciasVinculacion);
 router.post('/:id/vincular-paciente', validarJWT, vincularPacienteInicial);
@@ -144,10 +149,6 @@ router.post(
   "/:id/iniciar-atencion",
   [validarJWT, check("id", "ID inválido").isMongoId(), validarCampos],
   iniciarAtencionProgramacion,
-  consultarCoincidenciasVinculacion,
-  vincularPacienteInicial,
-  registrarRevisionCoincidencia,
-  obtenerHistorialVinculaciones,
 );
 
 module.exports = router;
