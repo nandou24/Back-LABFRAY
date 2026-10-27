@@ -27,7 +27,7 @@ const validarIdentidadesParaLiberar = async (solicitudes, { session = null } = {
   for (const solicitud of solicitudes) {
     const codigo = solicitud.codSolicitud ?? String(solicitud._id);
     const errorIdentidad = () => {
-      const error = new Error(`La solicitud ${codigo} requiere documento verificado y HC definitiva antes de liberar resultados.`);
+      const error = new Error(`La solicitud ${codigo} debe regularizar el documento y vincular una HC antes de liberar resultados.`);
       error.codigo = 'IDENTIDAD_PENDIENTE_LIBERACION';
       error.status = 409;
       error.statusCode = 409;
