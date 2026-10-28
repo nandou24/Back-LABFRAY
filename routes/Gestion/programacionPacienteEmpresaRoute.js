@@ -14,6 +14,7 @@ const {
 } = require("../../controllers/Gestion/programacionPacienteEmpresaController");
 const { previsualizarRegularizacionTemporal } = require("../../controllers/Gestion/previsualizarRegularizacionTemporalController");
 const { regularizarTemporalConHCExistente } = require("../../controllers/Gestion/regularizarTemporalHCExistenteController");
+const { regularizarTemporalConHCNueva } = require('../../controllers/Gestion/regularizarTemporalHCNuevaController');
 const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
 
@@ -91,6 +92,10 @@ router.post("/:id/previsualizar-regularizacion", [
 router.post('/:id/regularizar-hc-existente', [
   validarJWT, check('id', 'ID inválido').isMongoId(), validarCampos,
 ], regularizarTemporalConHCExistente);
+// ====== B.2.2B Nueva HC después de descartar coincidencias ======
+router.post('/:id/regularizar-hc-nueva', [
+  validarJWT, check('id', 'ID inválido').isMongoId(), validarCampos,
+], regularizarTemporalConHCNueva);
 // ====== Consulta, primera vinculación e historial ======
 router.get('/:id/coincidencias-vinculacion', validarJWT, consultarCoincidenciasVinculacion);
 router.post('/:id/vincular-paciente', validarJWT, vincularPacienteInicial);

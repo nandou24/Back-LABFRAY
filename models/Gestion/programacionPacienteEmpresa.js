@@ -121,7 +121,13 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
         nombreCompletoUsuario: {type:String,default:null},
         origenDocumento: {type:String,default:'EMPRESA'},
         tipoResolucion: {type:String,default:'COINCIDENCIA_EXACTA'},
-        motivoDecision: {type:String,default:null}
+        motivoDecision: {type:String,default:null},
+        // ====== Cambios al regularizar identidad temporal ======
+        cambiosIdentidad: { type: [{
+          campo: { type: String, required: true },
+          valorAnterior: { type: String, default: null },
+          valorNuevo: { type: String, default: null },
+        }], default: [] },
       }], default: []
     },
     // ====== Decisiones de revisión de identidad antes de la primera vinculación ======
