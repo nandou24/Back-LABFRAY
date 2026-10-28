@@ -83,7 +83,7 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
     apeMatCliente: {
       type: String,
       trim: true,
-      set: (value) => String(value ?? "").toUpperCase(),
+      set: (value) => value.toUpperCase(),
     },
     sexoCliente: {
       type: String,
@@ -102,6 +102,7 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
     // ====== Identidad transaccional hasta resolver documento ======
     identidadTemporalActiva: { type: Boolean, default: false },
     fechaInicioIdentidadTemporal: { type: Date, default: null },
+    fechaRegularizacionIdentidad: { type: Date, default: null },
     // ====== Auditoría de vínculos de identidad ======
     historialVinculaciones: {
       type: [{
@@ -110,6 +111,10 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
         hcAnterior: {type:String,default:null},
         pacienteIdNuevo: {type:Schema.Types.ObjectId,default:null},
         hcNueva: {type:String,default:null},
+        tipoDocAnterior: {type:String,default:null},
+        nroDocAnterior: {type:String,default:null},
+        tipoDocNuevo: {type:String,default:null},
+        nroDocNuevo: {type:String,default:null},
         fecha: {type:Date,default:Date.now},
         ejecutadoPor: {type:String,required:true},
         usuario: {type:String,default:null},
