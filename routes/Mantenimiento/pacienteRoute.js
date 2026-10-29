@@ -5,10 +5,10 @@ const {
   mostrarUltimosPacientes,
   encontrarTermino,
   actualizarPaciente,
+  obtenerHistorialCambiosPaciente,
   actualizarDatosComplementarios,
   encontrarTerminoCotizaicon,
   mostrarUltimosPacientesCotizacion,
-  registrarPacienteSinnHC,
   encontrarTerminoporId,
 } = require("../../controllers/Mantenimiento/pacienteController");
 const { validarCampos } = require("../../middlewares/validar-campo");
@@ -37,11 +37,8 @@ router.post(
       .notEmpty()
       .withMessage("Apellido Paterno es obligatorio"),
 
-    // check("fechaNacimiento")
-    //   .notEmpty()
-    //   .withMessage("Fecha de nacimiento es obligatorio"),
-
-    // check("sexoCliente").notEmpty().withMessage("Sexo es obligatorio"),
+    check("fechaNacimiento").notEmpty().withMessage("Fecha de nacimiento es obligatoria"),
+    check("sexoCliente").isIn(["Masculino", "Femenino"]).withMessage("Sexo es obligatorio"),
 
     check("departamentoCliente")
       .notEmpty()
@@ -51,7 +48,7 @@ router.post(
       .notEmpty()
       .withMessage("Provincia es obligatorio"),
 
-    check("distritoCliente").notEmpty().withMessage("Distrito es obligatorio"),
+    // ====== Distrito opcional ======
 
     //check('phones')
     //.notEmpty().withMessage('Al menos un teléfono es obligatorio'),
@@ -115,6 +112,7 @@ router.get(
 //PUT
 //! Actualizar Paciente
 router.put("/updatePatient", [validarJWT], actualizarPaciente);
+router.get("/historialCambios/:id", [validarJWT], obtenerHistorialCambiosPaciente);
 
 // ====== Datos complementarios del paciente desde programación empresarial ======
 router.patch(

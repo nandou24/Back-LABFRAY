@@ -3,6 +3,109 @@ const Paciente = require("../../models/Mantenimiento/Paciente");
 const Cotizacion = require("../../models/Gestion/CotizacionPaciente");
 const mongoose = require("mongoose");
 
+// ====== Normalización y validación de datos editables ======
+const camposMaestro = new Set([
+  'nombreCliente', 'apePatCliente', 'apeMatCliente', 'fechaNacimiento',
+  'sexoCliente', 'departamentoCliente', 'provinciaCliente', 'distritoCliente',
+  'direcCliente', 'mailCliente', 'phones',
+]);
+const documentoValido = (tipo, nro) => {
+  const tipoDoc = String(tipo ?? '').trim().toUpperCase();
+  const nroDoc = String(nro ?? '').trim().toUpperCase();
+  const patrones = { DNI: /^\d{8}$/, CE: /^[A-Z0-9]{1,13}$/, PASAPORTE: /^[A-Z0-9]{1,16}$/ };
+  if (!patrones[tipoDoc]?.test(nroDoc)) {
+    const error = new Error('Ingrese un documento válido para el tipo seleccionado.');
+    error.status = 400;
+    throw error;
+  }
+  return { tipoDoc: tipoDoc === 'PASAPORTE' ? 'Pasaporte' : tipoDoc, nroDoc };
+};
+const errorValidacion = (mensaje) => {
+  const error = new Error(mensaje);
+  error.status = 400;
+  throw error;
+};
+const textoSeguro = (valor) => String(valor ?? '').trim().replace(/\s+/g, ' ');
+const esPresente = (obj, campo) => Object.prototype.hasOwnProperty.call(obj, campo);
+const validarFecha = (valor, obligatoria = false) => {
+  if (valor == null || valor === '') {
+    if (obligatoria) errorValidacion('La fecha de nacimiento es obligatoria.');
+    return null;
+  }
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime()) || fecha > new Date() || fecha < new Date('1900-01-01')) {
+    errorValidacion('Fecha de nacimiento no válida.');
+  }
+  return fecha;
+};
+const datosLimpiosPaciente = (entrada) => {
+  if (!entrada || typeof entrada !== 'object' || Array.isArray(entrada)) {
+    errorValidacion('Datos del paciente no válidos.');
+  }
+  const salida = {};
+  for (const campo of camposMaestro) {
+    if (!esPresente(entrada, campo)) continue;
+    const valor = entrada[campo];
+    if (['nombreCliente', 'apePatCliente', 'apeMatCliente'].includes(campo)) {
+      const nombre = textoSeguro(valor).toUpperCase();
+      if (nombre.length > 100 || (campo !== 'apeMatCliente' && !nombre) ||
+          (nombre && !/^[\p{L}\s'’-]+$/u.test(nombre))) {
+        errorValidacion('Revise los nombres y apellidos del paciente.');
+      }
+      salida[campo] = nombre;
+    } else if (campo === 'fechaNacimiento') {
+      salida[campo] = validarFecha(valor);
+    } else if (campo === 'sexoCliente') {
+      const sexo = textoSeguro(valor);
+      if (sexo && !['Masculino', 'Femenino'].includes(sexo)) errorValidacion('Sexo no válido.');
+      salida[campo] = sexo || null;
+    } else if (['departamentoCliente', 'provinciaCliente', 'distritoCliente'].includes(campo)) {
+      const codigo = textoSeguro(valor);
+      if (codigo && !/^\d{2}$/.test(codigo)) errorValidacion('Seleccione una ubicación válida.');
+      salida[campo] = codigo || null;
+    } else if (campo === 'mailCliente') {
+      const correo = textoSeguro(valor).toLowerCase();
+      if (correo && (correo.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo))) {
+        errorValidacion('Correo electrónico no válido.');
+      }
+      salida[campo] = correo;
+    } else if (campo === 'direcCliente') {
+      const direccion = textoSeguro(valor);
+      if (direccion.length > 250) errorValidacion('La dirección supera 250 caracteres.');
+      salida[campo] = direccion;
+    } else if (campo === 'phones') {
+      if (!Array.isArray(valor) || valor.length > 20) errorValidacion('Lista de teléfonos no válida.');
+      salida.phones = valor.map((telefono) => {
+        const phoneNumber = textoSeguro(telefono?.phoneNumber);
+        const descriptionPhone = textoSeguro(telefono?.descriptionPhone);
+        if (!/^\d{9,11}$/.test(phoneNumber) || !descriptionPhone || descriptionPhone.length > 30) {
+          errorValidacion('Revise los teléfonos ingresados.');
+        }
+        return { phoneNumber, descriptionPhone };
+      });
+    }
+  }
+  if (salida.distritoCliente && (!salida.provinciaCliente || !salida.departamentoCliente) &&
+      esPresente(entrada, 'departamentoCliente') && esPresente(entrada, 'provinciaCliente')) {
+    errorValidacion('Seleccione departamento y provincia para el distrito.');
+  }
+  return salida;
+};
+const serializarCambio = (valor) => {
+  if (valor == null || valor === '') return null;
+  if (valor instanceof Date) return valor.toISOString().slice(0, 10);
+  if (Array.isArray(valor)) {
+    return JSON.stringify(valor.map(t => ({ phoneNumber: t.phoneNumber, descriptionPhone: t.descriptionPhone })));
+  }
+  return String(valor);
+};
+const leerCambios = (paciente, cambios) => Object.entries(cambios)
+  .map(([campo, nuevo]) => {
+    const anterior = serializarCambio(paciente[campo]);
+    const siguiente = serializarCambio(nuevo);
+    return anterior === siguiente ? null : { campo, valorAnterior: anterior, valorNuevo: siguiente };
+  }).filter(Boolean);
+
 // ==========================================
 // GENERAR HISTORIA CLÍNICA
 // ==========================================
@@ -72,33 +175,22 @@ const registrarPaciente = async ({
     );
   }
 
-  if (!["PENDIENTE", "REGISTRADA"].includes(estadoIdentificacion)) {
-    throw new Error("Estado de identificación del paciente no válido");
+  if (estadoIdentificacion !== 'REGISTRADA') {
+    errorValidacion('El paciente maestro debe tener documento de identidad.');
   }
-
-  const { tipoDoc, nroDoc, apePatCliente } = datosPaciente;
-
-  // ==========================================
-  // VALIDAR DOCUMENTO CUANDO EXISTE
-  // ==========================================
-
-  if (tipoDoc && nroDoc) {
-    const pacienteExistente = await Paciente.findOne({
-      tipoDoc,
-      nroDoc,
-    })
-      .session(session)
-      .lean();
-
-    if (pacienteExistente) {
-      const error = new Error(
-        "Ya existe un paciente con ese documento de identidad",
-      );
-
-      error.name = "PacienteDuplicadoError";
-
-      throw error;
-    }
+  const documento = documentoValido(datosPaciente?.tipoDoc, datosPaciente?.nroDoc);
+  const datos = datosLimpiosPaciente(datosPaciente);
+  const apePatCliente = datos.apePatCliente;
+  if (!datos.nombreCliente || !apePatCliente) {
+    errorValidacion('Nombres y apellido paterno son obligatorios.');
+  }
+  const duplicado = await Paciente.findOne({
+    tipoDoc: { $regex: `^${documento.tipoDoc}$`, $options: 'i' }, nroDoc: documento.nroDoc,
+  }).session(session).lean();
+  if (duplicado) {
+    const error = new Error('Ya existe un paciente con ese documento de identidad.');
+    error.name = 'PacienteDuplicadoError';
+    throw error;
   }
 
   // ==========================================
@@ -112,9 +204,11 @@ const registrarPaciente = async ({
   // ==========================================
 
   const nuevoPaciente = new Paciente({
-    ...datosPaciente,
+    ...datos,
+    ...documento,
     hc,
-    estadoIdentificacion,
+    origenAlta: datosPaciente?.origenAlta === 'CAMPANA_EMPRESA' ? 'CAMPANA_EMPRESA' : 'GENERAL',
+    estadoIdentificacion: 'REGISTRADA',
     createdBy: uid,
     usuarioRegistro: nombreUsuario,
     fechaRegistro: new Date(),
@@ -138,6 +232,16 @@ const crearPaciente = async (req, res = response) => {
     // ==========================================
     // REGISTRAR PACIENTE
     // ==========================================
+
+    // ====== Alta presencial: datos personales obligatorios ======
+    if (!['Masculino', 'Femenino'].includes(req.body?.sexoCliente)) {
+      errorValidacion('El sexo es obligatorio para el registro presencial.');
+    }
+    validarFecha(req.body?.fechaNacimiento, true);
+    if (!/^\d{2}$/.test(String(req.body?.departamentoCliente ?? '')) ||
+        !/^\d{2}$/.test(String(req.body?.provinciaCliente ?? ''))) {
+      errorValidacion('Seleccione departamento y provincia.');
+    }
 
     const nuevoPaciente = await registrarPaciente({
       datosPaciente: req.body,
@@ -179,9 +283,9 @@ const crearPaciente = async (req, res = response) => {
 
     console.error("Error al registrar paciente:", error);
 
-    return res.status(500).json({
+    return res.status(error.status || (error.name === 'ValidationError' ? 400 : 500)).json({
       ok: false,
-      msg: "Error al momento de registrar el paciente",
+      msg: error.status ? error.message : 'Error al momento de registrar el paciente',
     });
   } finally {
     await session.endSession();
@@ -430,41 +534,67 @@ const encontrarTerminoCotizaicon = async (req, res = response) => {
   }
 };
 
+// ====== Edición del maestro con campos permitidos y auditoría ======
 const actualizarPaciente = async (req, res = response) => {
-  const { tipoDoc, nroDoc, ...datosActualizables } = req.body;
-  // ====== Impedir cambio del estado de identificación por edición genérica ======
-  delete datosActualizables.estadoIdentificacion;
-  const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
-  console.log("Datos a actualizar:", datosActualizables);
-
   try {
-    const paciente = await Paciente.findOneAndUpdate(
-      { _id: datosActualizables._id },
-      {
-        $set: datosActualizables,
-        updatedBy: uid, // uid del usuario que actualiza el paciente
-        usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza el paciente
-        fechaActualizacion: new Date(), // Fecha de actualización
-      },
-    );
-
-    if (!paciente) {
-      return res.status(404).json({
-        ok: false,
-        msg: "Paciente no encontrado con ese número de historia",
-      });
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+      errorValidacion('Datos de actualización no válidos.');
     }
+    const id = String(req.body?._id ?? '').trim();
+    if (!mongoose.isValidObjectId(id)) errorValidacion('Paciente no válido.');
+    const paciente = await Paciente.findById(id);
+    if (!paciente) return res.status(404).json({ ok: false, msg: 'Paciente no encontrado.' });
+    if ((esPresente(req.body, 'tipoDoc') && String(req.body.tipoDoc ?? '').trim().toUpperCase() !== String(paciente.tipoDoc ?? '').toUpperCase()) ||
+        (esPresente(req.body, 'nroDoc') && String(req.body.nroDoc ?? '').trim() !== String(paciente.nroDoc ?? '').trim()) ||
+        (esPresente(req.body, 'hc') && String(req.body.hc ?? '') !== String(paciente.hc ?? ''))) {
+      return res.status(409).json({ ok: false, msg: 'El documento y la HC no se modifican desde este formulario.' });
+    }
+    const extrasPermitidos = new Set(['_id', 'tipoDoc', 'nroDoc', 'hc']);
+    if (Object.keys(req.body).some(campo => !camposMaestro.has(campo) && !extrasPermitidos.has(campo))) {
+      errorValidacion('Se enviaron campos no permitidos.');
+    }
+    const datos = datosLimpiosPaciente(req.body);
+    if (!Object.keys(datos).length) errorValidacion('No hay datos para actualizar.');
+    const diferencias = leerCambios(paciente, datos);
+    if (!diferencias.length) return res.json({ ok: true, msg: 'No hay modificaciones.', sinCambios: true });
+    for (const [campo, valor] of Object.entries(datos)) paciente.set(campo, valor);
+    paciente.historialModificaciones.push({
+      fecha: new Date(), uid: String(req.user.uid), nombreUsuario: req.user.nombreUsuario ?? null,
+      origen: 'MANTENIMIENTO_PACIENTES', cambios: diferencias,
+    });
+    paciente.updatedBy = req.user.uid;
+    paciente.usuarioActualizacion = req.user.nombreUsuario;
+    paciente.fechaActualizacion = new Date();
+    await paciente.save();
+    return res.json({ ok: true, msg: 'Paciente actualizado.', cambios: diferencias.length });
+  } catch (error) {
+    if (!error.status) console.error('Error al actualizar paciente:', error);
+    return res.status(error.status || (error.name === 'ValidationError' ? 400 : 500)).json({
+      ok: false, msg: error.status ? error.message : 'No se pudo actualizar el paciente.',
+    });
+  }
+};
 
-    //Generar respuesta exitosa
-    return res.status(201).json({
-      ok: true,
+// ====== Historial del maestro, solo lectura ======
+const obtenerHistorialCambiosPaciente = async (req, res = response) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ ok: false, msg: 'Paciente no válido.' });
+    }
+    const paciente = await Paciente.findById(req.params.id)
+      .select('hc historialModificaciones historialDocumentos').lean();
+    if (!paciente) return res.status(404).json({ ok: false, msg: 'Paciente no encontrado.' });
+    return res.json({ ok: true, hc: paciente.hc,
+      historial: [...(paciente.historialModificaciones ?? [])].reverse().slice(0, 100),
+      correccionesDocumentales: (paciente.historialDocumentos ?? []).map(c => ({
+        fecha: c.fecha, tipoDocAnterior: c.tipoDoc, nroDocAnterior: c.nroDoc,
+        tipoDocNuevo: c.tipoDocNuevo, nroDocNuevo: c.nroDocNuevo,
+        tipoOperacion: c.tipoOperacion, uid: c.uid, nombreUsuario: c.nombreUsuario,
+      })).reverse().slice(0, 100),
     });
   } catch (error) {
-    console.error("Error al actualizar el paciente: ", error);
-    return res.status(500).json({
-      ok: false,
-      msg: "Error al momento de actualizar back end",
-    });
+    console.error('Error al leer historial de paciente:', error);
+    return res.status(500).json({ ok: false, msg: 'No se pudo consultar el historial.' });
   }
 };
 
@@ -561,6 +691,7 @@ module.exports = {
   mostrarUltimosPacientes,
   encontrarTermino,
   actualizarPaciente,
+  obtenerHistorialCambiosPaciente,
   actualizarDatosComplementarios,
   encontrarTerminoCotizaicon,
   mostrarUltimosPacientesCotizacion,

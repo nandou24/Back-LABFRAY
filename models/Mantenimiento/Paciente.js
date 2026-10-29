@@ -84,13 +84,7 @@ const PacienteSchema = Schema(
       },
       default: null,
     },
-    distritoCliente: {
-      type: String,
-      required: function () {
-        return this.estadoIdentificacion === "REGISTRADA" && this.origenAlta !== "CAMPANA_EMPRESA";
-      },
-      default: null,
-    },
+    distritoCliente: { type: String, default: null },
     direcCliente: { type: String },
     mailCliente: { type: String },
     phones: [telefonoSchema],
@@ -113,6 +107,18 @@ const PacienteSchema = Schema(
       autorizadoPor: { type: String, default: null },
       usuarioAutorizacion: { type: String, default: null },
       rolAutorizacion: { type: String, default: null },
+    }],
+    // ====== Auditoría de modificaciones del maestro ======
+    historialModificaciones: [{
+      fecha: { type: Date, required: true },
+      uid: { type: String, required: true },
+      nombreUsuario: { type: String, default: null },
+      origen: { type: String, default: 'MANTENIMIENTO_PACIENTES' },
+      cambios: [{
+        campo: { type: String, required: true },
+        valorAnterior: { type: String, default: null },
+        valorNuevo: { type: String, default: null },
+      }],
     }],
     // 🔍 Campos de auditoría:
     createdBy: { type: String, required: true }, // uid
