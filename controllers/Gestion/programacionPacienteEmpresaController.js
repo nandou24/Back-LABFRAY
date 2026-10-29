@@ -7,6 +7,9 @@ const ProgramacionPacienteEmpresa = require("../../models/Gestion/programacionPa
 const Empresa = require("../../models/Mantenimiento/Empresa");
 const Paciente = require("../../models/Mantenimiento/Paciente");
 const SolicitudAtencion = require("../../models/Gestion/SolicitudAtencion");
+const MuestraLaboratorio = require("../../models/Gestion/MuestraLaboratorio");
+const ResultadoLaboratorio = require("../../models/Gestion/ResultadoLaboratorio");
+const { construirSeguimientoProgramacionesEmpresa } = require("../../utils/Gestion/construirSeguimientoProgramacionEmpresa");
 const ArchivoPaciente = require("../../models/Mantenimiento/ArchivoPaciente");
 const { crearSolicitudesAtencion } = require("./solicitudAtencionController");
 
@@ -299,11 +302,35 @@ const listarProgramaciones = async (req, res = response) => {
           .lean()
       : [];
     const pacientesPorId = new Map(pacientes.map((p) => [String(p._id), p]));
+
+    // ====== Consultar seguimiento sin modificar estados de Laboratorio ======
+    const idsProgramacion = programaciones.map((item) => item._id);
+    const solicitudes = idsProgramacion.length
+      ? await SolicitudAtencion.find({ programacionEmpresaId: { $in: idsProgramacion } })
+          .select('_id programacionEmpresaId codSolicitud tipo estado servicios unidadesLaboratorio')
+          .lean()
+      : [];
+    const laboratorioIds = solicitudes.filter((item) => item.tipo === 'Laboratorio')
+      .map((item) => item._id);
+    const [muestras, resultados] = laboratorioIds.length
+      ? await Promise.all([
+          MuestraLaboratorio.find({ solicitudAtencionId: { $in: laboratorioIds } })
+            .select('solicitudAtencionId claveMuestraPlan numeroRecipiente numeroIntento estadoMuestra createdAt coberturas.claveUnidad')
+            .lean(),
+          ResultadoLaboratorio.find({ solicitudAtencionId: { $in: laboratorioIds } })
+            .select('solicitudAtencionId claveUnidad estadoResultado')
+            .lean(),
+        ])
+      : [[], []];
+    const seguimientoPorProgramacion = construirSeguimientoProgramacionesEmpresa({
+      programaciones, solicitudes, muestras, resultados,
+    });
     const respuesta = programaciones.map((item) => {
       const paciente = item.pacienteId ? pacientesPorId.get(String(item.pacienteId)) : null;
       return {
         ...item,
         accionDocumentoPaciente: obtenerAccionDocumentoPaciente(paciente),
+        seguimientoAtencion: seguimientoPorProgramacion.get(String(item._id)) ?? { solicitudes: [], servicios: [] },
       };
     });
 

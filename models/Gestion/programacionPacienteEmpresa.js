@@ -199,6 +199,10 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
     fechaInicioAtencion: { type: Date, default: null },
     fechaUltimaAtencion: { type: Date, default: null },
     fechaFinalizacion: { type: Date, default: null },
+    // ====== Bloqueo definitivo de captura al completar servicios presenciales ======
+    fechaBloqueoFotografia: { type: Date, default: null },
+    origenBloqueoFotografia: { type: String, default: null },
+    usuarioBloqueoFotografia: { type: String, default: null },
     observaciones: { type: String, trim: true },
     // ====== Trazabilidad e idempotencia de importación Excel ======
     importacionId: { type: String, trim: true, default: null },

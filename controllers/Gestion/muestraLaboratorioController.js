@@ -22,6 +22,7 @@ const {
 const {
   sincronizarCompromisosSolicitud,
 } = require("../../utils/Gestion/compromisoEntregaLaboratorio");
+const { asegurarBloqueoFotograficoProgramacion } = require('../../utils/Gestion/bloqueoFotografiaProgramacionEmpresa');
 
 // ====== Obtener id normalizado ======
 
@@ -1824,6 +1825,17 @@ const sincronizarEstadosDeLotes = async ({
           uid,
           nombreUsuario,
         });
+        // ====== Aplicar bloqueo tras recepción o recolección masiva ======
+        if (solicitud.programacionEmpresaId) {
+          try {
+            await asegurarBloqueoFotograficoProgramacion({
+              programacionId: solicitud.programacionEmpresaId, usuario: uid,
+            });
+          } catch (errorFoto) {
+            console.error('No se pudo sincronizar el bloqueo fotográfico masivo:', errorFoto);
+            // ====== El endpoint de fotos volverá a evaluar antes de permitir cambios ======
+          }
+        }
       }
     } catch (error) {
       console.error(`Error al actualizar estado de ${solicitudAtencionId}:`, error);
@@ -1970,6 +1982,18 @@ const tomarYRecibirMuestra = async (req, res = response) => {
     });
 
     await session.commitTransaction();
+
+    // ====== Bloquear fotos sin interferir con el registro confirmado de muestras ======
+    if (solicitud.programacionEmpresaId) {
+      try {
+        await asegurarBloqueoFotograficoProgramacion({
+          programacionId: solicitud.programacionEmpresaId, usuario: uid,
+        });
+      } catch (errorFoto) {
+        console.error('No se pudo sincronizar el bloqueo fotográfico:', errorFoto);
+        // ====== El endpoint de fotos volverá a validar el estado operativo ======
+      }
+    }
 
     return res.status(200).json({
       ok: true,
@@ -2329,6 +2353,18 @@ const recolectarMuestra = async (req, res = response) => {
     });
 
     await session.commitTransaction();
+
+    // ====== Bloquear fotos sin interferir con el registro confirmado de muestras ======
+    if (solicitud.programacionEmpresaId) {
+      try {
+        await asegurarBloqueoFotograficoProgramacion({
+          programacionId: solicitud.programacionEmpresaId, usuario: uid,
+        });
+      } catch (errorFoto) {
+        console.error('No se pudo sincronizar el bloqueo fotográfico:', errorFoto);
+        // ====== El endpoint de fotos volverá a validar el estado operativo ======
+      }
+    }
 
     return res.status(200).json({
       ok: true,
@@ -3435,6 +3471,18 @@ const recibirMuestra = async (req, res = response) => {
     });
 
     await session.commitTransaction();
+
+    // ====== Bloquear fotos sin interferir con el registro confirmado de muestras ======
+    if (solicitud.programacionEmpresaId) {
+      try {
+        await asegurarBloqueoFotograficoProgramacion({
+          programacionId: solicitud.programacionEmpresaId, usuario: uid,
+        });
+      } catch (errorFoto) {
+        console.error('No se pudo sincronizar el bloqueo fotográfico:', errorFoto);
+        // ====== El endpoint de fotos volverá a validar el estado operativo ======
+      }
+    }
 
     return res.status(200).json({
       ok: true,

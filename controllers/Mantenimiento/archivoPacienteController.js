@@ -5,6 +5,7 @@ const ArchivoPaciente = require("../../models/Mantenimiento/ArchivoPaciente");
 const ProgramacionPacienteEmpresa = require("../../models/Gestion/programacionPacienteEmpresa");
 const SolicitudAtencion = require("../../models/Gestion/SolicitudAtencion");
 const FotoEvaluacionTemporal = require("../../models/Gestion/FotoEvaluacionTemporal");
+const { asegurarBloqueoFotograficoProgramacion } = require('../../utils/Gestion/bloqueoFotografiaProgramacionEmpresa');
 const { GetObjectCommand } = require('@aws-sdk/client-s3');
 const { s3Client } = require('../../utils/aws/s3Client');
 const { subirArchivo, subirArchivoStorage, eliminarArchivo, generarUrlTemporal } = require("../../utils/aws/s3Storage");
@@ -261,6 +262,14 @@ const subirFotoEvaluacionPaciente = async (req, res = response) => {
       return res.status(409).json({ ok: false, codigo: 'FOTO_NO_EDITABLE',
         msg: 'No se pueden cambiar fotografías de una programación que ya terminó o no inició.' });
     }
+    // ====== Comprobar cumplimiento presencial antes de subir a S3 ======
+    const cierre = await asegurarBloqueoFotograficoProgramacion({ programacionId });
+    if (cierre.bloqueada) {
+      return res.status(409).json({ ok: false, codigo: 'FOTO_BLOQUEADA_ATENCION',
+        msg: cierre.motivo === 'ATENCION_PRESENCIAL_COMPLETADA'
+          ? 'La atención presencial ya terminó. Solo puedes consultar las fotografías.'
+          : 'La programación no permite actualizar fotografías.' });
+    }
     const solicitudes = await SolicitudAtencion.find({ programacionEmpresaId: programacion._id })
       .select('_id').lean();
     if (!solicitudes.length) {
@@ -276,9 +285,16 @@ const subirFotoEvaluacionPaciente = async (req, res = response) => {
 
     sesion = await mongoose.startSession();
     sesion.startTransaction();
+    // ====== Validar de nuevo el cierre presencial dentro de la transacción ======
+    const cierreVigente = await asegurarBloqueoFotograficoProgramacion({ programacionId, session: sesion });
+    if (cierreVigente.bloqueada) {
+      const errorBloqueo = new Error('La atención presencial terminó; no se permite reemplazar la fotografía.');
+      errorBloqueo.status = 409;
+      throw errorBloqueo;
+    }
     // ====== Impedir guardar si la programación cambió de estado ======
     const cambioProgramacion = await ProgramacionPacienteEmpresa.updateOne({
-      _id: programacion._id, pacienteId: paciente._id,
+      _id: programacion._id, pacienteId: paciente._id, fechaBloqueoFotografia: null,
       estadoProgramacion: { $in: ['EN ATENCION', 'PENDIENTE DE COMPLETAR'] },
     }, { $inc: { __v: 1 } }, { session: sesion });
     if (cambioProgramacion.matchedCount !== 1) {
@@ -355,6 +371,9 @@ const subirFotoEvaluacionPaciente = async (req, res = response) => {
 const estadosFotografiaEditable = ['EN ATENCION', 'PENDIENTE DE COMPLETAR'];
 
 const validarEvaluacionParaFoto = async (programacion, session = null) => {
+  if (programacion.fechaBloqueoFotografia) {
+    return 'La atención presencial ya terminó. Solo puedes consultar el historial fotográfico.';
+  }
   if (!estadosFotografiaEditable.includes(programacion.estadoProgramacion)) {
     return 'La programación está cerrada o aún no está en atención; solo puedes consultar fotografías.';
   }
@@ -387,9 +406,16 @@ const subirFotoEvaluacionTemporal = async (req, res = response) => {
     }
 
     const programacion = await ProgramacionPacienteEmpresa.findById(programacionId)
-      .select('_id pacienteId hc nroDoc tipoDoc estadoProgramacion').lean();
+      .select('_id pacienteId hc nroDoc tipoDoc estadoProgramacion fechaBloqueoFotografia').lean();
     if (!programacion) {
       return res.status(404).json({ ok: false, msg: 'Programación no encontrada' });
+    }
+    const cierre = await asegurarBloqueoFotograficoProgramacion({ programacionId });
+    if (cierre.bloqueada) {
+      return res.status(409).json({ ok: false, codigo: 'FOTO_BLOQUEADA_ATENCION',
+        msg: cierre.motivo === 'ATENCION_PRESENCIAL_COMPLETADA'
+          ? 'La atención presencial ya terminó. Solo puedes consultar el historial fotográfico.'
+          : 'La programación no permite actualizar fotografías.' });
     }
     const errorVinculo = await validarEvaluacionParaFoto(programacion);
     if (errorVinculo) {
@@ -411,8 +437,14 @@ const subirFotoEvaluacionTemporal = async (req, res = response) => {
     session = await mongoose.startSession();
     session.startTransaction();
     // ====== Revalidar estado y vínculo de la atención al guardar ======
+    const cierreVigente = await asegurarBloqueoFotograficoProgramacion({ programacionId, session });
+    if (cierreVigente.bloqueada) {
+      const conflicto = new Error('La atención presencial ya terminó. Solo puedes consultar fotografías.');
+      conflicto.status = 409;
+      throw conflicto;
+    }
     const vigente = await ProgramacionPacienteEmpresa.findById(programacionId)
-      .session(session).select('_id pacienteId hc nroDoc tipoDoc estadoProgramacion').lean();
+      .session(session).select('_id pacienteId hc nroDoc tipoDoc estadoProgramacion fechaBloqueoFotografia').lean();
     const errorActual = vigente ? await validarEvaluacionParaFoto(vigente, session) : 'Programación no encontrada';
     if (errorActual) {
       const conflicto = new Error(errorActual);
@@ -421,7 +453,8 @@ const subirFotoEvaluacionTemporal = async (req, res = response) => {
     }
     // ====== Evitar reemplazo simultáneo con un cambio de estado ======
     const bloqueo = await ProgramacionPacienteEmpresa.updateOne({
-      _id: programacionId, estadoProgramacion: { $in: estadosFotografiaEditable },
+      _id: programacionId, fechaBloqueoFotografia: null,
+      estadoProgramacion: { $in: estadosFotografiaEditable },
     }, { $inc: { __v: 1 } }, { session });
     if (bloqueo.matchedCount !== 1) {
       const conflicto = new Error('La programación cambió de estado; actualiza la pantalla.');
@@ -495,16 +528,18 @@ const listarHistorialFotosTemporales = async (req, res = response) => {
       return res.status(400).json({ ok: false, msg: 'Programación inválida' });
     }
     const programacion = await ProgramacionPacienteEmpresa.findById(id)
-      .select('_id pacienteId hc nroDoc tipoDoc estadoProgramacion').lean();
+      .select('_id pacienteId hc nroDoc tipoDoc estadoProgramacion fechaBloqueoFotografia').lean();
     if (!programacion) return res.status(404).json({ ok: false, msg: 'Programación no encontrada' });
-    // ====== La edición depende del estado, no de tener HC definitiva ======
-    const puedeCapturar = !await validarEvaluacionParaFoto(programacion);
+    // ====== Si ya se cumplió el último servicio, guardar el bloqueo irreversible ======
+    const cierre = await asegurarBloqueoFotograficoProgramacion({ programacionId: id });
+    const puedeCapturar = !cierre.bloqueada && !await validarEvaluacionParaFoto(programacion);
     const fotos = await FotoEvaluacionTemporal.find({ programacionEmpresaId: programacion._id })
       .select('_id estadoArchivo fechaCaptura createdAt createdBy usuarioRegistro reemplazaA reemplazadoPor fechaReemplazo reemplazadoPorUsuario reemplazadoPorNombre')
       .sort({ createdAt: -1, _id: -1 }).lean();
     return res.status(200).set('Cache-Control', 'no-store').json({
       ok: true, fotos, puedeCapturar, hc: programacion.hc || null,
       estadoProgramacion: programacion.estadoProgramacion,
+      motivoBloqueoFoto: cierre.bloqueada ? cierre.motivo : null,
     });
   } catch (error) {
     console.error('Error consultando historial de fotos temporales:', error);
