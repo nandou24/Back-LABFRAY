@@ -249,13 +249,17 @@ const subirFotoEvaluacionPaciente = async (req, res = response) => {
     }
     const [paciente, programacion] = await Promise.all([
       Paciente.findById(pacienteId).select('_id').lean(),
-      ProgramacionPacienteEmpresa.findById(programacionId).select('_id pacienteId').lean(),
+      ProgramacionPacienteEmpresa.findById(programacionId).select('_id pacienteId estadoProgramacion').lean(),
     ]);
     if (!paciente || !programacion) {
       return res.status(404).json({ ok: false, msg: 'No se encontró el paciente o la programación' });
     }
     if (!programacion.pacienteId || String(programacion.pacienteId) !== pacienteId) {
       return res.status(409).json({ ok: false, msg: 'La programación no está vinculada a este paciente' });
+    }
+    if (!['EN ATENCION', 'PENDIENTE DE COMPLETAR'].includes(programacion.estadoProgramacion)) {
+      return res.status(409).json({ ok: false, codigo: 'FOTO_NO_EDITABLE',
+        msg: 'No se pueden cambiar fotografías de una programación que ya terminó o no inició.' });
     }
     const solicitudes = await SolicitudAtencion.find({ programacionEmpresaId: programacion._id })
       .select('_id').lean();
@@ -272,6 +276,16 @@ const subirFotoEvaluacionPaciente = async (req, res = response) => {
 
     sesion = await mongoose.startSession();
     sesion.startTransaction();
+    // ====== Impedir guardar si la programación cambió de estado ======
+    const cambioProgramacion = await ProgramacionPacienteEmpresa.updateOne({
+      _id: programacion._id, pacienteId: paciente._id,
+      estadoProgramacion: { $in: ['EN ATENCION', 'PENDIENTE DE COMPLETAR'] },
+    }, { $inc: { __v: 1 } }, { session: sesion });
+    if (cambioProgramacion.matchedCount !== 1) {
+      const errorEstado = new Error('La programación ya no permite cambiar fotografías.');
+      errorEstado.status = 409;
+      throw errorEstado;
+    }
     await ArchivoPaciente.updateMany({
       pacienteId: paciente._id,
       programacionEmpresaId: programacion._id,
@@ -327,13 +341,38 @@ const subirFotoEvaluacionPaciente = async (req, res = response) => {
       catch (rollbackError) { console.error('Rollback S3:', rollbackError); }
     }
     console.error('Error guardando FOTO_EVALUACION:', error);
+    if (error?.status === 409 || error?.code === 112 || error?.codeName === 'WriteConflict') {
+      return res.status(409).json({ ok: false, codigo: 'FOTO_NO_EDITABLE',
+        msg: 'La programación cambió de estado; actualiza la pantalla antes de continuar.' });
+    }
     return res.status(500).json({ ok: false, msg: 'No se pudo guardar fotografía de evaluación' });
   } finally {
     if (sesion) await sesion.endSession();
   }
 };
 
-// ====== MC.2: guardar foto temporal sin crear paciente ni HC ======
+// ====== Validar si la programación admite fotografías de evaluación ======
+const estadosFotografiaEditable = ['EN ATENCION', 'PENDIENTE DE COMPLETAR'];
+
+const validarEvaluacionParaFoto = async (programacion, session = null) => {
+  if (!estadosFotografiaEditable.includes(programacion.estadoProgramacion)) {
+    return 'La programación está cerrada o aún no está en atención; solo puedes consultar fotografías.';
+  }
+  const tieneIdentidad = Boolean(programacion.pacienteId || programacion.hc || programacion.nroDoc || programacion.tipoDoc);
+  if (!tieneIdentidad) return null;
+  if (!programacion.pacienteId || !programacion.hc || !programacion.nroDoc || !programacion.tipoDoc) {
+    return 'La identidad de la programación está incompleta; revisa su vinculación.';
+  }
+  const query = Paciente.findById(programacion.pacienteId).select('_id hc tipoDoc nroDoc');
+  const paciente = await (session ? query.session(session) : query).lean();
+  if (!paciente || paciente.hc !== programacion.hc ||
+      paciente.tipoDoc !== programacion.tipoDoc || paciente.nroDoc !== programacion.nroDoc) {
+    return 'La HC y el documento de la programación no coinciden con el maestro de pacientes.';
+  }
+  return null;
+};
+
+// ====== Guardar foto por programación con o sin HC definitiva ======
 const subirFotoEvaluacionTemporal = async (req, res = response) => {
   let archivoS3 = null;
   let session = null;
@@ -352,10 +391,9 @@ const subirFotoEvaluacionTemporal = async (req, res = response) => {
     if (!programacion) {
       return res.status(404).json({ ok: false, msg: 'Programación no encontrada' });
     }
-    if (programacion.estadoProgramacion !== 'EN ATENCION' ||
-        programacion.pacienteId || programacion.hc || programacion.nroDoc || programacion.tipoDoc) {
-      return res.status(409).json({ ok: false, codigo: 'IDENTIDAD_NO_TEMPORAL',
-        msg: 'Solo se admite una fotografía temporal para una atención iniciada sin documento ni HC' });
+    const errorVinculo = await validarEvaluacionParaFoto(programacion);
+    if (errorVinculo) {
+      return res.status(409).json({ ok: false, codigo: 'FOTO_NO_EDITABLE', msg: errorVinculo });
     }
     const solicitudes = await SolicitudAtencion.find({ programacionEmpresaId: programacion._id })
       .select('_id').lean();
@@ -372,6 +410,24 @@ const subirFotoEvaluacionTemporal = async (req, res = response) => {
 
     session = await mongoose.startSession();
     session.startTransaction();
+    // ====== Revalidar estado y vínculo de la atención al guardar ======
+    const vigente = await ProgramacionPacienteEmpresa.findById(programacionId)
+      .session(session).select('_id pacienteId hc nroDoc tipoDoc estadoProgramacion').lean();
+    const errorActual = vigente ? await validarEvaluacionParaFoto(vigente, session) : 'Programación no encontrada';
+    if (errorActual) {
+      const conflicto = new Error(errorActual);
+      conflicto.status = 409;
+      throw conflicto;
+    }
+    // ====== Evitar reemplazo simultáneo con un cambio de estado ======
+    const bloqueo = await ProgramacionPacienteEmpresa.updateOne({
+      _id: programacionId, estadoProgramacion: { $in: estadosFotografiaEditable },
+    }, { $inc: { __v: 1 } }, { session });
+    if (bloqueo.matchedCount !== 1) {
+      const conflicto = new Error('La programación cambió de estado; actualiza la pantalla.');
+      conflicto.status = 409;
+      throw conflicto;
+    }
     // ====== Registrar sucesión sin borrar el objeto S3 anterior ======
     const anterior = await FotoEvaluacionTemporal.findOne({
       programacionEmpresaId: programacion._id, estadoArchivo: 'ACTIVO',
@@ -408,7 +464,7 @@ const subirFotoEvaluacionTemporal = async (req, res = response) => {
     await session.commitTransaction();
     confirmado = true;
 
-    return res.status(201).json({ ok: true, msg: 'Fotografía temporal guardada en la programación',
+    return res.status(201).json({ ok: true, msg: 'Fotografía de evaluación guardada en la programación',
       archivo: { _id: foto._id, storageKey: foto.storageKey,
         programacionEmpresaId: foto.programacionEmpresaId, solicitudAtencionIds: foto.solicitudAtencionIds,
         fechaCaptura: foto.fechaCaptura },
@@ -420,9 +476,10 @@ const subirFotoEvaluacionTemporal = async (req, res = response) => {
       catch (errorRollback) { console.error('Rollback foto temporal S3:', errorRollback); }
     }
     console.error('Error guardando fotografía temporal:', error);
-    if (error?.status === 409 || error?.code === 11000) {
-      return res.status(409).json({ ok: false, codigo: 'FOTO_ACTIVA_MODIFICADA',
-        msg: 'La fotografía cambió; actualiza el historial e inténtalo nuevamente' });
+    if (error?.status === 409 || error?.code === 11000 || error?.code === 112 ||
+        error?.codeName === 'WriteConflict') {
+      return res.status(409).json({ ok: false, codigo: 'FOTO_NO_EDITABLE_O_MODIFICADA',
+        msg: error?.status === 409 ? error.message : 'La programación o fotografía cambió; actualiza e inténtalo nuevamente.' });
     }
     return res.status(500).json({ ok: false, msg: 'No se pudo guardar la fotografía temporal' });
   } finally {
@@ -437,13 +494,17 @@ const listarHistorialFotosTemporales = async (req, res = response) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ ok: false, msg: 'Programación inválida' });
     }
-    const programacion = await ProgramacionPacienteEmpresa.findById(id).select('_id').lean();
+    const programacion = await ProgramacionPacienteEmpresa.findById(id)
+      .select('_id pacienteId hc nroDoc tipoDoc estadoProgramacion').lean();
     if (!programacion) return res.status(404).json({ ok: false, msg: 'Programación no encontrada' });
+    // ====== La edición depende del estado, no de tener HC definitiva ======
+    const puedeCapturar = !await validarEvaluacionParaFoto(programacion);
     const fotos = await FotoEvaluacionTemporal.find({ programacionEmpresaId: programacion._id })
       .select('_id estadoArchivo fechaCaptura createdAt createdBy usuarioRegistro reemplazaA reemplazadoPor fechaReemplazo reemplazadoPorUsuario reemplazadoPorNombre')
       .sort({ createdAt: -1, _id: -1 }).lean();
     return res.status(200).set('Cache-Control', 'no-store').json({
-      ok: true, fotos,
+      ok: true, fotos, puedeCapturar, hc: programacion.hc || null,
+      estadoProgramacion: programacion.estadoProgramacion,
     });
   } catch (error) {
     console.error('Error consultando historial de fotos temporales:', error);
@@ -546,8 +607,7 @@ const buscarFotoEvaluacion = async (req) => {
       .select('pacienteId hc nroDoc tipoDoc estadoProgramacion').lean();
     if (!programacion) return { error: 'PROGRAMACION_NO_ENCONTRADA', status: 404 };
     const temporal = !programacion.pacienteId && !programacion.hc &&
-      !programacion.nroDoc && !programacion.tipoDoc &&
-      programacion.estadoProgramacion === 'EN ATENCION';
+      !programacion.nroDoc && !programacion.tipoDoc;
     if (temporal) {
       if (pacienteId || hc) return { error: 'IDENTIDAD_INCONSISTENTE', status: 409 };
       const foto = await FotoEvaluacionTemporal.findOne({
@@ -563,18 +623,34 @@ const buscarFotoEvaluacion = async (req) => {
   if (inconsistente) return { error: 'IDENTIDAD_INCONSISTENTE', status: 409 };
   if (!paciente || !programacionId) return { disponible: false, motivo: 'SIN_EVALUACION_VINCULADA' };
 
-  // ====== Compatibilidad: fotos antiguas FOTO_PERFIL con programación ======
-  const foto = await ArchivoPaciente.findOne({
-    pacienteId: paciente._id,
-    programacionEmpresaId: programacionId,
-    tipoArchivo: { $in: ['FOTO_EVALUACION', 'FOTO_PERFIL'] },
-    estadoArchivo: 'ACTIVO',
-  })
-    .sort({ fechaCaptura: -1, createdAt: -1 })
-    .select('storageBucket storageKey storageVersionId fechaCaptura mimeType tipoArchivo')
-    .lean();
-  if (!foto) return { disponible: false, motivo: 'SIN_FOTOGRAFIA' };
-  return { disponible: true, foto };
+  // ====== Verificar pertenencia de la programación a la HC definitiva ======
+  const programacionVinculada = await ProgramacionPacienteEmpresa.findById(programacionId)
+    .select('pacienteId hc').lean();
+  if (!programacionVinculada?.pacienteId ||
+      String(programacionVinculada.pacienteId) !== String(paciente._id) ||
+      programacionVinculada.hc !== paciente.hc) {
+    return { error: 'VINCULOS_INCONSISTENTES', status: 409 };
+  }
+
+  // ====== Mostrar la última foto activa de esta evaluación, sin importar la colección ======
+  const [fotoMaestra, fotoProgramacion] = await Promise.all([
+    ArchivoPaciente.findOne({
+      pacienteId: paciente._id,
+      programacionEmpresaId: programacionId,
+      tipoArchivo: { $in: ['FOTO_EVALUACION', 'FOTO_PERFIL'] },
+      estadoArchivo: 'ACTIVO',
+    }).sort({ fechaCaptura: -1, createdAt: -1 })
+      .select('storageBucket storageKey storageVersionId fechaCaptura createdAt mimeType tipoArchivo').lean(),
+    FotoEvaluacionTemporal.findOne({
+      programacionEmpresaId: programacionId, estadoArchivo: 'ACTIVO',
+    }).sort({ fechaCaptura: -1, createdAt: -1 })
+      .select('storageBucket storageKey storageVersionId fechaCaptura createdAt mimeType tipoArchivo').lean(),
+  ]);
+  const fecha = (foto) => new Date(foto?.fechaCaptura || foto?.createdAt || 0).getTime() || 0;
+  const foto = !fotoMaestra ? fotoProgramacion
+    : !fotoProgramacion ? fotoMaestra
+      : (fecha(fotoProgramacion) >= fecha(fotoMaestra) ? fotoProgramacion : fotoMaestra);
+  return foto ? { disponible: true, foto } : { disponible: false, motivo: 'SIN_FOTOGRAFIA' };
 };
 
 // ====== Información de la foto sin exponer el objeto de S3 ======
