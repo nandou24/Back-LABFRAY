@@ -65,13 +65,11 @@ const buscarCoincidenciasVinculacion = async (Paciente, programacion, validarCoi
 
   // ====== Nombres y apellidos: buscar la combinación, no palabras sueltas ======
   const primerNombre = expresionPrimerNombre(programacion.nombreCliente);
-  const apellidos = [programacion.apePatCliente, programacion.apeMatCliente]
-    .map((valor, index) => ({ valor, campo: index === 0 ? 'apePatCliente' : 'apeMatCliente' }))
-    .filter(item => normalizarDocumento(item.valor))
-    .map(item => ({ [item.campo]: expresionCampo(item.valor) }));
-  if (primerNombre && apellidos.length) {
+  const apellidoPaterno = normalizarDocumento(programacion.apePatCliente);
+  if (primerNombre && apellidoPaterno) {
     nombres = await conSesion(Paciente.find({
-      nombreCliente: primerNombre, $or: apellidos,
+      nombreCliente: primerNombre,
+      apePatCliente: expresionCampo(apellidoPaterno),
     }).select(CAMPOS_PACIENTE)).lean();
   }
 

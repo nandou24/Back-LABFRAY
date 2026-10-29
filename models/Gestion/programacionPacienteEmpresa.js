@@ -122,6 +122,14 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
         origenDocumento: {type:String,default:'EMPRESA'},
         tipoResolucion: {type:String,default:'COINCIDENCIA_EXACTA'},
         motivoDecision: {type:String,default:null},
+        // ====== Datos declarados al consultar, antes de aplicar identidad maestra ======
+        identidadDeclarada: {
+          nombreCliente: { type: String, default: null },
+          apePatCliente: { type: String, default: null },
+          apeMatCliente: { type: String, default: null },
+          sexoCliente: { type: String, default: null },
+          fechaNacimiento: { type: String, default: null },
+        },
         // ====== Cambios al regularizar identidad temporal ======
         cambiosIdentidad: { type: [{
           campo: { type: String, required: true },

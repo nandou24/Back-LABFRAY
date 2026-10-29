@@ -7,7 +7,7 @@ const ResultadoLaboratorio = require('../../models/Gestion/ResultadoLaboratorio'
 const RecursoHumano = require('../../models/Mantenimiento/RecHumano');
 const { registrarPaciente } = require('../Mantenimiento/pacienteController');
 const { normalizarDocumento, esAtencionTemporalPendiente, normalizarIdentidadPropuesta,
-  buscarCandidatosAmbasIdentidades } = require('./previsualizarRegularizacionTemporalController');
+  buscarCandidatosIdentidadConsultada } = require('./previsualizarRegularizacionTemporalController');
 
 const rechazar = (codigo, msg, status = 409) => {
   const error = new Error(msg);
@@ -57,17 +57,6 @@ const construirCambiosIdentidad = (programacion, identidad) =>
           valorNuevo: nuevo == null ? null : String(nuevo) };
     }).filter(Boolean);
 
-// ====== Buscar documentos usados anteriormente en cualquier HC ======
-const encontrarDocumentoHistorico = (documento, session) => {
-  const tipoDoc = new RegExp(`^\\s*${documento.tipoDoc}\\s*$`, 'i');
-  const nroDoc = new RegExp(`^\\s*${documento.nroDoc}\\s*$`, 'i');
-  return Paciente.find({
-    historialDocumentos: { $elemMatch: { $or: [
-      { tipoDoc, nroDoc }, { tipoDocNuevo: tipoDoc, nroDocNuevo: nroDoc },
-    ] } },
-  }).select('_id hc').session(session).lean();
-};
-
 // ====== Resolver nombre auditado del operador ======
 const nombreOperador = async (uid, usuario, session) => {
   const filtros = [];
@@ -107,7 +96,7 @@ const regularizarTemporalConHCNueva = async (req, res = response) => {
       if (!esAtencionTemporalPendiente(programacion)) {
         rechazar('ATENCION_NO_TEMPORAL', 'La atención ya fue regularizada o no admite regularización.');
       }
-      const identidad = normalizarIdentidadPropuesta(req.body, programacion);
+      const identidad = normalizarIdentidadPropuesta(req.body);
       const cambiosIdentidad = construirCambiosIdentidad(programacion, identidad);
       const solicitudes = await Solicitud.find({ programacionEmpresaId: programacion._id }).session(session);
       if (!solicitudes.length || solicitudes.some(s => s.origenAtencion !== 'EMPRESA' ||
@@ -127,14 +116,26 @@ const regularizarTemporalConHCNueva = async (req, res = response) => {
         rechazar('DOCUMENTO_YA_RESERVADO', 'El documento ya fue regularizado por este flujo. Revise el paciente maestro.');
       }
 
-      // ====== Reconsultar maestro e historial dentro de la transacción ======
-      const coincidencias = await buscarCandidatosAmbasIdentidades(programacion.toObject(), documento, identidad, session);
-      const historicos = await encontrarDocumentoHistorico(documento, session);
-      if (coincidencias.porDocumento.length || historicos.length) {
-        rechazar('DOCUMENTO_EXISTENTE', 'El documento ya está asociado a un paciente o historial. Revise la HC existente.');
+      // ====== Reconsultar documento vigente y nombres dentro de la transacción ======
+      const coincidencias = await buscarCandidatosIdentidadConsultada(documento, identidad, session);
+      if (coincidencias.porDocumento.length) {
+        rechazar('DOCUMENTO_EXISTENTE', 'Este documento ya pertenece a una HC. Revise la HC existente.');
       }
-      if (coincidencias.porNombres.length) {
-        rechazar('COINCIDENCIAS_IDENTIDAD_PENDIENTES', 'Hay pacientes con nombres o apellidos similares. Revise antes de crear otra HC.');
+      // ====== Las coincidencias nominales se revisan; el documento manda ======
+      const nominales = [...new Map(coincidencias.porNombres.map(c => [String(c.pacienteId), c])).values()];
+      const descartados = req.body?.candidatosNominalesDescartados;
+      if (nominales.length) {
+        const ids = Array.isArray(descartados) ? descartados.map(String) : [];
+        const esperados = new Set(nominales.map(c => String(c.pacienteId)));
+        const revisionCompleta = ids.length === esperados.size &&
+          new Set(ids).size === esperados.size && ids.every(id => esperados.has(id));
+        if (!revisionCompleta || req.body?.confirmacionSinCorrespondencia !== true) {
+          rechazar('COINCIDENCIAS_IDENTIDAD_PENDIENTES',
+            'Revise los candidatos y confirme que son personas diferentes antes de crear una HC nueva.');
+        }
+      } else if (req.body?.confirmacionSinCorrespondencia === true ||
+          (Array.isArray(descartados) && descartados.length > 0)) {
+        rechazar('REVISION_DESACTUALIZADA', 'La lista de coincidencias cambió. Realice una nueva búsqueda.');
       }
       // ====== Sin resultados liberados: no alterar expedientes publicados ======
       const liberados = await ResultadoLaboratorio.exists({
@@ -173,6 +174,22 @@ const regularizarTemporalConHCNueva = async (req, res = response) => {
       programacion.updatedBy = uid;
       programacion.usuarioActualizacion = usuario;
       programacion.fechaActualizacion = ahora;
+      // ====== Auditar cada candidato descartado sin alterar su HC ======
+      for (const candidato of nominales) {
+        programacion.historialRevisionIdentidad.push({
+          decision: 'DISTINTO',
+          pacienteIdCandidato: candidato.pacienteId,
+          hcCandidata: candidato.hc ?? null,
+          documentoCoincidente: false,
+          tipoDocProgramacion: documento.tipoDoc,
+          nroDocProgramacion: documento.nroDoc,
+          nombreClienteProgramacion: identidad.nombreCliente,
+          apePatClienteProgramacion: identidad.apePatCliente,
+          apeMatClienteProgramacion: identidad.apeMatCliente,
+          motivo: motivoDecision || null,
+          fecha: ahora, ejecutadoPor: uid, usuario, nombreCompletoUsuario,
+        });
+      }
       programacion.historialVinculaciones.push({
         tipo: 'REGULARIZACION_TEMPORAL_HC_NUEVA',
         pacienteIdAnterior: null, hcAnterior: null,
@@ -182,7 +199,7 @@ const regularizarTemporalConHCNueva = async (req, res = response) => {
         fecha: ahora, ejecutadoPor: uid, usuario,
         nombreCompletoUsuario,
         origenDocumento: 'REGULARIZACION_TEMPORAL',
-        tipoResolucion: 'ALTA_NUEVA_EMPRESA',
+        tipoResolucion: nominales.length ? 'ALTA_NUEVA_EMPRESA_NOMINALES_DESCARTADAS' : 'ALTA_NUEVA_EMPRESA',
         motivoDecision: motivoDecision || null, cambiosIdentidad,
       });
       await programacion.save({ session });

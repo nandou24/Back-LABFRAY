@@ -34,10 +34,10 @@ const esAtencionTemporalPendiente = (programacion) => Boolean(
 );
 
 // ====== Identidad declarada para regularizar sin modificar datos existentes ======
-const normalizarIdentidadPropuesta = (body, programacion) => {
+const normalizarIdentidadPropuesta = (body) => {
   const valores = {};
   for (const campo of ['nombreCliente', 'apePatCliente', 'apeMatCliente']) {
-    const valor = String(body?.[campo] ?? programacion[campo] ?? '').trim().replace(/\s+/g, ' ').toUpperCase();
+    const valor = String(body?.[campo] ?? '').trim().replace(/\s+/g, ' ').toUpperCase();
     if (valor.length > 80 || (campo !== 'apeMatCliente' && valor.length < 2) ||
         (valor && !/^[\p{L}\s'’-]+$/u.test(valor))) {
       const error = new Error('Revise los nombres y apellidos del paciente (mínimo 2 caracteres en campos obligatorios).');
@@ -45,16 +45,13 @@ const normalizarIdentidadPropuesta = (body, programacion) => {
     }
     valores[campo] = valor;
   }
-  const sexo = Object.prototype.hasOwnProperty.call(body ?? {}, 'sexoCliente')
-    ? (body.sexoCliente || null) : (programacion.sexoCliente ?? null);
+  const sexo = body?.sexoCliente || null;
   if (sexo && !['Masculino', 'Femenino'].includes(sexo)) {
     const error = new Error('El sexo informado no es válido.');
     error.codigo = 'SEXO_INVALIDO'; error.status = 400; throw error;
   }
   valores.sexoCliente = sexo || null;
-  const original = programacion.fechaNacimiento ? new Date(programacion.fechaNacimiento).toISOString().slice(0, 10) : '';
-  const fecha = String(Object.prototype.hasOwnProperty.call(body ?? {}, 'fechaNacimiento')
-    ? (body.fechaNacimiento || '') : original).trim();
+  const fecha = String(body?.fechaNacimiento || '').trim();
   if (fecha) {
     const valor = new Date(`${fecha}T00:00:00.000Z`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || !Number.isFinite(valor.getTime()) ||
@@ -67,41 +64,9 @@ const normalizarIdentidadPropuesta = (body, programacion) => {
   return valores;
 };
 
-// ====== Incluir coincidencias por identidad inicial y propuesta corregida ======
-const buscarCandidatosAmbasIdentidades = async (programacion, documento, identidad, session = null) => {
-  const original = { ...programacion, ...documento };
-  const propuesta = { ...original, ...identidad };
-  const busqueda = async (datos) => buscarCoincidenciasVinculacion(Paciente, datos, compararNombres, session);
-  const inicial = await busqueda(original);
-  if (['nombreCliente', 'apePatCliente', 'apeMatCliente'].every(c =>
-    normalizarNombre(original[c]) === normalizarNombre(propuesta[c]))) return inicial;
-  const corregida = await busqueda(propuesta);
-  const unir = (a, b) => Array.from(new Map([...a,...b].map(item => [item.pacienteId, item])).values());
-  const porDocumento = unir(inicial.porDocumento, corregida.porDocumento);
-  const porNombres = unir(inicial.porNombres, corregida.porNombres);
-  return { porDocumento, porNombres, candidatos: unir([...porDocumento,...porNombres], []) };
-};
-
-// ====== Buscar documentos históricos para evitar crear HC duplicadas ======
-const buscarEnHistorialDocumentos = async (tipoDoc, nroDoc) => {
-  const tipo = new RegExp(`^\\s*${tipoDoc}\\s*$`, 'i');
-  const numero = new RegExp(`^\\s*${nroDoc}\\s*$`, 'i');
-  const coincidencias = await Paciente.find({
-    historialDocumentos: {
-      $elemMatch: {
-        $or: [{ tipoDoc: tipo, nroDoc: numero }, { tipoDocNuevo: tipo, nroDocNuevo: numero }],
-      },
-    },
-  }).select('_id hc tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente estadoIdentificacion').lean();
-  return coincidencias.map(p => ({
-    pacienteId: String(p._id), hc: p.hc ?? null,
-    tipoDoc: p.tipoDoc ?? null, nroDoc: p.nroDoc ?? null,
-    nombreCliente: p.nombreCliente, apePatCliente: p.apePatCliente,
-    apeMatCliente: p.apeMatCliente ?? '',
-    identificacionPendiente: p.estadoIdentificacion === 'PENDIENTE',
-    tipoCoincidencia: 'HISTORIAL_DOCUMENTO',
-  }));
-};
+// ====== Buscar solo con los datos ingresados durante la regularización ======
+const buscarCandidatosIdentidadConsultada = async (documento, identidad, session = null) =>
+  buscarCoincidenciasVinculacion(Paciente, { ...identidad, ...documento }, compararNombres, session);
 
 // ====== Solo lectura: la vinculación será una operación posterior ======
 const previsualizarRegularizacionTemporal = async (req, res = response) => {
@@ -132,14 +97,10 @@ const previsualizarRegularizacionTemporal = async (req, res = response) => {
         msg: 'Las solicitudes de esta programación no están íntegramente en identidad temporal.' });
     }
 
-    const identidadConsultada = normalizarIdentidadPropuesta(req.body, programacion);
-    const [coincidencias, historicas] = await Promise.all([
-      buscarCandidatosAmbasIdentidades(programacion, documento, identidadConsultada),
-      buscarEnHistorialDocumentos(documento.tipoDoc, documento.nroDoc),
-    ]);
-    const actuales = new Set(coincidencias.candidatos.map(p => p.pacienteId));
-    const soloHistoricas = historicas.filter(p => !actuales.has(p.pacienteId));
-    const requiereRevision = coincidencias.candidatos.length > 0 || historicas.length > 0;
+    const identidadConsultada = normalizarIdentidadPropuesta(req.body);
+    const coincidencias = await buscarCandidatosIdentidadConsultada(documento, identidadConsultada);
+    const pacientesUnicos = coincidencias.candidatos.length;
+    const requiereRevision = pacientesUnicos > 0;
 
     return res.json({
       ok: true, soloLectura: true, documento, identidadConsultada,
@@ -153,8 +114,8 @@ const previsualizarRegularizacionTemporal = async (req, res = response) => {
         codigoLaboratorio: s.codigoLaboratorio ?? null })),
       porDocumento: coincidencias.porDocumento,
       porNombres: coincidencias.porNombres,
-      porHistorialDocumento: soloHistoricas,
-      pacientesUnicos: coincidencias.candidatos.length + soloHistoricas.length,
+      porHistorialDocumento: [], // Compatibilidad temporal del contrato Angular.
+      pacientesUnicos,
       estadoRevision: requiereRevision ? 'REQUIERE_REVISION_IDENTIDAD' : 'SIN_COINCIDENCIAS',
       msg: requiereRevision
         ? 'Revise las coincidencias antes de vincular o crear una HC. No se modificó ningún registro.'
@@ -172,5 +133,5 @@ module.exports = {
   normalizarDocumento,
   esAtencionTemporalPendiente,
   normalizarIdentidadPropuesta,
-  buscarCandidatosAmbasIdentidades,
+  buscarCandidatosIdentidadConsultada,
 };

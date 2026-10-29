@@ -6,7 +6,7 @@ const Paciente = require('../../models/Mantenimiento/Paciente');
 const ResultadoLaboratorio = require('../../models/Gestion/ResultadoLaboratorio');
 const RecursoHumano = require('../../models/Mantenimiento/RecHumano');
 const { buscarCoincidenciasVinculacion } = require('../../utils/Gestion/buscarCoincidenciasVinculacion');
-const { normalizarDocumento, esAtencionTemporalPendiente } = require('./previsualizarRegularizacionTemporalController');
+const { normalizarDocumento, esAtencionTemporalPendiente, normalizarIdentidadPropuesta } = require('./previsualizarRegularizacionTemporalController');
 
 const errorNegocio = (codigo, msg, status = 409) => {
   const error = new Error(msg);
@@ -20,7 +20,7 @@ const mismoDocumento = (paciente, documento) =>
   String(paciente.tipoDoc ?? '').trim().toUpperCase() === documento.tipoDoc &&
   String(paciente.nroDoc ?? '').trim().toUpperCase() === documento.nroDoc;
 
-// ====== Distinguir discrepancia menor de identidad incompatible ======
+// ====== Comparar datos declarados y referencia del maestro ======
 const compararIdentidad = (programacion, paciente) => {
   const nombreProgramado = normalizarNombre(programacion.nombreCliente);
   const nombreMaestro = normalizarNombre(paciente.nombreCliente);
@@ -33,13 +33,37 @@ const compararIdentidad = (programacion, paciente) => {
   const coincideMaterno = !maternoProgramado || maternoProgramado === maternoMaestro;
   return {
     coincide: coincideNombre && coincidePaterno && coincideMaterno,
-    incompatible: !coincideNombre && !coincidePaterno,
     diferencias: [
       ...(!coincideNombre ? ['Nombres'] : []),
       ...(!coincidePaterno ? ['Apellido paterno'] : []),
       ...(!coincideMaterno ? ['Apellido materno'] : []),
     ],
   };
+};
+
+// ====== Registrar cambios originales frente a la identidad definitiva ======
+const fechaISO = valor => {
+  if (!valor) return '';
+  const fecha = valor instanceof Date ? valor : new Date(valor);
+  return Number.isNaN(fecha.getTime()) ? '' : fecha.toISOString().slice(0, 10);
+};
+
+const obtenerIdentidadDefinitiva = (programacion, declarada, paciente) => ({
+  nombreCliente: paciente.nombreCliente,
+  apePatCliente: paciente.apePatCliente,
+  apeMatCliente: paciente.apeMatCliente || '',
+  sexoCliente: paciente.sexoCliente || declarada.sexoCliente || programacion.sexoCliente || null,
+  fechaNacimiento: paciente.fechaNacimiento || declarada.fechaNacimiento || programacion.fechaNacimiento || null,
+});
+
+const crearCambiosIdentidad = (programacion, identidad) => {
+  const cambios = [];
+  for (const campo of ['nombreCliente', 'apePatCliente', 'apeMatCliente', 'sexoCliente', 'fechaNacimiento']) {
+    const anterior = campo === 'fechaNacimiento' ? fechaISO(programacion[campo]) : String(programacion[campo] ?? '').trim();
+    const nuevo = campo === 'fechaNacimiento' ? fechaISO(identidad[campo]) : String(identidad[campo] ?? '').trim();
+    if (anterior !== nuevo) cambios.push({ campo, valorAnterior: anterior || null, valorNuevo: nuevo || null });
+  }
+  return cambios;
 };
 
 // ====== Resolver el nombre real del responsable ======
@@ -110,8 +134,9 @@ const regularizarTemporalConHCExistente = async (req, res = response) => {
         errorNegocio('HC_PROVISIONAL', 'La HC provisional debe conciliarse antes de utilizarse en esta operación.');
       }
 
-      // ====== Revalidar en MongoDB el documento: no confiar en la previsualización ======
-      const propuesta = { ...programacion.toObject(), ...documento };
+      // ====== Revalidar con la identidad ingresada, no con la programación inicial ======
+      const identidadDeclarada = normalizarIdentidadPropuesta(req.body);
+      const propuesta = { ...identidadDeclarada, ...documento };
       const coincidencias = await buscarCoincidenciasVinculacion(
         Paciente, propuesta, compararIdentidad, session,
       );
@@ -119,21 +144,15 @@ const regularizarTemporalConHCExistente = async (req, res = response) => {
       if (coincidenciasDocumento.length !== 1 || coincidenciasDocumento[0] !== String(paciente._id)) {
         errorNegocio('DOCUMENTO_AMBIGUO', 'El documento no identifica de manera única a la HC seleccionada.');
       }
-      const historicos = await Paciente.find({ historialDocumentos: { $elemMatch: { $or: [
-        { tipoDoc: documento.tipoDoc, nroDoc: documento.nroDoc },
-        { tipoDocNuevo: documento.tipoDoc, nroDocNuevo: documento.nroDoc },
-      ] } } }).select('_id').session(session).lean();
-      if (historicos.some(p => String(p._id) !== String(paciente._id))) {
-        errorNegocio('CONFLICTO_HISTORIAL_DOCUMENTAL', 'El documento también figura en el historial de otra HC. Requiere revisión autorizada.');
-      }
-
-      const identidad = compararIdentidad(programacion, paciente);
-      if (identidad.incompatible) {
-        errorNegocio('IDENTIDAD_INCOMPATIBLE', 'No coinciden nombres ni apellido paterno. No se permite esta vinculación.');
-      }
-      if (!identidad.coincide && req.body?.confirmacionDiscrepancia !== true) {
+      // ====== La identidad del maestro prevalece; las diferencias no impiden vincular ======
+      const identidadOriginal = compararIdentidad(programacion, paciente);
+      const identidadConsultada = compararIdentidad(identidadDeclarada, paciente);
+      const tieneDiscrepancias = !identidadOriginal.coincide || !identidadConsultada.coincide;
+      if (tieneDiscrepancias && req.body?.confirmacionDiscrepancia !== true) {
         errorNegocio('DISCREPANCIA_NO_CONFIRMADA', 'Confirme expresamente las diferencias de identidad antes de vincular.');
       }
+      const identidadDefinitiva = obtenerIdentidadDefinitiva(programacion, identidadDeclarada, paciente);
+      const cambiosIdentidad = crearCambiosIdentidad(programacion, identidadDefinitiva);
 
       const liberados = await ResultadoLaboratorio.exists({
         solicitudAtencionId: { $in: solicitudes.map(s => s._id) }, estadoResultado: 'LIBERADO',
@@ -148,6 +167,8 @@ const regularizarTemporalConHCExistente = async (req, res = response) => {
       programacion.nroDoc = documento.nroDoc;
       programacion.pacienteId = paciente._id;
       programacion.hc = paciente.hc;
+      // ====== Actualizar datos transaccionales desde el maestro ======
+      Object.assign(programacion, identidadDefinitiva);
       programacion.identidadTemporalActiva = false;
       programacion.fechaRegularizacionIdentidad = ahora;
       programacion.updatedBy = uid;
@@ -161,8 +182,16 @@ const regularizarTemporalConHCExistente = async (req, res = response) => {
         tipoDocNuevo: documento.tipoDoc, nroDocNuevo: documento.nroDoc,
         fecha: ahora, ejecutadoPor: uid, usuario: nombreUsuario, nombreCompletoUsuario,
         origenDocumento: 'REGULARIZACION_TEMPORAL',
-        tipoResolucion: identidad.coincide ? 'COINCIDENCIA_EXACTA' : 'DISCREPANCIA_CONFIRMADA',
+        tipoResolucion: tieneDiscrepancias ? 'DISCREPANCIA_CONFIRMADA' : 'COINCIDENCIA_EXACTA',
         motivoDecision: motivoDecision || null,
+        identidadDeclarada: {
+          nombreCliente: identidadDeclarada.nombreCliente,
+          apePatCliente: identidadDeclarada.apePatCliente,
+          apeMatCliente: identidadDeclarada.apeMatCliente,
+          sexoCliente: identidadDeclarada.sexoCliente,
+          fechaNacimiento: identidadDeclarada.fechaNacimiento,
+        },
+        cambiosIdentidad,
       });
       await programacion.save({ session });
 
@@ -172,6 +201,11 @@ const regularizarTemporalConHCExistente = async (req, res = response) => {
         solicitud.hc = paciente.hc;
         solicitud.tipoDoc = documento.tipoDoc;
         solicitud.nroDoc = documento.nroDoc;
+        solicitud.nombreCliente = identidadDefinitiva.nombreCliente;
+        solicitud.apePatCliente = identidadDefinitiva.apePatCliente;
+        solicitud.apeMatCliente = identidadDefinitiva.apeMatCliente;
+        solicitud.sexoPaciente = identidadDefinitiva.sexoCliente;
+        solicitud.fechaNacimientoPaciente = identidadDefinitiva.fechaNacimiento;
         solicitud.updatedBy = uid;
         solicitud.usuarioActualizacion = nombreUsuario;
         solicitud.fechaActualizacion = ahora;
@@ -182,7 +216,10 @@ const regularizarTemporalConHCExistente = async (req, res = response) => {
         msg: 'Identidad regularizada con HC existente. Se conservaron solicitudes, resultados y fotografías.',
         programacion: { _id: String(programacion._id), codProgramacion: programacion.codProgramacion,
           identidadTemporalActiva: false, tipoDoc: documento.tipoDoc, nroDoc: documento.nroDoc,
-          pacienteId: String(paciente._id), hc: paciente.hc },
+          pacienteId: String(paciente._id), hc: paciente.hc,
+          nombreCliente: identidadDefinitiva.nombreCliente,
+          apePatCliente: identidadDefinitiva.apePatCliente,
+          apeMatCliente: identidadDefinitiva.apeMatCliente },
         solicitudesActualizadas: solicitudes.map(s => ({ _id: String(s._id), codSolicitud: s.codSolicitud,
           codigoLaboratorio: s.codigoLaboratorio, identidadAtencion: s.identidadAtencion })),
         fotografiasSinModificar: true,
