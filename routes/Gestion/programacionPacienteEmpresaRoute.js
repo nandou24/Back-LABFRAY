@@ -18,6 +18,9 @@ const { regularizarTemporalConHCNueva } = require('../../controllers/Gestion/reg
 const { validarImportacionProgramaciones } = require('../../controllers/Gestion/validacionMasivaProgramacionController');
 const { registrarImportacionProgramaciones } = require('../../controllers/Gestion/registroMasivoProgramacionController');
 const { verificarIdentidadesImportacion } = require('../../controllers/Gestion/verificacionMasivaIdentidadEmpresaController');
+const { registrarDecisionesImportacion } = require('../../controllers/Gestion/decisionesMasivasIdentidadEmpresaController');
+const { vincularHCConformesImportacion } = require('../../controllers/Gestion/vinculacionMasivaHCImportacionController');
+const { desvincularHCImportacion } = require('../../controllers/Gestion/desvinculacionHCImportacionController');
 const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
 
@@ -92,6 +95,12 @@ router.post('/validar-importacion', validarJWT, validarImportacionProgramaciones
 router.post('/registrar-importacion', validarJWT, registrarImportacionProgramaciones);
 // ====== PE.6.5E.3: consultar coincidencias de un lote registrado ======
 router.post('/verificar-identidades-importacion', validarJWT, verificarIdentidadesImportacion);
+// ====== PE.6.5E.4: guardar decisiones auditadas, sin vincular HC ======
+router.post('/decisiones-identidad-importacion', validarJWT, registrarDecisionesImportacion);
+// ====== PE.6.5E.4.2: primera vinculación masiva de HC conformes ======
+router.post('/vincular-hc-conformes-importacion', validarJWT, vincularHCConformesImportacion);
+// ====== PE.6.5E.4.2B: desvincular HC solo antes de iniciar atención ======
+router.post('/desvincular-hc-importacion', validarJWT, desvincularHCImportacion);
 
 // ====== B.2.1A Verificación documental temporal (solo lectura) ======
 router.post("/:id/previsualizar-regularizacion", [

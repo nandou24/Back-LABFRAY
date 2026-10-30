@@ -55,6 +55,50 @@ const PlazoResultadosProgramacionSchema = new Schema(
   { _id: false },
 );
 
+// ====== Auditoría de verificación masiva de identidad ======
+const DecisionesIdentidadImportacion = [
+  "CONFORME", "CONFIRMAR_MAESTRO", "DESCARTAR_CANDIDATO",
+  "PENDIENTE", "SIN_COINCIDENCIA_REVISADA", "DOCUMENTO_PENDIENTE",
+];
+
+const IdentidadVerificadaImportacionSchema = new Schema({
+  tipoDoc: { type: String, default: null },
+  nroDoc: { type: String, default: null },
+  apePatCliente: { type: String, default: null },
+  apeMatCliente: { type: String, default: null },
+  nombreCliente: { type: String, default: null },
+}, { _id: false });
+
+const RevisionIdentidadImportacionSchema = new Schema({
+  decision: { type: String, enum: DecisionesIdentidadImportacion, required: true },
+  pacienteIdCandidato: { type: Schema.Types.ObjectId, default: null },
+  hcCandidata: { type: String, default: null },
+  categoriaConsulta: { type: String, default: null },
+  huellaConsulta: { type: String, required: true },
+  fecha: { type: Date, required: true },
+  ejecutadoPor: { type: String, required: true },
+  usuario: { type: String, default: null },
+  nombreCompletoUsuario: { type: String, default: null },
+  motivo: { type: String, trim: true, maxlength: 300, default: null },
+}, { _id: false });
+
+const EventoVerificacionIdentidadImportacionSchema = new Schema({
+  decision: { type: String, enum: DecisionesIdentidadImportacion, required: true },
+  categoriaConsulta: { type: String, default: null },
+  pacienteIdCandidato: { type: Schema.Types.ObjectId, default: null },
+  hcCandidata: { type: String, default: null },
+  documentoCoincidente: { type: Boolean, default: false },
+  huellaConsulta: { type: String, required: true },
+  motivo: { type: String, trim: true, maxlength: 300, default: null },
+  confirmacionDiferencias: { type: Boolean, default: false },
+  identidadProgramacion: { type: IdentidadVerificadaImportacionSchema, default: () => ({}) },
+  identidadCandidato: { type: IdentidadVerificadaImportacionSchema, default: () => ({}) },
+  fecha: { type: Date, required: true },
+  ejecutadoPor: { type: String, required: true },
+  usuario: { type: String, default: null },
+  nombreCompletoUsuario: { type: String, default: null },
+}, { _id: false });
+
 const ProgramacionPacienteEmpresaSchema = new Schema(
   {
     codProgramacion: { type: String, required: true, unique: true, trim: true },
@@ -204,6 +248,11 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
     origenBloqueoFotografia: { type: String, default: null },
     usuarioBloqueoFotografia: { type: String, default: null },
     observaciones: { type: String, trim: true },
+    // ====== Decisión actual y eventos auditables de identidad importada ======
+    revisionIdentidadImportacion: { type: RevisionIdentidadImportacionSchema, default: null },
+    historialVerificacionIdentidadImportacion: {
+      type: [EventoVerificacionIdentidadImportacionSchema], default: [],
+    },
     // ====== Trazabilidad e idempotencia de importación Excel ======
     importacionId: { type: String, trim: true, default: null },
     filaExcelImportacion: { type: Number, default: null },
