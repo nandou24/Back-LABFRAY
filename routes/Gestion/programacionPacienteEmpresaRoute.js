@@ -17,6 +17,7 @@ const { regularizarTemporalConHCExistente } = require("../../controllers/Gestion
 const { regularizarTemporalConHCNueva } = require('../../controllers/Gestion/regularizarTemporalHCNuevaController');
 const { validarImportacionProgramaciones } = require('../../controllers/Gestion/validacionMasivaProgramacionController');
 const { registrarImportacionProgramaciones } = require('../../controllers/Gestion/registroMasivoProgramacionController');
+const { verificarIdentidadesImportacion } = require('../../controllers/Gestion/verificacionMasivaIdentidadEmpresaController');
 const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
 
@@ -89,6 +90,8 @@ router.get("/", validarJWT, listarProgramaciones);
 // ====== Importación masiva: validar antes de registrar ======
 router.post('/validar-importacion', validarJWT, validarImportacionProgramaciones);
 router.post('/registrar-importacion', validarJWT, registrarImportacionProgramaciones);
+// ====== PE.6.5E.3: consultar coincidencias de un lote registrado ======
+router.post('/verificar-identidades-importacion', validarJWT, verificarIdentidadesImportacion);
 
 // ====== B.2.1A Verificación documental temporal (solo lectura) ======
 router.post("/:id/previsualizar-regularizacion", [
