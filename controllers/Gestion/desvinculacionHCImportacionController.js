@@ -50,15 +50,41 @@ const desvincularHCImportacion = async (req, res) => {
       return res.status(409).json({ ok: false,
         msg: 'La HC vinculada cambió. Vuelve a consultar la programación.' });
     }
-    if (p.estadoProgramacion !== 'PROGRAMADO' || p.fechaInicioAtencion) {
+    if (p.estadoProgramacion !== 'PROGRAMADO') {
       return res.status(409).json({ ok: false,
-        msg: 'Solo se permite desvincular antes del inicio de atención.' });
+        msg: `La programación está en estado ${texto(p.estadoProgramacion) || 'SIN ESTADO'}. Solo se permite desvincular en PROGRAMADO.` });
+    }
+    if (p.fechaInicioAtencion) {
+      return res.status(409).json({ ok: false,
+        msg: 'La programación tiene una fecha de inicio de atención registrada. No se puede desvincular.' });
     }
     if (await Solicitud.exists({ programacionEmpresaId: p._id })) {
       return res.status(409).json({ ok: false,
         msg: 'Ya existen solicitudes asociadas. No se puede desvincular desde este módulo.' });
     }
 
+    // ====== Restaurar los nombres importados cuando fueron reemplazados por los del maestro ======
+    const ultimoVinculo = [...(p.historialVinculaciones ?? [])].reverse().find((v) =>
+      v.tipo === 'VINCULACION_INICIAL' && String(v.pacienteIdNuevo) === String(p.pacienteId) &&
+      v.hcNueva === p.hc);
+    const original = ultimoVinculo?.tipoResolucion === 'DISCREPANCIA_DOCUMENTO_COINCIDENTE'
+      ? ultimoVinculo.identidadDeclarada : null;
+    const restaurar = original?.nombreCliente && original?.apePatCliente ? {
+      nombreCliente: original.nombreCliente,
+      apePatCliente: original.apePatCliente,
+      apeMatCliente: original.apeMatCliente ?? '',
+      sexoCliente: original.sexoCliente ?? null,
+      fechaNacimiento: original.fechaNacimiento ?? null,
+    } : {};
+    const cambiosRestaurados = [];
+    for (const campo of ['nombreCliente', 'apePatCliente', 'apeMatCliente', 'sexoCliente', 'fechaNacimiento']) {
+      if (!Object.prototype.hasOwnProperty.call(restaurar, campo)) continue;
+      const anterior = campo === 'fechaNacimiento' && p[campo]
+        ? new Date(p[campo]).toISOString().slice(0, 10) : texto(p[campo]);
+      const nuevo = campo === 'fechaNacimiento' && restaurar[campo]
+        ? new Date(restaurar[campo]).toISOString().slice(0, 10) : texto(restaurar[campo]);
+      if (anterior !== nuevo) cambiosRestaurados.push({ campo, valorAnterior: anterior || null, valorNuevo: nuevo || null });
+    }
     const fecha = new Date();
     const nombreCompletoUsuario = await obtenerNombreOperador(req.user);
     const evento = {
@@ -78,6 +104,7 @@ const desvincularHCImportacion = async (req, res) => {
         fechaNacimiento: p.fechaNacimiento
           ? new Date(p.fechaNacimiento).toISOString().slice(0, 10) : null,
       },
+      cambiosIdentidad: cambiosRestaurados,
     };
 
     // ====== Compare-and-set para no desvincular una programación modificada ======
@@ -89,6 +116,7 @@ const desvincularHCImportacion = async (req, res) => {
     }, {
       $set: {
         pacienteId: null, hc: null, revisionIdentidadImportacion: null,
+        ...restaurar,
         updatedBy: uid, usuarioActualizacion: nombreUsuario, fechaActualizacion: fecha,
       },
       $push: { historialVinculaciones: evento },

@@ -21,6 +21,7 @@ const { verificarIdentidadesImportacion } = require('../../controllers/Gestion/v
 const { registrarDecisionesImportacion } = require('../../controllers/Gestion/decisionesMasivasIdentidadEmpresaController');
 const { vincularHCConformesImportacion } = require('../../controllers/Gestion/vinculacionMasivaHCImportacionController');
 const { desvincularHCImportacion } = require('../../controllers/Gestion/desvinculacionHCImportacionController');
+const { vincularHCRevisadaImportacion } = require('../../controllers/Gestion/vinculacionHCRevisadaImportacionController');
 const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
 
@@ -101,6 +102,8 @@ router.post('/decisiones-identidad-importacion', validarJWT, registrarDecisiones
 router.post('/vincular-hc-conformes-importacion', validarJWT, vincularHCConformesImportacion);
 // ====== PE.6.5E.4.2B: desvincular HC solo antes de iniciar atención ======
 router.post('/desvincular-hc-importacion', validarJWT, desvincularHCImportacion);
+// ====== Vinculación individual con identidad verificada y mismo documento ======
+router.post('/vincular-hc-revisada-importacion', validarJWT, vincularHCRevisadaImportacion);
 
 // ====== B.2.1A Verificación documental temporal (solo lectura) ======
 router.post("/:id/previsualizar-regularizacion", [
