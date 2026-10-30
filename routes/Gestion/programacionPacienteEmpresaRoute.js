@@ -15,6 +15,8 @@ const {
 const { previsualizarRegularizacionTemporal } = require("../../controllers/Gestion/previsualizarRegularizacionTemporalController");
 const { regularizarTemporalConHCExistente } = require("../../controllers/Gestion/regularizarTemporalHCExistenteController");
 const { regularizarTemporalConHCNueva } = require('../../controllers/Gestion/regularizarTemporalHCNuevaController');
+const { validarImportacionProgramaciones } = require('../../controllers/Gestion/validacionMasivaProgramacionController');
+const { registrarImportacionProgramaciones } = require('../../controllers/Gestion/registroMasivoProgramacionController');
 const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
 
@@ -84,6 +86,10 @@ const validarProgramacion = [
 
 router.post("/", [validarJWT, ...validarProgramacion], crearProgramacion);
 router.get("/", validarJWT, listarProgramaciones);
+// ====== Importación masiva: validar antes de registrar ======
+router.post('/validar-importacion', validarJWT, validarImportacionProgramaciones);
+router.post('/registrar-importacion', validarJWT, registrarImportacionProgramaciones);
+
 // ====== B.2.1A Verificación documental temporal (solo lectura) ======
 router.post("/:id/previsualizar-regularizacion", [
   validarJWT, check("id", "ID inválido").isMongoId(), validarCampos,

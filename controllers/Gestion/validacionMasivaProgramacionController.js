@@ -1,13 +1,10 @@
 const mongoose = require('mongoose');
 const Empresa = require('../../models/Mantenimiento/Empresa');
-const Paciente = require('../../models/Mantenimiento/Paciente');
 const Programacion = require('../../models/Gestion/programacionPacienteEmpresa');
 
 // ====== Normalizar datos de identificación ======
 const texto = (v) => String(v ?? '').trim();
 const clave = (v) => texto(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').toUpperCase();
-const regexExacta = (v) => new RegExp(`^\\s*${texto(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\s*$`, 'i');
-const coincidenNombres = (a, b) => ['apePatCliente', 'apeMatCliente', 'nombreCliente'].every((campo) => clave(a[campo]) === clave(b[campo]));
 const fechaISO = (v) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(texto(v))) return null;
   const fecha = new Date(`${v}T00:00:00.000Z`);
@@ -79,24 +76,7 @@ const analizarFilasImportacion = async (entradas, session = null) => {
     const empresaPorId = new Map(empresas.map((e) => [String(e._id), e]));
     const empresaPorRuc = new Map(empresas.map((e) => [e.ruc, e]));
 
-    const docs = [...new Map(filas.filter((f) => f.nroDoc && documentoValido(f.tipoDoc, f.nroDoc))
-      .map((f) => [`${f.tipoDoc}:${f.nroDoc}`, { tipoDoc: f.tipoDoc, nroDoc: f.nroDoc }])).values()];
-    const sinDocumento = filas.filter((f) => !f.nroDoc && f.nombreCliente && f.apePatCliente);
-    const filtrosNombre = [...new Map(sinDocumento.map((f) => [
-      `${clave(f.apePatCliente)}|${clave(f.nombreCliente)}`,
-      { apePatCliente: regexExacta(f.apePatCliente), nombreCliente: regexExacta(f.nombreCliente) },
-    ])).values()];
-    const pacientesPorDoc = await consultarPorBloques(Paciente, docs,
-      '_id hc estadoIdentificacion tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sexoCliente fechaNacimiento', session);
-    const pacientesPorNombre = await consultarPorBloques(Paciente, filtrosNombre,
-      '_id hc estadoIdentificacion tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sexoCliente fechaNacimiento', session);
-    const mapaDocumento = new Map();
-    pacientesPorDoc.forEach((p) => {
-      const key = `${clave(p.tipoDoc)}:${clave(p.nroDoc)}`;
-      if (!mapaDocumento.has(key)) mapaDocumento.set(key, []);
-      mapaDocumento.get(key).push(p);
-    });
-
+    // ====== La consulta de identidad se realizará después del registro (PE.6.5E.3) ======
     const fechaPorFila = new Map(filas.map((f) => [f.filaExcel, fechaISO(f.fechaProgramada)]));
     const contextos = [...new Map(filas.filter((f) =>
       mongoose.isValidObjectId(f.empresaId) && mongoose.isValidObjectId(f.protocoloId) && fechaPorFila.get(f.filaExcel),
@@ -108,7 +88,7 @@ const analizarFilasImportacion = async (entradas, session = null) => {
       } },
     ])).values()];
     const existentes = await consultarPorBloques(Programacion, contextos,
-      '_id codProgramacion empresaId protocoloId fechaProgramada pacienteId tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente estadoProgramacion', session);
+      '_id codProgramacion empresaId protocoloId fechaProgramada tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente estadoProgramacion', session);
     const programacionesPorContexto = new Map();
     existentes.forEach((p) => {
       const key = `${p.empresaId}:${p.protocoloId}:${fechaCalendario(p.fechaProgramada)}`;
@@ -121,10 +101,10 @@ const analizarFilasImportacion = async (entradas, session = null) => {
       const errores = [];
       const advertencias = [];
       const fecha = fechaPorFila.get(f.filaExcel);
-      let paciente = { estado: 'NUEVO', hc: null, pacienteId: null, nombreCompleto: null };
+      const paciente = { estado: 'PENDIENTE_VERIFICACION', hc: null, pacienteId: null, nombreCompleto: null };
       let empresa = null;
       let protocolo = null;
-      if (!fecha) errores.push('Fecha de programación inválida; usa dd/MM/yyyy.');
+      if (!fecha) errores.push('Fecha de programación inválida; revisa la fecha seleccionada.');
       if (f.fechaNacimiento && !fechaISO(f.fechaNacimiento)) errores.push('Fecha de nacimiento inválida.');
       if (f.sexoCliente && !['Masculino', 'Femenino'].includes(f.sexoCliente)) errores.push('Sexo inválido.');
       if (f.observaciones.length > 200) errores.push('Observaciones: máximo 200 caracteres.');
@@ -167,47 +147,13 @@ const analizarFilasImportacion = async (entradas, session = null) => {
           }
         }
       }
-      if (f.nroDoc && documentoValido(f.tipoDoc, f.nroDoc)) {
-        const encontrados = mapaDocumento.get(`${f.tipoDoc}:${f.nroDoc}`) ?? [];
-        if (encontrados.length > 1) {
-          paciente = { estado: 'DUPLICADO_DOCUMENTO', hc: null, pacienteId: null, nombreCompleto: null };
-          errores.push('Más de una HC usa ese documento. Requiere revisión de pacientes.');
-        } else if (encontrados.length === 1) {
-          const p = encontrados[0];
-          paciente = { estado: coincidenNombres(f, p) ? 'HC_COINCIDE' : 'IDENTIDAD_DIFERENTE',
-            hc: p.hc ?? null, pacienteId: String(p._id),
-            nombreCompleto: [p.apePatCliente, p.apeMatCliente, p.nombreCliente].filter(Boolean).join(' '),
-            // ====== Datos maestros para cotejo asistido, solo con HC y documento único ======
-            datosMaestros: p.hc ? {
-              tipoDoc: p.tipoDoc ?? '', nroDoc: p.nroDoc ?? '',
-              apePatCliente: p.apePatCliente ?? '', apeMatCliente: p.apeMatCliente ?? '',
-              nombreCliente: p.nombreCliente ?? '',
-              sexoCliente: p.sexoCliente ?? '',
-              fechaNacimiento: fechaCalendario(p.fechaNacimiento) ?? '',
-            } : null };
-          if (!p.hc) errores.push('El paciente encontrado no tiene historia clínica.');
-          if (p.hc && f.sexoCliente && p.sexoCliente && clave(f.sexoCliente) !== clave(p.sexoCliente)) {
-            advertencias.push('El sexo informado difiere del registrado en la HC; verificar.');
-          }
-          if (p.hc && f.fechaNacimiento && p.fechaNacimiento &&
-              f.fechaNacimiento !== fechaCalendario(p.fechaNacimiento)) {
-            advertencias.push('La fecha de nacimiento difiere de la HC; verificar.');
-          }
-          if (paciente.estado === 'IDENTIDAD_DIFERENTE') errores.push(`El DNI corresponde a HC ${p.hc || '(sin HC)'}, pero los nombres no coinciden.`);
-        }
-      } else if (!f.nroDoc && f.nombreCliente && f.apePatCliente) {
-        const candidatos = pacientesPorNombre.filter((p) => coincidenNombres(f, p));
-        paciente = { estado: candidatos.length ? 'COINCIDENCIA_NOMBRE' : 'SIN_DOCUMENTO', hc: null, pacienteId: null, nombreCompleto: null };
-        if (candidatos.length) advertencias.push(`Hay ${candidatos.length} posible(s) HC con los mismos nombres. Revisar antes de asociar.`);
-        else advertencias.push('Documento pendiente: confirmar identidad antes del registro.');
-      }
+      // ====== La ausencia de documento o diferencias nominales no bloquean la programación ======
       if (fecha && empresa && protocolo && f.nombreCliente && f.apePatCliente) {
         const key = `${f.empresaId}:${f.protocoloId}:${f.fechaProgramada}`;
         const candidatas = programacionesPorContexto.get(key) ?? [];
         const duplicada = candidatas.find((p) => {
-          if (paciente.pacienteId && String(p.pacienteId ?? '') === paciente.pacienteId) return true;
           if (f.nroDoc && clave(p.tipoDoc) === f.tipoDoc && clave(p.nroDoc) === f.nroDoc) return true;
-          return !f.nroDoc && !p.nroDoc && coincidenNombres(f, p);
+          return !f.nroDoc && !p.nroDoc && ['apePatCliente', 'apeMatCliente', 'nombreCliente'].every((c) => clave(f[c]) === clave(p[c]));
         });
         if (duplicada) errores.push(`Ya existe la programación ${duplicada.codProgramacion} (${duplicada.estadoProgramacion}).`);
         const claveArchivo = `${key}:${identidadFila(f)}`;

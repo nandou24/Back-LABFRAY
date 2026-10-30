@@ -51,7 +51,7 @@ const registrarImportacionProgramaciones = async (req, res) => {
         }
 
         if (pendientes.length) {
-          // ====== Revalidar y bloquear cambios posteriores a la previsualización ======
+          // ====== Revalidar estructura, catálogos y duplicados antes de guardar ======
           const verificacion = await analizarFilasImportacion(pendientes, session);
           const observadas = [];
           const porFila = new Map(pendientes.map((f) => [f.filaExcel, f]));
@@ -61,9 +61,6 @@ const registrarImportacionProgramaciones = async (req, res) => {
               ? fila.advertenciasOriginales.filter((m) => typeof m === 'string').map((m) => m.slice(0, 180)).slice(0, 12)
               : [];
             const errores = [...resultado.errores];
-            if (resultado.paciente.estado === 'COINCIDENCIA_NOMBRE') {
-              errores.push('Existe una posible HC por nombres. Debe resolver la identidad antes de importar.');
-            }
             if ((resultado.advertencias.length || adicionales.length) && fila.confirmada !== true) {
               errores.push('Confirma las observaciones de esta fila antes de importarla.');
             }
@@ -105,7 +102,6 @@ const registrarImportacionProgramaciones = async (req, res) => {
             const advertenciasOriginales = Array.isArray(fila.advertenciasOriginales) ? fila.advertenciasOriginales : [];
             const advertencias = [...new Set([...resultado.advertencias, ...advertenciasOriginales])].map((a) => texto(a).slice(0, 180)).slice(0, 18);
             const documento = texto(datos.nroDoc).toUpperCase();
-            const pacienteVinculado = resultado.paciente.estado === 'HC_COINCIDE';
             nuevos.push({
               codProgramacion: `PPE-${anio}-${String(correlativo++).padStart(4, '0')}`,
               empresaId: empresa._id,
@@ -127,8 +123,8 @@ const registrarImportacionProgramaciones = async (req, res) => {
               apeMatCliente: texto(datos.apeMatCliente),
               fechaNacimiento: datos.fechaNacimiento ? fechaSoloDia(datos.fechaNacimiento) : null,
               sexoCliente: datos.sexoCliente || null,
-              pacienteId: pacienteVinculado ? resultado.paciente.pacienteId : null,
-              hc: pacienteVinculado ? resultado.paciente.hc : null,
+              pacienteId: null,
+              hc: null,
               fechaProgramada: fechaProgramacionPeru(datos.fechaProgramada),
               sede: datos.sede,
               tipoEvaluacion: datos.tipoEvaluacion,
@@ -136,6 +132,8 @@ const registrarImportacionProgramaciones = async (req, res) => {
               prioridad: datos.prioridad || 'Normal',
               observaciones: texto(datos.observaciones),
               estadoProgramacion: 'PROGRAMADO',
+              // ====== No se crea ni vincula HC durante la importación ======
+              identidadTemporalActiva: false,
               origenRegistro: 'IMPORTACION_EXCEL',
               importacionId, filaExcelImportacion: fila.filaExcel, huellaImportacion: huellaFila(fila),
               revisionImportacion: {
