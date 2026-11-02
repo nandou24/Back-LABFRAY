@@ -2,6 +2,7 @@ const { Router } = require("express");
 const { check } = require("express-validator");
 const {
   crearProgramacion,
+  consultarDocumentoProgramacion,
   listarProgramaciones,
   obtenerProgramacion,
   actualizarProgramacion,
@@ -91,6 +92,8 @@ const validarProgramacion = [
 
 router.post("/", [validarJWT, ...validarProgramacion], crearProgramacion);
 router.get("/", validarJWT, listarProgramaciones);
+// ====== Consulta manual por Enter antes de registrar programación ======
+router.get("/consultar-documento", validarJWT, consultarDocumentoProgramacion);
 // ====== Importación masiva: validar antes de registrar ======
 router.post('/validar-importacion', validarJWT, validarImportacionProgramaciones);
 router.post('/registrar-importacion', validarJWT, registrarImportacionProgramaciones);

@@ -184,6 +184,53 @@ const cambiaIdentidad = (antes, propuesta) => camposIdentidadProgramacion.some((
   return String(previo ?? "").trim().toUpperCase() !== String(nuevo ?? "").trim().toUpperCase();
 });
 
+// ====== Consultar DNI del maestro sin registrar ni vincular ======
+const consultarDocumentoProgramacion = async (req, res = response) => {
+  try {
+    const documento = normalizarDocumentoProgramacion(req.query);
+    if (!documento.tipoDoc || !documento.nroDoc) {
+      return res.status(400).json({ ok: false, codigo: 'DOCUMENTO_INVALIDO',
+        msg: 'Ingresa un documento válido antes de consultar.' });
+    }
+    const encontrados = await Paciente.find({
+      tipoDoc: new RegExp(`^${documento.tipoDoc}$`, 'i'),
+      nroDoc: new RegExp(`^${documento.nroDoc}$`, 'i'),
+    }).select('_id hc tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sexoCliente fechaNacimiento phones estadoIdentificacion tipoHC estadoConciliacion')
+      .limit(2).lean();
+
+    if (!encontrados.length) {
+      return res.json({ ok: true, estado: 'DISPONIBLE',
+        msg: 'Documento no registrado. Puedes completar la programación sin HC. Se creará al iniciar atención, previa verificación.' });
+    }
+    if (encontrados.length !== 1) {
+      return res.json({ ok: true, estado: 'BLOQUEADO',
+        msg: 'Existen varios pacientes con este documento. Corrige el conflicto antes de programar.' });
+    }
+    const paciente = encontrados[0];
+    if (!paciente.hc || !paciente.tipoDoc || !paciente.nroDoc ||
+        paciente.estadoIdentificacion === 'PENDIENTE' ||
+        (paciente.tipoHC === 'PROVISIONAL' && paciente.estadoConciliacion !== 'CONCILIADA')) {
+      return res.json({ ok: true, estado: 'BLOQUEADO',
+        msg: 'El documento existe, pero la HC no permite la vinculación. Corrige el caso antes de programar.' });
+    }
+    return res.json({ ok: true, estado: 'ENCONTRADO', paciente: {
+      pacienteId: String(paciente._id), hc: paciente.hc,
+      tipoDoc: paciente.tipoDoc, nroDoc: paciente.nroDoc,
+      nombreCliente: paciente.nombreCliente, apePatCliente: paciente.apePatCliente,
+      apeMatCliente: paciente.apeMatCliente ?? '',
+      sexoCliente: paciente.sexoCliente ?? null,
+      fechaNacimiento: paciente.fechaNacimiento ?? null,
+      phones: Array.isArray(paciente.phones) ? paciente.phones.map(item => ({
+        phoneNumber: item.phoneNumber ?? '', descriptionPhone: item.descriptionPhone ?? '',
+      })) : [],
+    } });
+  } catch (error) {
+    console.error('Error al consultar documento de programación:', error);
+    return res.status(500).json({ ok: false, codigo: 'ERROR_CONSULTA_DOCUMENTO',
+      msg: 'No fue posible consultar el documento. Intenta de nuevo.' });
+  }
+};
+
 const crearProgramacion = async (req, res = response) => {
   try {
     const { empresaId, protocoloId } = req.body;
@@ -231,6 +278,18 @@ const crearProgramacion = async (req, res = response) => {
       if (mismoDNI.length !== 1 || String(mismoDNI[0]._id) !== String(pacienteMaestro._id)) {
         return res.status(409).json({ ok: false, codigo: 'DOCUMENTO_AMBIGUO',
           msg: 'El documento no identifica una única HC en el maestro. Resuelve el conflicto antes de vincular.' });
+      }
+    }
+
+    // ====== Revalidar DNI manual al guardar y evitar duplicados de identidad ======
+    if (!pacienteIdSeleccionado && documento.tipoDoc && documento.nroDoc) {
+      const existeEnMaestro = await Paciente.exists({
+        tipoDoc: new RegExp(`^${documento.tipoDoc}$`, 'i'),
+        nroDoc: new RegExp(`^${documento.nroDoc}$`, 'i'),
+      });
+      if (existeEnMaestro) {
+        return res.status(409).json({ ok: false, codigo: 'DOCUMENTO_YA_REGISTRADO',
+          msg: 'Este documento ya corresponde a un paciente registrado. Confirma la identidad desde Buscar o corrige el número.' });
       }
     }
 
@@ -1607,6 +1666,7 @@ const obtenerHistorialVinculaciones = async (req, res = response) => {
 };
 
 module.exports = {
+  consultarDocumentoProgramacion,
   consultarCoincidenciasVinculacion,
   vincularPacienteInicial,
   registrarRevisionCoincidencia,
