@@ -196,7 +196,47 @@ const crearProgramacion = async (req, res = response) => {
     });
 
     const documento = normalizarDocumentoProgramacion(req.body);
-    const datosIdentidad = { ...req.body, ...documento };
+    const pacienteIdSeleccionado = String(req.body.pacienteId ?? '').trim();
+    let pacienteMaestro = null;
+
+    // ====== Validar paciente seleccionado expresamente en la búsqueda ======
+    if (pacienteIdSeleccionado) {
+      if (!mongoose.isValidObjectId(pacienteIdSeleccionado)) {
+        return res.status(400).json({ ok: false, codigo: 'PACIENTE_INVALIDO',
+          msg: 'El paciente seleccionado no es válido. Vuelve a buscarlo.' });
+      }
+
+      pacienteMaestro = await Paciente.findById(pacienteIdSeleccionado).lean();
+      if (!pacienteMaestro?.hc || !pacienteMaestro.tipoDoc || !pacienteMaestro.nroDoc ||
+          pacienteMaestro.estadoIdentificacion === 'PENDIENTE' ||
+          (pacienteMaestro.tipoHC === 'PROVISIONAL' && pacienteMaestro.estadoConciliacion !== 'CONCILIADA')) {
+        return res.status(409).json({ ok: false, codigo: 'HC_NO_HABILITADA',
+          msg: 'La HC seleccionada no tiene identidad definitiva. Continúa mediante ingreso manual sin vincularla.' });
+      }
+
+      const mismoDocumento = documento.tipoDoc === String(pacienteMaestro.tipoDoc).trim().toUpperCase() &&
+        documento.nroDoc === String(pacienteMaestro.nroDoc).trim().toUpperCase();
+      const mismosNombres = validarCoincidenciaIdentidad(req.body, pacienteMaestro).coincide;
+      if (!mismoDocumento || !mismosNombres ||
+          (req.body.hc && String(req.body.hc) !== String(pacienteMaestro.hc))) {
+        return res.status(409).json({ ok: false, codigo: 'IDENTIDAD_NO_COINCIDE',
+          msg: 'Los datos de la programación cambiaron o no coinciden con la HC seleccionada. Vuelve a buscar al paciente.' });
+      }
+
+      // ====== No vincular automáticamente un documento ambiguo ======
+      const mismoDNI = await Paciente.find({
+        tipoDoc: new RegExp(`^${documento.tipoDoc}$`, 'i'),
+        nroDoc: new RegExp(`^${documento.nroDoc}$`, 'i'),
+      }).select('_id').limit(2).lean();
+      if (mismoDNI.length !== 1 || String(mismoDNI[0]._id) !== String(pacienteMaestro._id)) {
+        return res.status(409).json({ ok: false, codigo: 'DOCUMENTO_AMBIGUO',
+          msg: 'El documento no identifica una única HC en el maestro. Resuelve el conflicto antes de vincular.' });
+      }
+    }
+
+    // ====== Prevenir duplicados utilizando la identidad maestra validada ======
+    const datosIdentidad = { ...req.body, ...documento,
+      pacienteId: pacienteMaestro?._id ?? null };
     const programacionDuplicada = await ProgramacionPacienteEmpresa.findOne(
       filtroDuplicadoProgramacion(datosIdentidad),
     ).lean();
@@ -204,19 +244,41 @@ const crearProgramacion = async (req, res = response) => {
     if (programacionDuplicada) {
       return res.status(409).json({
         ok: false,
-        msg: "Ya existe una programación para este paciente, empresa y protocolo en la misma fecha",
+        msg: 'Ya existe una programación para este paciente, empresa y protocolo en la misma fecha',
       });
     }
 
-    const codProgramacion = await generarCodigoProgramacion();
+    const fechaRegistro = new Date();
+    const nombreCompletoUsuario = pacienteMaestro ? await obtenerNombreCompletoOperador({
+      uid: req.user.uid, nombreUsuario: req.user.nombreUsuario,
+    }) : null;
+    const historialVinculaciones = pacienteMaestro ? [{
+      tipo: 'VINCULACION_INICIAL',
+      pacienteIdAnterior: null, hcAnterior: null,
+      pacienteIdNuevo: pacienteMaestro._id, hcNueva: pacienteMaestro.hc,
+      tipoDocAnterior: null, nroDocAnterior: null,
+      tipoDocNuevo: documento.tipoDoc, nroDocNuevo: documento.nroDoc,
+      fecha: fechaRegistro, ejecutadoPor: req.user.uid,
+      usuario: req.user.nombreUsuario, nombreCompletoUsuario,
+      origenDocumento: 'EMPRESA', tipoResolucion: 'COINCIDENCIA_EXACTA',
+      motivoDecision: 'Paciente seleccionado desde la búsqueda al crear la programación',
+    }] : [];
+
+    // ====== Crear programación con vínculo y auditoría en un único guardado ======
     const programacion = new ProgramacionPacienteEmpresa({
       ...req.body,
-      pacienteId: null,
-      hc: null,
+      pacienteId: pacienteMaestro?._id ?? null,
+      hc: pacienteMaestro?.hc ?? null,
       ...documento,
+      ...(pacienteMaestro ? {
+        nombreCliente: pacienteMaestro.nombreCliente,
+        apePatCliente: pacienteMaestro.apePatCliente,
+        apeMatCliente: pacienteMaestro.apeMatCliente ?? '',
+      } : {}),
       ...snapshotProtocolo,
-      codProgramacion,
-      estadoProgramacion: "PROGRAMADO",
+      codProgramacion: await generarCodigoProgramacion(),
+      estadoProgramacion: 'PROGRAMADO',
+      historialVinculaciones,
       createdBy: req.user.uid,
       usuarioRegistro: req.user.nombreUsuario,
     });
@@ -225,7 +287,7 @@ const crearProgramacion = async (req, res = response) => {
 
     return res.status(201).json({
       ok: true,
-      msg: "Programación registrada correctamente",
+      msg: pacienteMaestro ? 'Programación registrada con HC vinculada' : 'Programación registrada correctamente',
       programacion,
     });
   } catch (error) {
