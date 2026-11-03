@@ -66,7 +66,7 @@ const vincularHCRevisadaImportacion = async (req, res) => {
       return res.status(409).json({ ok: false,
         msg: 'Cambió la identidad o el maestro de pacientes. Vuelve a buscar coincidencias.' });
     }
-    if (!['DOCUMENTO_REVISAR', 'DOCUMENTO_MULTIPLE'].includes(consulta.categoria) || consulta.masCandidatos) {
+    if (consulta.categoria !== 'DOCUMENTO_REVISAR' || consulta.masCandidatos || consulta.candidatos.length !== 1) {
       return res.status(409).json({ ok: false,
         msg: 'Este caso no corresponde a revisión individual con documento coincidente.' });
     }
@@ -76,9 +76,9 @@ const vincularHCRevisadaImportacion = async (req, res) => {
         msg: 'La HC seleccionada no tiene el mismo documento vigente. No se permite vincular.' });
     }
     const paciente = await Paciente.findById(pacienteId)
-      .select('hc tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sexoCliente fechaNacimiento estadoIdentificacion').lean();
+      .select('hc tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sexoCliente fechaNacimiento tipoHC estadoConciliacion').lean();
     if (!paciente?.hc || !paciente.tipoDoc || !paciente.nroDoc ||
-        paciente.estadoIdentificacion === 'PENDIENTE' ||
+        (paciente.tipoHC === 'PROVISIONAL' && paciente.estadoConciliacion !== 'CONCILIADA') ||
         paciente.hc !== candidato.hc ||
         clave(p.tipoDoc) !== clave(paciente.tipoDoc) || clave(p.nroDoc) !== clave(paciente.nroDoc)) {
       return res.status(409).json({ ok: false,
@@ -142,6 +142,7 @@ const vincularHCRevisadaImportacion = async (req, res) => {
     }, {
       $set: {
         pacienteId: paciente._id, hc: paciente.hc,
+        tipoDoc: paciente.tipoDoc, nroDoc: paciente.nroDoc,
         nombreCliente: identidadMaestro.nombreCliente,
         apePatCliente: identidadMaestro.apePatCliente,
         apeMatCliente: identidadMaestro.apeMatCliente,

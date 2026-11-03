@@ -65,50 +65,26 @@ const verificarIdentidadesImportacion = async (req, res) => {
     }).select('programacionEmpresaId').lean() : [];
     const conSolicitudes = new Set(solicitudes.map((s) => String(s.programacionEmpresaId)));
 
+    // ====== Buscar candidatos solo por documento vigente; sin búsquedas nominales ======
     const documentos = new Map();
-    const nombres = new Map();
     for (const p of programaciones) {
-      if (p.pacienteId) continue;
-      if (p.nroDoc && p.tipoDoc) {
-        const key = `${clave(p.tipoDoc)}:${clave(p.nroDoc)}`;
-        documentos.set(key, { tipoDoc: clave(p.tipoDoc), nroDoc: clave(p.nroDoc) });
-      }
-      const nombre = primero(p.nombreCliente);
-      const paterno = clave(p.apePatCliente);
-      if (nombre && paterno) {
-        nombres.set(`${paterno}:${nombre}`, {
-          apePatCliente: new RegExp(`^\\s*${patronFlexible(paterno)}\\s*$`, 'i'),
-          nombreCliente: new RegExp(`^\\s*${patronFlexible(nombre)}(?:\\s|$)`, 'i'),
-        });
-      }
+      if (p.pacienteId || !p.nroDoc || !p.tipoDoc) continue;
+      const key = `${clave(p.tipoDoc)}:${clave(p.nroDoc)}`;
+      documentos.set(key, { tipoDoc: clave(p.tipoDoc), nroDoc: clave(p.nroDoc) });
     }
     const seleccion = '_id hc tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sexoCliente fechaNacimiento';
     const porDocumento = documentos.size
       ? await Paciente.find({ $or: [...documentos.values()] }).select(seleccion).lean() : [];
-    // ====== No consultar historial documental ======
-    // ====== Limitar la búsqueda nominal sin clasificar resultados truncados ======
-    const nominal = nombres.size
-      ? await Paciente.find({ $or: [...nombres.values()] }).select(seleccion).limit(2001).lean() : [];
-    if (nominal.length > 2000) {
-      return res.status(422).json({ ok: false, msg: 'La búsqueda nominal contiene demasiados candidatos. Reduce el tamaño de página e intenta nuevamente.' });
-    }
+
     const documentosPorClave = new Map();
     porDocumento.forEach((p) => {
       const key = `${clave(p.tipoDoc)}:${clave(p.nroDoc)}`;
       if (!documentosPorClave.has(key)) documentosPorClave.set(key, []);
       documentosPorClave.get(key).push(p);
     });
-    const nominalPorClave = new Map();
-    nominal.forEach((p) => {
-      const key = `${clave(p.apePatCliente)}:${primero(p.nombreCliente)}`;
-      if (!nominalPorClave.has(key)) nominalPorClave.set(key, []);
-      nominalPorClave.get(key).push(p);
-    });
-
     const resultados = programaciones.map((p) => {
       const documento = p.nroDoc && p.tipoDoc ? `${clave(p.tipoDoc)}:${clave(p.nroDoc)}` : '';
       const exactas = documento ? (documentosPorClave.get(documento) ?? []) : [];
-      const nominales = nominalPorClave.get(`${clave(p.apePatCliente)}:${primero(p.nombreCliente)}`) ?? [];
       let candidatos = [];
       let categoria = 'SIN_COINCIDENCIA';
       if (p.pacienteId) categoria = 'YA_VINCULADA';
@@ -119,8 +95,7 @@ const verificarIdentidadesImportacion = async (req, res) => {
         candidatos = [convertirCandidato(exactas[0], 'DOCUMENTO_VIGENTE', p)];
         categoria = candidatos[0].coincideNombreCompleto && !!candidatos[0].hc ? 'DOCUMENTO_CONFORME' : 'DOCUMENTO_REVISAR';
       } else {
-        candidatos = nominales.map((c) => convertirCandidato(c, 'NOMBRES', p));
-        categoria = !documento ? 'SIN_DOCUMENTO' : candidatos.length ? 'NOMINAL' : 'SIN_COINCIDENCIA';
+        categoria = !documento ? 'SIN_DOCUMENTO' : 'SIN_COINCIDENCIA';
       }
       // ====== Motivo exacto del bloqueo de desvinculación ======
       const tieneHC = Boolean(p.pacienteId && p.hc);
@@ -166,7 +141,7 @@ const verificarIdentidadesImportacion = async (req, res) => {
     const resumen = {
       totalPagina: resultados.length,
       documentoConforme: resultados.filter((r) => r.categoria === 'DOCUMENTO_CONFORME').length,
-      porRevisar: resultados.filter((r) => ['DOCUMENTO_REVISAR', 'DOCUMENTO_MULTIPLE', 'NOMINAL'].includes(r.categoria)).length,
+      porRevisar: resultados.filter((r) => r.categoria === 'DOCUMENTO_REVISAR').length,
       sinCoincidencias: resultados.filter((r) => r.categoria === 'SIN_COINCIDENCIA').length,
       sinDocumento: resultados.filter((r) => r.categoria === 'SIN_DOCUMENTO').length,
       yaVinculadas: resultados.filter((r) => r.categoria === 'YA_VINCULADA').length,
@@ -184,17 +159,6 @@ const consultarIdentidadUna = async (p) => {
     ? { tipoDoc: clave(p.tipoDoc), nroDoc: clave(p.nroDoc) } : null;
   const seleccion = '_id hc tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sexoCliente fechaNacimiento';
   const exactos = documento ? await Paciente.find(documento).select(seleccion).lean() : [];
-  const nombre = primero(p.nombreCliente);
-  const paterno = clave(p.apePatCliente);
-  const nominales = nombre && paterno ? await Paciente.find({
-    apePatCliente: new RegExp(`^\\s*${patronFlexible(paterno)}\\s*$`, 'i'),
-    nombreCliente: new RegExp(`^\\s*${patronFlexible(nombre)}(?:\\s|$)`, 'i'),
-  }).select(seleccion).limit(2001).lean() : [];
-  if (nominales.length > 2000) {
-    const error = new Error('Demasiados candidatos nominales. Consulta de nuevo en una página menor.');
-    error.status = 422;
-    throw error;
-  }
   let candidatos = [];
   let categoria = 'SIN_COINCIDENCIA';
   if (p.pacienteId) categoria = 'YA_VINCULADA';
@@ -206,8 +170,7 @@ const consultarIdentidadUna = async (p) => {
     categoria = candidatos[0].coincideNombreCompleto && !!candidatos[0].hc
       ? 'DOCUMENTO_CONFORME' : 'DOCUMENTO_REVISAR';
   } else {
-    candidatos = nominales.map((c) => convertirCandidato(c, 'NOMBRES', p));
-    categoria = !documento ? 'SIN_DOCUMENTO' : candidatos.length ? 'NOMINAL' : 'SIN_COINCIDENCIA';
+    categoria = !documento ? 'SIN_DOCUMENTO' : 'SIN_COINCIDENCIA';
   }
   const fila = {
     programacionId: String(p._id), categoria,

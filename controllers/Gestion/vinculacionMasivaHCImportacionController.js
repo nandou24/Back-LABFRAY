@@ -54,10 +54,6 @@ const vincularUna = async (importacionId, entrada, usuario, nombreCompletoUsuari
   if (await Solicitud.exists({ programacionEmpresaId: p._id })) {
     return errorFila(programacionId, 'La programación ya tiene solicitudes. No se modifica.');
   }
-  if (p.revisionIdentidadImportacion?.decision &&
-      !['CONFORME'].includes(p.revisionIdentidadImportacion.decision)) {
-    return errorFila(programacionId, 'Existe una revisión individual distinta de conforme. Reevalúa la identidad.');
-  }
   const consulta = await consultarIdentidadUna(p);
   if (consulta.huellaConsulta !== huellaConsulta) {
     return errorFila(programacionId, 'La identidad o los candidatos cambiaron. Vuelve a consultar.');
@@ -69,8 +65,8 @@ const vincularUna = async (importacionId, entrada, usuario, nombreCompletoUsuari
     return errorFila(programacionId, 'No existe una coincidencia documental y nominal única y conforme.');
   }
   const paciente = await Paciente.findById(pacienteId)
-    .select('hc tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente estadoIdentificacion').lean();
-  if (!paciente?.hc || paciente.estadoIdentificacion === 'PENDIENTE' ||
+    .select('hc tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sexoCliente fechaNacimiento tipoHC estadoConciliacion').lean();
+  if (!paciente?.hc || (paciente.tipoHC === 'PROVISIONAL' && paciente.estadoConciliacion !== 'CONCILIADA') ||
       !paciente.tipoDoc || !paciente.nroDoc || paciente.hc !== candidato.hc ||
       clave(p.tipoDoc) !== clave(paciente.tipoDoc) || clave(p.nroDoc) !== clave(paciente.nroDoc) ||
       clave(p.nombreCliente) !== clave(paciente.nombreCliente) ||
@@ -86,13 +82,29 @@ const vincularUna = async (importacionId, entrada, usuario, nombreCompletoUsuari
     tipoDocNuevo: paciente.tipoDoc, nroDocNuevo: paciente.nroDoc,
     fecha, ejecutadoPor: usuario.uid, usuario: usuario.nombreUsuario,
     nombreCompletoUsuario, origenDocumento: 'EMPRESA', tipoResolucion: 'COINCIDENCIA_EXACTA',
-    motivoDecision: 'Vinculación masiva de identidad conforme (PE.6.5E.4.2)',
+    motivoDecision: 'Vinculación masiva de identidad conforme (PE.6.5E.5C.1)',
     identidadDeclarada: {
       nombreCliente: p.nombreCliente, apePatCliente: p.apePatCliente,
       apeMatCliente: p.apeMatCliente ?? null, sexoCliente: p.sexoCliente ?? null,
       fechaNacimiento: p.fechaNacimiento ? new Date(p.fechaNacimiento).toISOString().slice(0, 10) : null,
     },
   };
+  // ====== La HC registrada prevalece sobre los datos enviados en Excel ======
+  const identidadMaestro = {
+    nombreCliente: paciente.nombreCliente,
+    apePatCliente: paciente.apePatCliente,
+    apeMatCliente: paciente.apeMatCliente ?? '',
+    sexoCliente: paciente.sexoCliente ?? p.sexoCliente ?? null,
+    fechaNacimiento: paciente.fechaNacimiento ?? p.fechaNacimiento ?? null,
+  };
+  evento.cambiosIdentidad = Object.entries(identidadMaestro)
+    .map(([campo, valorNuevo]) => {
+      const normalizar = (v) => campo === 'fechaNacimiento'
+        ? (v ? new Date(v).toISOString().slice(0, 10) : null) : texto(v);
+      const valorAnterior = normalizar(p[campo]);
+      const nuevo = normalizar(valorNuevo);
+      return valorAnterior === nuevo ? null : { campo, valorAnterior, valorNuevo: nuevo };
+    }).filter(Boolean);
   // ====== Actualización atómica: una sola primera vinculación por programación ======
   const actualizado = await Programacion.findOneAndUpdate({
     _id: p._id, importacionId, origenRegistro: 'IMPORTACION_EXCEL',
@@ -102,7 +114,8 @@ const vincularUna = async (importacionId, entrada, usuario, nombreCompletoUsuari
     nombreCliente: p.nombreCliente, apePatCliente: p.apePatCliente,
     apeMatCliente: p.apeMatCliente ?? null,
   }, {
-    $set: { pacienteId: paciente._id, hc: paciente.hc,
+    $set: { pacienteId: paciente._id, hc: paciente.hc, ...identidadMaestro,
+      tipoDoc: paciente.tipoDoc, nroDoc: paciente.nroDoc,
       updatedBy: usuario.uid, usuarioActualizacion: usuario.nombreUsuario,
       fechaActualizacion: fecha },
     $push: { historialVinculaciones: evento },
