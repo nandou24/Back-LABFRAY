@@ -147,7 +147,7 @@ const registrarDecisionesImportacion = async (req, res) => {
   try {
     const importacionId = texto(req.body?.importacionId);
     const decisiones = req.body?.decisiones;
-    if (!/^[a-zA-Z0-9-]{18,80}$/.test(importacionId) || !Array.isArray(decisiones) ||
+    if (!/^\d{8}-\d{4,12}$/.test(importacionId) || !Array.isArray(decisiones) ||
         !decisiones.length || decisiones.length > 50 ||
         new Set(decisiones.map((d) => texto(d?.programacionId))).size !== decisiones.length) {
       return res.status(400).json({ ok: false, msg: 'Lote o lista de decisiones inválidos (máximo 50 filas diferentes).' });

@@ -45,7 +45,7 @@ const verificarIdentidadesImportacion = async (req, res) => {
     const importacionId = texto(req.body?.importacionId);
     const pagina = Number(req.body?.pagina ?? 1);
     const tamanoPagina = Number(req.body?.tamanoPagina ?? 50);
-    if (!/^[a-zA-Z0-9-]{18,80}$/.test(importacionId) || !Number.isInteger(pagina) || pagina < 1 ||
+    if (!/^\d{8}-\d{4,12}$/.test(importacionId) || !Number.isInteger(pagina) || pagina < 1 ||
         !Number.isInteger(tamanoPagina) || tamanoPagina < 1 || tamanoPagina > 100 || pagina > 1000) {
       return res.status(400).json({ ok: false, msg: 'Identificador o paginación inválidos.' });
     }

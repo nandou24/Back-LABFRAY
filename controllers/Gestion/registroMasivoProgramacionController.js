@@ -18,7 +18,7 @@ const texto = (valor) => String(valor ?? '').trim();
 const registrarImportacionProgramaciones = async (req, res) => {
   const importacionId = texto(req.body?.importacionId);
   const filas = req.body?.filas;
-  if (!/^[a-zA-Z0-9-]{18,80}$/.test(importacionId) ||
+  if (!/^\d{8}-\d{4,12}$/.test(importacionId) ||
       !Array.isArray(filas) || !filas.length || filas.length > 100 ||
       filas.some((f) => !Number.isInteger(f?.filaExcel) || f.filaExcel < 2 || !f.datos) ||
       new Set(filas.map((f) => f.filaExcel)).size !== filas.length) {

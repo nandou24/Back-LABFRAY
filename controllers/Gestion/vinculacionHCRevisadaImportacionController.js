@@ -39,7 +39,7 @@ const vincularHCRevisadaImportacion = async (req, res) => {
     const uid = texto(req.user?.uid);
     const usuario = texto(req.user?.nombreUsuario);
     if (!uid) return res.status(401).json({ ok: false, msg: 'Usuario no identificado.' });
-    if (!/^[a-zA-Z0-9-]{18,80}$/.test(importacionId) ||
+    if (!/^\d{8}-\d{4,12}$/.test(importacionId) ||
         !mongoose.isValidObjectId(programacionId) || !mongoose.isValidObjectId(pacienteId) ||
         !/^[a-f0-9]{64}$/.test(huellaConsulta) || motivo.length > 300 ||
         req.body?.confirmacionExpresa !== true) {

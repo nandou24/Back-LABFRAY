@@ -133,7 +133,7 @@ const vincularHCConformesImportacion = async (req, res) => {
   try {
     const importacionId = texto(req.body?.importacionId);
     const vinculaciones = req.body?.vinculaciones;
-    if (!/^[a-zA-Z0-9-]{18,80}$/.test(importacionId) || !Array.isArray(vinculaciones) ||
+    if (!/^\d{8}-\d{4,12}$/.test(importacionId) || !Array.isArray(vinculaciones) ||
         !vinculaciones.length || vinculaciones.length > 50 ||
         new Set(vinculaciones.map((v) => texto(v?.programacionId))).size !== vinculaciones.length) {
       return res.status(400).json({ ok: false, msg: 'Lote inválido o más de 50 programaciones diferentes.' });

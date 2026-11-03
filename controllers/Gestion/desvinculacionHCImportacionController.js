@@ -32,7 +32,7 @@ const desvincularHCImportacion = async (req, res) => {
     const nombreUsuario = texto(req.user?.nombreUsuario);
 
     if (!uid) return res.status(401).json({ ok: false, msg: 'Usuario no identificado.' });
-    if (!/^[a-zA-Z0-9-]{18,80}$/.test(importacionId) ||
+    if (!/^\d{8}-\d{4,12}$/.test(importacionId) ||
         !mongoose.isValidObjectId(programacionId) || !hcActual ||
         motivo.length < 10 || motivo.length > 300) {
       return res.status(400).json({ ok: false,

@@ -18,6 +18,7 @@ const { regularizarTemporalConHCExistente } = require("../../controllers/Gestion
 const { regularizarTemporalConHCNueva } = require('../../controllers/Gestion/regularizarTemporalHCNuevaController');
 const { validarImportacionProgramaciones } = require('../../controllers/Gestion/validacionMasivaProgramacionController');
 const { registrarImportacionProgramaciones } = require('../../controllers/Gestion/registroMasivoProgramacionController');
+const { reservarCodigoLoteImportacion } = require('../../controllers/Gestion/correlativoLoteImportacionController');
 const { verificarIdentidadesImportacion } = require('../../controllers/Gestion/verificacionMasivaIdentidadEmpresaController');
 const { registrarDecisionesImportacion } = require('../../controllers/Gestion/decisionesMasivasIdentidadEmpresaController');
 const { vincularHCConformesImportacion } = require('../../controllers/Gestion/vinculacionMasivaHCImportacionController');
@@ -97,6 +98,8 @@ router.get("/consultar-documento", validarJWT, consultarDocumentoProgramacion);
 // ====== Importación masiva: validar antes de registrar ======
 router.post('/validar-importacion', validarJWT, validarImportacionProgramaciones);
 router.post('/registrar-importacion', validarJWT, registrarImportacionProgramaciones);
+// ====== Código AAAAMMDD-NNNN reservado para todo el Excel ======
+router.post('/reservar-lote-importacion', validarJWT, reservarCodigoLoteImportacion);
 // ====== PE.6.5E.3: consultar coincidencias de un lote registrado ======
 router.post('/verificar-identidades-importacion', validarJWT, verificarIdentidadesImportacion);
 // ====== PE.6.5E.4: guardar decisiones auditadas, sin vincular HC ======
