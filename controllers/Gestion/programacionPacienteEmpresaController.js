@@ -1,4 +1,4 @@
-const { randomUUID } = require('crypto');
+const { randomUUID, createHash } = require('crypto');
 const { response } = require("express");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
@@ -16,7 +16,7 @@ const { crearSolicitudesAtencion } = require("./solicitudAtencionController");
 const { registrarPaciente } = require("../Mantenimiento/pacienteController");
 const { buscarCoincidenciasVinculacion } = require("../../utils/Gestion/buscarCoincidenciasVinculacion");
 const { obtenerConflictoRevisionIdentidad } = require("../../utils/Gestion/obtenerConflictoRevisionIdentidad");
-const { evaluarIdentidadParaNuevaHC, obtenerUltimasDecisiones } = require("../../utils/Gestion/evaluarIdentidadParaNuevaHC");
+const { obtenerUltimasDecisiones } = require("../../utils/Gestion/evaluarIdentidadParaNuevaHC");
 
 const construirRangoDia = (fecha) => {
   const base = new Date(fecha);
@@ -183,6 +183,131 @@ const cambiaIdentidad = (antes, propuesta) => camposIdentidadProgramacion.some((
   const nuevo = propuesta[campo] instanceof Date ? propuesta[campo].toISOString() : propuesta[campo];
   return String(previo ?? "").trim().toUpperCase() !== String(nuevo ?? "").trim().toUpperCase();
 });
+
+// ====== Identidad congelada para una confirmación de modalidad ======
+const normalizarHuellaModalidad = (valor) => String(valor ?? '').trim().replace(/\s+/g, ' ').toUpperCase();
+const huellaModalidadAtencion = (programacion) => {
+  const fecha = programacion.fechaNacimiento ? new Date(programacion.fechaNacimiento) : null;
+  const fechaISO = fecha && !Number.isNaN(fecha.getTime()) ? fecha.toISOString().slice(0, 10) : '';
+  const valores = [
+    programacion.tipoDoc, programacion.nroDoc,
+    programacion.apePatCliente, programacion.apeMatCliente, programacion.nombreCliente,
+    programacion.sexoCliente, fechaISO,
+  ].map(normalizarHuellaModalidad);
+  return createHash('sha256').update(JSON.stringify(valores)).digest('hex');
+};
+
+const modalidadAtencionVigente = (programacion) => {
+  if (!programacion || programacion.estadoProgramacion !== 'PROGRAMADO' ||
+      programacion.fechaInicioAtencion || programacion.pacienteId || programacion.hc) return false;
+  const modalidad = programacion.modalidadAtencionConfirmada;
+  const tieneDocumento = Boolean(programacion.tipoDoc && programacion.nroDoc);
+  if (modalidad !== (tieneDocumento ? 'PACIENTE_NUEVO' : 'TEMPORAL')) return false;
+  if (!programacion.fechaConfirmacionModalidad ||
+      programacion.huellaModalidadAtencion !== huellaModalidadAtencion(programacion)) return false;
+  // ====== Una vinculación o desvinculación posterior invalida la confirmación previa ======
+  const desde = new Date(programacion.fechaConfirmacionModalidad).getTime();
+  return !(programacion.historialVinculaciones ?? []).some(evento =>
+    /^(VINCULACION_|DESVINCULACION_)/.test(String(evento.tipo ?? '')) &&
+    new Date(evento.fecha).getTime() > desde);
+};
+
+// ====== Confirmar o retirar modalidad antes de iniciar atención ======
+const actualizarModalidadAtencion = async (req, res = response) => {
+  try {
+    const id = req.params.id;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ ok:false, codigo:'ID_INVALIDO', msg:'Programación inválida.' });
+    }
+    const modalidad = req.body?.modalidadAtencion;
+    if (![null, 'PACIENTE_NUEVO', 'TEMPORAL'].includes(modalidad)) {
+      return res.status(400).json({ ok:false, codigo:'MODALIDAD_INVALIDA',
+        msg:'Selecciona una modalidad de atención válida.' });
+    }
+    const programacion = await ProgramacionPacienteEmpresa.findById(id);
+    if (!programacion) return res.status(404).json({ ok:false, msg:'Programación no encontrada.' });
+    if (programacion.estadoProgramacion !== 'PROGRAMADO' || programacion.fechaInicioAtencion ||
+        programacion.pacienteId || programacion.hc) {
+      return res.status(409).json({ ok:false, codigo:'MODALIDAD_NO_EDITABLE',
+        msg:'Solo puedes confirmar o retirar la modalidad de una programación sin HC y antes de iniciar atención.' });
+    }
+    if (await SolicitudAtencion.exists({ programacionEmpresaId:programacion._id })) {
+      return res.status(409).json({ ok:false, codigo:'ATENCION_YA_INICIADA',
+        msg:'Esta programación ya tiene solicitudes. No se puede modificar la modalidad.' });
+    }
+    if (modalidad === null && !programacion.modalidadAtencionConfirmada) {
+      return res.json({ ok:true, msg:'No existe una modalidad confirmada.',
+        programacion:{ ...programacion.toObject(), modalidadAtencionVigente:false } });
+    }
+    if (modalidad !== null && programacion.modalidadAtencionConfirmada) {
+      if (programacion.modalidadAtencionConfirmada === modalidad && modalidadAtencionVigente(programacion)) {
+        return res.json({ ok:true, msg:'La modalidad ya estaba confirmada.',
+          programacion:{ ...programacion.toObject(), modalidadAtencionVigente:true } });
+      }
+      return res.status(409).json({ ok:false, codigo:'RETIRAR_MODALIDAD_PRIMERO',
+        msg:'Retira primero la decisión anterior y luego confirma la nueva modalidad.' });
+    }
+    if (modalidad === 'TEMPORAL' && (programacion.tipoDoc || programacion.nroDoc)) {
+      return res.status(409).json({ ok:false, codigo:'DOCUMENTO_PRESENTE',
+        msg:'Para una atención temporal primero retira el documento desde Editar programación.' });
+    }
+    if (modalidad === 'PACIENTE_NUEVO') {
+      const documento = normalizarDocumentoProgramacion(programacion);
+      if (!documento.tipoDoc || !documento.nroDoc) {
+        return res.status(409).json({ ok:false, codigo:'DOCUMENTO_REQUERIDO',
+          msg:'El paciente nuevo necesita un documento válido.' });
+      }
+      const existente = await Paciente.exists({
+        tipoDoc:new RegExp(`^${documento.tipoDoc}$`, 'i'),
+        nroDoc:new RegExp(`^${documento.nroDoc}$`, 'i'),
+      });
+      if (existente) return res.status(409).json({ ok:false, codigo:'DNI_YA_REGISTRADO',
+        msg:'El documento ya pertenece a un paciente. Vincula la HC o corrige el documento antes de continuar.' });
+    }
+    const ahora = new Date();
+    const nombreCompletoUsuario = await obtenerNombreCompletoOperador({
+      uid:req.user.uid, nombreUsuario:req.user.nombreUsuario,
+    });
+    const evento = {
+      tipo:modalidad ? 'CONFIRMACION_MODALIDAD_ATENCION' : 'REVOCACION_MODALIDAD_ATENCION',
+      pacienteIdAnterior:null, hcAnterior:null, pacienteIdNuevo:null, hcNueva:null,
+      fecha:ahora, ejecutadoPor:String(req.user.uid), usuario:req.user.nombreUsuario,
+      nombreCompletoUsuario, origenDocumento:'EMPRESA', tipoResolucion:'MODALIDAD_ATENCION',
+      motivoDecision:modalidad === 'PACIENTE_NUEVO'
+        ? 'Paciente nuevo con documento informado: se creará HC al iniciar atención.'
+        : modalidad === 'TEMPORAL'
+          ? 'Atención temporal sin documento: resultados bloqueados hasta regularización.'
+          : 'Confirmación de modalidad retirada antes de iniciar atención.',
+    };
+    const filtro = {
+      _id:programacion._id, estadoProgramacion:'PROGRAMADO', fechaInicioAtencion:null,
+      pacienteId:null, hc:null,
+      modalidadAtencionConfirmada:programacion.modalidadAtencionConfirmada ?? null,
+      huellaModalidadAtencion:programacion.huellaModalidadAtencion ?? null,
+      tipoDoc:programacion.tipoDoc ?? null, nroDoc:programacion.nroDoc ?? null,
+      apePatCliente:programacion.apePatCliente,
+      apeMatCliente:programacion.apeMatCliente,
+      nombreCliente:programacion.nombreCliente,
+    };
+    const actualizado = await ProgramacionPacienteEmpresa.findOneAndUpdate(filtro, {
+      $set:{ modalidadAtencionConfirmada:modalidad,
+        huellaModalidadAtencion:modalidad ? huellaModalidadAtencion(programacion) : null,
+        fechaConfirmacionModalidad:modalidad ? ahora : null,
+        updatedBy:req.user.uid, usuarioActualizacion:req.user.nombreUsuario,
+        fechaActualizacion:ahora },
+      $push:{ historialVinculaciones:evento },
+    }, { new:true, runValidators:true });
+    if (!actualizado) return res.status(409).json({ ok:false, codigo:'DATOS_CAMBIARON',
+      msg:'La programación cambió. Actualiza la pantalla antes de confirmar.' });
+    return res.json({ ok:true,
+      msg:modalidad ? 'Modalidad confirmada. Ya puedes iniciar atención.' : 'Decisión retirada. Debes confirmar nuevamente la modalidad.',
+      programacion:{ ...actualizado.toObject(), modalidadAtencionVigente:modalidadAtencionVigente(actualizado) },
+    });
+  } catch (error) {
+    console.error('Error al actualizar modalidad de atención:', error);
+    return res.status(500).json({ ok:false, msg:'No se pudo guardar la modalidad de atención.' });
+  }
+};
 
 // ====== Consultar DNI del maestro sin registrar ni vincular ======
 const consultarDocumentoProgramacion = async (req, res = response) => {
@@ -456,6 +581,7 @@ const listarProgramaciones = async (req, res = response) => {
       return {
         ...item,
         accionDocumentoPaciente: obtenerAccionDocumentoPaciente(paciente),
+        modalidadAtencionVigente: modalidadAtencionVigente(item),
         seguimientoAtencion: seguimientoPorProgramacion.get(String(item._id)) ?? { solicitudes: [], servicios: [] },
       };
     });
@@ -481,7 +607,7 @@ const obtenerProgramacion = async (req, res = response) => {
         .json({ ok: false, msg: "Programación no encontrada" });
     }
 
-    return res.json({ ok: true, programacion });
+    return res.json({ ok: true, programacion: { ...programacion, modalidadAtencionVigente: modalidadAtencionVigente(programacion) } });
   } catch (error) {
     console.error("Error al obtener programación empresarial:", error);
     return res
@@ -646,6 +772,18 @@ const actualizarProgramacion = async (req, res = response) => {
 
     const ahora = new Date();
     const eventos = [];
+    // ====== Invalidar modalidad si se cambia la identidad confirmada ======
+    const invalidaModalidad = Boolean(programacionActual.modalidadAtencionConfirmada &&
+      (cambios.some(item => ['tipoDoc', 'nroDoc', 'apePatCliente', 'apeMatCliente',
+        'nombreCliente', 'sexoCliente', 'fechaNacimiento'].includes(item.campo)) || pacienteConfirmado));
+    if (invalidaModalidad) {
+      eventos.push({ tipo:'INVALIDACION_MODALIDAD_ATENCION',
+        pacienteIdAnterior:null, hcAnterior:null, pacienteIdNuevo:null, hcNueva:null,
+        fecha:ahora, ejecutadoPor:String(req.user.uid), usuario:req.user.nombreUsuario,
+        origenDocumento:'EMPRESA', tipoResolucion:'MODALIDAD_ATENCION',
+        motivoDecision:'La identidad fue modificada: se requiere confirmar nuevamente la modalidad.',
+      });
+    }
     if (cambios.length) {
       eventos.push({ tipo: 'CORRECCION_PROGRAMACION',
         pacienteIdAnterior: null, hcAnterior: null,
@@ -680,6 +818,10 @@ const actualizarProgramacion = async (req, res = response) => {
     if (edicionIdentidadPermitida) filtro.fechaInicioAtencion = null;
     const actualizacion = { $set: { ...datos, updatedBy: req.user.uid,
       usuarioActualizacion: req.user.nombreUsuario, fechaActualizacion: ahora } };
+    if (invalidaModalidad) Object.assign(actualizacion.$set, {
+      modalidadAtencionConfirmada:null, huellaModalidadAtencion:null,
+      fechaConfirmacionModalidad:null,
+    });
     if (eventos.length) actualizacion.$push = { historialVinculaciones: { $each: eventos } };
     const programacion = await ProgramacionPacienteEmpresa.findOneAndUpdate(filtro, actualizacion,
       { new: true, runValidators: true });
@@ -902,6 +1044,17 @@ const iniciarAtencionProgramacion = async (req, res = response) => {
       });
     }
 
+    // ====== Exigir una de las tres modalidades antes de iniciar atención ======
+    if (Boolean(programacion.pacienteId) !== Boolean(programacion.hc)) {
+      await session.abortTransaction();
+      return res.status(409).json({ ok:false, codigo:'VINCULO_INCOMPLETO',
+        msg:'La vinculación de la HC está incompleta. Corrige la programación.' });
+    }
+    if (!programacion.pacienteId && !modalidadAtencionVigente(programacion)) {
+      await session.abortTransaction();
+      return res.status(409).json({ ok:false, codigo:'MODALIDAD_NO_CONFIRMADA',
+        msg:'Primero confirma Paciente nuevo o Atención temporal desde Programaciones de Empresas.' });
+    }
     // ====== No ignorar una decisión documental anterior no resuelta ======
     const conflictoVigente = obtenerConflictoRevisionIdentidad(programacion);
     if (!programacion.pacienteId && programacion.nroDoc && conflictoVigente) {
@@ -943,9 +1096,14 @@ const iniciarAtencionProgramacion = async (req, res = response) => {
         });
       }
 
-      // Sincronizamos la HC de la programación
-      // con la HC oficial del paciente.
-
+      // ====== La HC confirmada debe seguir perteneciendo al mismo paciente ======
+      if (String(programacion.hc) !== String(paciente.hc) ||
+          String(programacion.tipoDoc ?? '').toUpperCase() !== String(paciente.tipoDoc ?? '').toUpperCase() ||
+          String(programacion.nroDoc ?? '').toUpperCase() !== String(paciente.nroDoc ?? '').toUpperCase()) {
+        await session.abortTransaction();
+        return res.status(409).json({ ok:false, codigo:'VINCULO_DESACTUALIZADO',
+          msg:'La identidad de la HC ha cambiado. Verifica el vínculo antes de iniciar atención.' });
+      }
       programacion.hc = paciente.hc;
       formaResolucion = "PACIENTE_ID";
     }
@@ -979,13 +1137,11 @@ const iniciarAtencionProgramacion = async (req, res = response) => {
         const coincidencias = await buscarCoincidenciasVinculacion(
           Paciente, programacion, validarCoincidenciaIdentidad, session,
         );
-        const evaluacion = evaluarIdentidadParaNuevaHC(programacion, coincidencias);
-        if (!evaluacion.permiteCrear) {
+        // ====== Paciente nuevo: verificar otra vez que el documento esté disponible ======
+        if (coincidencias.porDocumento.length) {
           await session.abortTransaction();
-          return res.status(409).json({
-            ok: false, codigo: evaluacion.codigo, msg: evaluacion.msg,
-            candidatos: evaluacion.candidatos.map(item => ({ pacienteId: item.pacienteId, hc: item.hc })),
-          });
+          return res.status(409).json({ ok:false, codigo:'DNI_YA_REGISTRADO',
+            msg:'El documento fue registrado después de la confirmación. Resuelve la identidad antes de iniciar.' });
         }
         // ====== Sin coincidencias ni pendientes: crear alta documentada de empresa ======
         const datosPaciente = {
@@ -1745,6 +1901,7 @@ module.exports = {
   actualizarProgramacion,
   actualizarEstadoProgramacion,
   iniciarAtencionProgramacion,
+  actualizarModalidadAtencion,
   regularizarDocumentoProgramacion,
   verificarDocumentoProgramacion,
   corregirDocumentoProgramacion,

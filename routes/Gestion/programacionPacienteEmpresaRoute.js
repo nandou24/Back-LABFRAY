@@ -8,6 +8,7 @@ const {
   actualizarProgramacion,
   actualizarEstadoProgramacion,
   iniciarAtencionProgramacion,
+  actualizarModalidadAtencion,
   consultarCoincidenciasVinculacion,
   vincularPacienteInicial,
   registrarRevisionCoincidencia,
@@ -128,6 +129,10 @@ router.get('/:id/coincidencias-vinculacion', validarJWT, consultarCoincidenciasV
 router.post('/:id/vincular-paciente', validarJWT, vincularPacienteInicial);
 router.post('/:id/revisar-coincidencia', validarJWT, registrarRevisionCoincidencia);
 router.get('/:id/historial-vinculaciones', validarJWT, obtenerHistorialVinculaciones);
+// ====== Confirmación reversible de modalidad de atención ======
+router.put('/:id/modalidad-atencion', [
+  validarJWT, check('id', 'ID inválido').isMongoId(), validarCampos,
+], actualizarModalidadAtencion);
 router.get(
   "/:id",
   [validarJWT, check("id", "ID inválido").isMongoId(), validarCampos],

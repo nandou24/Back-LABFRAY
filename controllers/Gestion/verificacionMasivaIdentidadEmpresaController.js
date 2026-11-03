@@ -3,6 +3,25 @@ const Programacion = require('../../models/Gestion/programacionPacienteEmpresa')
 const Paciente = require('../../models/Mantenimiento/Paciente');
 const Solicitud = require('../../models/Gestion/SolicitudAtencion');
 
+// ====== Validez de la modalidad confirmada antes de iniciar ======
+const modalidadVigente = (p) => {
+  if (!p.modalidadAtencionConfirmada || p.pacienteId || p.hc || p.estadoProgramacion !== 'PROGRAMADO' ||
+      p.fechaInicioAtencion || !p.fechaConfirmacionModalidad) return false;
+  const fecha = p.fechaNacimiento ? new Date(p.fechaNacimiento) : null;
+  const fechaISO = fecha && !Number.isNaN(fecha.getTime()) ? fecha.toISOString().slice(0, 10) : '';
+  const datos = [p.tipoDoc, p.nroDoc, p.apePatCliente, p.apeMatCliente,
+    p.nombreCliente, p.sexoCliente, fechaISO]
+    .map(v => String(v ?? '').trim().replace(/\s+/g, ' ').toUpperCase());
+  const huella = createHash('sha256').update(JSON.stringify(datos)).digest('hex');
+  const documento = Boolean(p.tipoDoc && p.nroDoc);
+  if (p.modalidadAtencionConfirmada !== (documento ? 'PACIENTE_NUEVO' : 'TEMPORAL') ||
+      p.huellaModalidadAtencion !== huella) return false;
+  const desde = new Date(p.fechaConfirmacionModalidad).getTime();
+  return !(p.historialVinculaciones ?? []).some(e =>
+    /^(VINCULACION_|DESVINCULACION_)/.test(String(e.tipo ?? '')) &&
+    new Date(e.fecha).getTime() > desde);
+};
+
 // ====== Coincidencias de identidad: consulta de solo lectura ======
 const texto = (v) => String(v ?? '').trim();
 const clave = (v) => texto(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').toUpperCase();
@@ -56,7 +75,7 @@ const verificarIdentidadesImportacion = async (req, res) => {
     if (pagina > paginas) return res.status(400).json({ ok: false, msg: 'La página solicitada no existe.' });
     const programaciones = await Programacion.find(filtro)
       .sort({ filaExcelImportacion: 1, _id: 1 }).skip((pagina - 1) * tamanoPagina).limit(tamanoPagina)
-      .select('_id codProgramacion filaExcelImportacion nombreCliente apePatCliente apeMatCliente tipoDoc nroDoc sexoCliente fechaNacimiento hc pacienteId estadoProgramacion fechaInicioAtencion revisionIdentidadImportacion historialVerificacionIdentidadImportacion')
+      .select('_id codProgramacion filaExcelImportacion nombreCliente apePatCliente apeMatCliente tipoDoc nroDoc sexoCliente fechaNacimiento hc pacienteId estadoProgramacion fechaInicioAtencion revisionIdentidadImportacion historialVerificacionIdentidadImportacion modalidadAtencionConfirmada huellaModalidadAtencion fechaConfirmacionModalidad historialVinculaciones')
       .lean();
     // ====== Mostrar desvinculación solo si no existen solicitudes ======
     const vinculadas = programaciones.filter((p) => p.pacienteId && p.hc).map((p) => p._id);
@@ -110,6 +129,8 @@ const verificarIdentidadesImportacion = async (req, res) => {
       const fila = {
         programacionId: String(p._id), codProgramacion: p.codProgramacion,
         filaExcel: p.filaExcelImportacion, estadoProgramacion: p.estadoProgramacion,
+        modalidadAtencionConfirmada: p.modalidadAtencionConfirmada ?? null,
+        modalidadAtencionVigente: modalidadVigente(p),
         identidad: {
           tipoDoc: p.tipoDoc ?? null, nroDoc: p.nroDoc ?? null,
           nombreCliente: p.nombreCliente, apePatCliente: p.apePatCliente, apeMatCliente: p.apeMatCliente ?? '',

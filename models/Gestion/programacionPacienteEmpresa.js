@@ -143,6 +143,12 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
       default: null,
     },
     hc: { type: String, default: null, trim: true },
+    // ====== Modalidad confirmada antes de iniciar atención ======
+    modalidadAtencionConfirmada: {
+      type: String, enum: ['PACIENTE_NUEVO', 'TEMPORAL', null], default: null,
+    },
+    huellaModalidadAtencion: { type: String, default: null },
+    fechaConfirmacionModalidad: { type: Date, default: null },
     // ====== Contactos transaccionales mientras no hay HC ======
     phones: { type: [{
       phoneNumber: { type: String, required: true, trim: true },
