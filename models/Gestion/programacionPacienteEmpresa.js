@@ -143,6 +143,11 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
       default: null,
     },
     hc: { type: String, default: null, trim: true },
+    // ====== Contactos transaccionales mientras no hay HC ======
+    phones: { type: [{
+      phoneNumber: { type: String, required: true, trim: true },
+      descriptionPhone: { type: String, required: true, trim: true },
+    }], default: [] },
     // ====== Identidad transaccional hasta resolver documento ======
     identidadTemporalActiva: { type: Boolean, default: false },
     fechaInicioIdentidadTemporal: { type: Date, default: null },

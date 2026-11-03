@@ -293,6 +293,10 @@ const crearProgramacion = async (req, res = response) => {
       }
     }
 
+    // ====== Contactos declarados para programaciones sin HC ======
+    const telefonosProgramacion = !pacienteMaestro && req.body.phones
+      ? normalizarTelefonosProgramacion(req.body.phones) : [];
+
     // ====== Prevenir duplicados utilizando la identidad maestra validada ======
     const datosIdentidad = { ...req.body, ...documento,
       pacienteId: pacienteMaestro?._id ?? null };
@@ -328,6 +332,7 @@ const crearProgramacion = async (req, res = response) => {
       ...req.body,
       pacienteId: pacienteMaestro?._id ?? null,
       hc: pacienteMaestro?.hc ?? null,
+      phones: telefonosProgramacion,
       ...documento,
       ...(pacienteMaestro ? {
         nombreCliente: pacienteMaestro.nombreCliente,
@@ -485,143 +490,206 @@ const obtenerProgramacion = async (req, res = response) => {
   }
 };
 
+// ====== Normalizar teléfonos transaccionales de una programación sin HC ======
+const normalizarTelefonosProgramacion = (telefonos) => {
+  if (!Array.isArray(telefonos) || telefonos.length > 15) {
+    throw new Error('La programación admite hasta 15 teléfonos');
+  }
+  return telefonos.map((telefono) => {
+    const phoneNumber = String(telefono.phoneNumber ?? '').trim();
+    const descriptionPhone = String(telefono.descriptionPhone ?? '').trim();
+    if (!/^\d{9,11}$/.test(phoneNumber) || !descriptionPhone || descriptionPhone.length > 30) {
+      throw new Error('Teléfono de contacto inválido');
+    }
+    return { phoneNumber, descriptionPhone };
+  });
+};
+
+const valorAuditoriaProgramacion = (valor, campo) => {
+  if (campo === 'fechaNacimiento') {
+    if (!valor) return '';
+    const fecha = new Date(valor);
+    return Number.isNaN(fecha.getTime()) ? '' : fecha.toISOString().slice(0, 10);
+  }
+  if (campo === 'phones') {
+    return JSON.stringify((valor ?? []).map(({ phoneNumber, descriptionPhone }) => ({
+      phoneNumber: String(phoneNumber ?? '').trim(),
+      descriptionPhone: String(descriptionPhone ?? '').trim(),
+    })));
+  }
+  return String(valor ?? '').trim();
+};
+
 const actualizarProgramacion = async (req, res = response) => {
   try {
-    const programacionActual = await ProgramacionPacienteEmpresa.findById(
-      req.params.id,
-    );
-
+    const programacionActual = await ProgramacionPacienteEmpresa.findById(req.params.id);
     if (!programacionActual) {
-      return res
-        .status(404)
-        .json({ ok: false, msg: "Programación no encontrada" });
+      return res.status(404).json({ ok: false, msg: 'Programación no encontrada' });
     }
 
-    // ====== Vinculación solo por endpoint auditado ======
-    if ((req.body.pacienteId && String(req.body.pacienteId) !== String(programacionActual.pacienteId ?? '')) ||
-        (req.body.hc && String(req.body.hc) !== String(programacionActual.hc ?? ''))) {
-      return res.status(409).json({ ok:false,
-        msg:'La vinculación de HC se realiza desde la revisión de coincidencias.' });
-    }
-    const datosActualizables = { ...req.body };
-    delete datosActualizables.pacienteId;
-    delete datosActualizables.hc;
-    const actualizaDocumento = "nroDoc" in req.body || "tipoDoc" in req.body;
-    if (actualizaDocumento) {
-      const documento = normalizarDocumentoProgramacion({
-        tipoDoc: req.body.tipoDoc ?? programacionActual.tipoDoc,
-        nroDoc: req.body.nroDoc ?? ("nroDoc" in req.body ? null : programacionActual.nroDoc),
-      });
-      Object.assign(datosActualizables, documento);
+    // ====== No permitir editar identidad tras vincular HC o iniciar atención ======
+    const vinculada = Boolean(programacionActual.pacienteId || programacionActual.hc);
+    const edicionIdentidadPermitida = !vinculada &&
+      programacionActual.estadoProgramacion === 'PROGRAMADO' &&
+      !programacionActual.fechaInicioAtencion;
+    const camposIdentidad = [
+      'tipoDoc', 'nroDoc', 'nombreCliente', 'apePatCliente', 'apeMatCliente',
+      'sexoCliente', 'fechaNacimiento', 'phones',
+    ];
+    const permitidos = [
+      ...camposIdentidad, 'fechaProgramada', 'sede', 'tipoEvaluacion',
+      'tipoAtencion', 'prioridad', 'observaciones', 'empresaId', 'protocoloId',
+    ];
+    const datos = Object.fromEntries(permitidos
+      .filter(campo => Object.prototype.hasOwnProperty.call(req.body, campo))
+      .map(campo => [campo, req.body[campo]]));
+    const pacienteIdNuevo = String(req.body.pacienteId ?? '').trim();
+    const hcRecibida = String(req.body.hc ?? '').trim();
+
+    if (vinculada && (pacienteIdNuevo && pacienteIdNuevo !== String(programacionActual.pacienteId ?? '') ||
+        hcRecibida && hcRecibida !== String(programacionActual.hc ?? ''))) {
+      return res.status(409).json({ ok: false, codigo: 'IDENTIDAD_VINCULADA',
+        msg: 'La identidad vinculada no puede modificarse desde la programación.' });
     }
 
-    // ====== Proteger historia clínica y solicitudes existentes ======
-    if ((programacionActual.pacienteId || programacionActual.estadoProgramacion !== "PROGRAMADO") &&
-        cambiaIdentidad(programacionActual, datosActualizables)) {
-      return res.status(409).json({
-        ok: false,
-        codigo: "IDENTIDAD_VINCULADA",
-        msg: "La identidad ya está vinculada a un paciente o una atención. No puede modificarse únicamente desde la programación.",
-      });
-    }
-
-    if (!programacionActual.pacienteId && programacionActual.estadoProgramacion === "PROGRAMADO") {
-      // La vinculación a un paciente existente debe hacerse por búsqueda, no enviando un ID arbitrario.
-      if (datosActualizables.pacienteId &&
-          String(datosActualizables.pacienteId) !== String(programacionActual.pacienteId ?? "")) {
-        const paciente = await Paciente.findById(datosActualizables.pacienteId).lean();
-        if (!paciente || !paciente.hc) {
-          return res.status(409).json({ ok: false, msg: "Paciente seleccionado no válido" });
-        }
-        if (!validarCoincidenciaIdentidad(datosActualizables, paciente).coincide) {
-          return res.status(409).json({ ok: false, msg: "Los nombres no coinciden con el paciente vinculado" });
-        }
-        if (String(datosActualizables.tipoDoc ?? "") !== String(paciente.tipoDoc ?? "") ||
-            String(datosActualizables.nroDoc ?? "") !== String(paciente.nroDoc ?? "")) {
-          return res.status(409).json({ ok: false, msg: "El documento no coincide con el paciente seleccionado" });
-        }
-        datosActualizables.hc = paciente.hc;
+    let pacienteConfirmado = null;
+    if (edicionIdentidadPermitida && pacienteIdNuevo) {
+      if (!mongoose.isValidObjectId(pacienteIdNuevo)) {
+        return res.status(400).json({ ok: false, msg: 'Paciente seleccionado inválido' });
       }
-    }
-
-    delete datosActualizables.codProgramacion;
-    delete datosActualizables.estadoProgramacion;
-    delete datosActualizables.createdBy;
-    delete datosActualizables.usuarioRegistro;
-    delete datosActualizables.plazoResultados;
-    delete datosActualizables.serviciosProgramados;
-    delete datosActualizables.codProtocolo;
-    delete datosActualizables.nombreProtocolo;
-    delete datosActualizables.rucEmpresa;
-    delete datosActualizables.razonSocialEmpresa;
-    delete datosActualizables.nombreComercialEmpresa;
-
-    const empresaIdNuevo = String(
-      req.body.empresaId ?? programacionActual.empresaId ?? "",
-    );
-    const protocoloIdNuevo = String(
-      req.body.protocoloId ?? programacionActual.protocoloId ?? "",
-    );
-
-    const cambioContrato =
-      empresaIdNuevo !== String(programacionActual.empresaId ?? "") ||
-      protocoloIdNuevo !== String(programacionActual.protocoloId ?? "");
-
-    if (cambioContrato) {
-      const snapshotProtocolo = await resolverSnapshotProtocolo({
-        empresaId: empresaIdNuevo,
-        protocoloId: protocoloIdNuevo,
+      pacienteConfirmado = await Paciente.findById(pacienteIdNuevo).lean();
+      if (!pacienteConfirmado?.hc || !pacienteConfirmado.tipoDoc || !pacienteConfirmado.nroDoc ||
+          pacienteConfirmado.estadoIdentificacion === 'PENDIENTE' ||
+          (pacienteConfirmado.tipoHC === 'PROVISIONAL' && pacienteConfirmado.estadoConciliacion !== 'CONCILIADA')) {
+        return res.status(409).json({ ok: false, msg: 'La HC seleccionada no está habilitada. Consulta nuevamente el documento.' });
+      }
+      const documento = normalizarDocumentoProgramacion(datos);
+      const coincideDocumento = documento.tipoDoc === String(pacienteConfirmado.tipoDoc).trim().toUpperCase() &&
+        documento.nroDoc === String(pacienteConfirmado.nroDoc).trim().toUpperCase();
+      if (!coincideDocumento || !validarCoincidenciaIdentidad(datos, pacienteConfirmado).coincide ||
+          (hcRecibida && hcRecibida !== String(pacienteConfirmado.hc))) {
+        return res.status(409).json({ ok: false, msg: 'La identidad seleccionada ya no coincide. Consulta nuevamente el DNI.' });
+      }
+      const coincidentes = await Paciente.find({
+        tipoDoc: new RegExp(`^${documento.tipoDoc}$`, 'i'),
+        nroDoc: new RegExp(`^${documento.nroDoc}$`, 'i'),
+      }).select('_id').limit(2).lean();
+      if (coincidentes.length !== 1 || String(coincidentes[0]._id) !== String(pacienteConfirmado._id)) {
+        return res.status(409).json({ ok: false, msg: 'Este documento tiene coincidencias ambiguas. Corrige el conflicto.' });
+      }
+      Object.assign(datos, {
+        pacienteId: pacienteConfirmado._id, hc: pacienteConfirmado.hc,
+        tipoDoc: documento.tipoDoc, nroDoc: documento.nroDoc,
+        nombreCliente: pacienteConfirmado.nombreCliente,
+        apePatCliente: pacienteConfirmado.apePatCliente,
+        apeMatCliente: pacienteConfirmado.apeMatCliente ?? '',
+        sexoCliente: pacienteConfirmado.sexoCliente ?? null,
+        fechaNacimiento: pacienteConfirmado.fechaNacimiento ?? null,
       });
-
-      Object.assign(datosActualizables, snapshotProtocolo);
-    } else {
-      delete datosActualizables.empresaId;
-      delete datosActualizables.protocoloId;
-    }
-
-    const condiciones = {
-      ...programacionActual.toObject(),
-      ...datosActualizables,
-      empresaId: empresaIdNuevo,
-      protocoloId: protocoloIdNuevo,
-    };
-    if ("fechaProgramada" in req.body || "tipoDoc" in req.body ||
-        "nroDoc" in req.body || "empresaId" in req.body ||
-        "protocoloId" in req.body || "nombreCliente" in req.body ||
-        "apePatCliente" in req.body || "apeMatCliente" in req.body) {
-      const duplicada = await ProgramacionPacienteEmpresa.findOne(
-        filtroDuplicadoProgramacion(condiciones, programacionActual._id),
-      ).lean();
-      if (duplicada) {
-        return res.status(409).json({
-          ok: false,
-          msg: "Ya existe una programación para este trabajador, empresa y protocolo en la misma fecha",
+      delete datos.phones; // Los contactos de la HC no se modifican desde Programación
+    } else if (edicionIdentidadPermitida) {
+      const documento = normalizarDocumentoProgramacion(datos);
+      Object.assign(datos, documento);
+      if (documento.nroDoc) {
+        const pacienteExistente = await Paciente.exists({
+          tipoDoc: new RegExp(`^${documento.tipoDoc}$`, 'i'),
+          nroDoc: new RegExp(`^${documento.nroDoc}$`, 'i'),
         });
+        if (pacienteExistente) {
+          return res.status(409).json({ ok: false, msg: 'Este documento ya está registrado. Consulta y confirma la HC antes de guardar.' });
+        }
       }
+      if ('phones' in datos) datos.phones = normalizarTelefonosProgramacion(datos.phones);
+    } else {
+      // ====== No aceptar cambios indirectos de identidad desde el payload ======
+      const identidadDistinta = camposIdentidad.some(campo =>
+        campo in datos && valorAuditoriaProgramacion(programacionActual[campo], campo) !==
+          valorAuditoriaProgramacion(datos[campo], campo));
+      if (identidadDistinta || (pacienteIdNuevo && !vinculada)) {
+        return res.status(409).json({ ok: false, codigo: 'IDENTIDAD_BLOQUEADA',
+          msg: 'No puedes modificar la identidad de una programación vinculada o con atención iniciada.' });
+      }
+      camposIdentidad.forEach(campo => delete datos[campo]);
     }
 
-    const programacion = await ProgramacionPacienteEmpresa.findByIdAndUpdate(
-      req.params.id,
-      {
-        ...datosActualizables,
-        updatedBy: req.user.uid,
-        usuarioActualizacion: req.user.nombreUsuario,
-        fechaActualizacion: new Date(),
-      },
-      { new: true, runValidators: true },
-    );
+    const cambios = edicionIdentidadPermitida ? camposIdentidad
+      .filter(campo => campo in datos &&
+        valorAuditoriaProgramacion(programacionActual[campo], campo) !== valorAuditoriaProgramacion(datos[campo], campo))
+      .map(campo => ({ campo,
+        valorAnterior: valorAuditoriaProgramacion(programacionActual[campo], campo),
+        valorNuevo: valorAuditoriaProgramacion(datos[campo], campo),
+      })) : [];
+    if (edicionIdentidadPermitida && (cambios.length || pacienteConfirmado)) {
+      const solicitudes = await SolicitudAtencion.exists({ programacionEmpresaId: programacionActual._id });
+      if (solicitudes) return res.status(409).json({ ok: false,
+        msg: 'Ya existen solicitudes de atención. La identidad no puede corregirse desde la programación.' });
+    }
 
-    return res.json({
-      ok: true,
-      msg: "Programación actualizada correctamente",
-      programacion,
-    });
+    // ====== Reutilizar snapshot contractual y prevención de duplicados ======
+    const empresaIdNuevo = String(req.body.empresaId ?? programacionActual.empresaId ?? '');
+    const protocoloIdNuevo = String(req.body.protocoloId ?? programacionActual.protocoloId ?? '');
+    const cambioContrato = empresaIdNuevo !== String(programacionActual.empresaId) ||
+      protocoloIdNuevo !== String(programacionActual.protocoloId);
+    if (cambioContrato) {
+      Object.assign(datos, await resolverSnapshotProtocolo({ empresaId: empresaIdNuevo,
+        protocoloId: protocoloIdNuevo }));
+    } else {
+      delete datos.empresaId;
+      delete datos.protocoloId;
+    }
+    const condiciones = { ...programacionActual.toObject(), ...datos,
+      empresaId: empresaIdNuevo, protocoloId: protocoloIdNuevo };
+    const duplicada = await ProgramacionPacienteEmpresa.findOne(
+      filtroDuplicadoProgramacion(condiciones, programacionActual._id)).lean();
+    if (duplicada) return res.status(409).json({ ok: false,
+      msg: 'Ya existe una programación para este trabajador, empresa y protocolo en la misma fecha' });
+
+    const ahora = new Date();
+    const eventos = [];
+    if (cambios.length) {
+      eventos.push({ tipo: 'CORRECCION_PROGRAMACION',
+        pacienteIdAnterior: null, hcAnterior: null,
+        pacienteIdNuevo: pacienteConfirmado?._id ?? null,
+        hcNueva: pacienteConfirmado?.hc ?? null,
+        tipoDocAnterior: programacionActual.tipoDoc ?? null,
+        nroDocAnterior: programacionActual.nroDoc ?? null,
+        tipoDocNuevo: datos.tipoDoc ?? programacionActual.tipoDoc ?? null,
+        nroDocNuevo: datos.nroDoc ?? null,
+        fecha: ahora, ejecutadoPor: String(req.user.uid),
+        usuario: req.user.nombreUsuario, origenDocumento: 'EMPRESA',
+        tipoResolucion: 'EDICION_PROGRAMACION', cambiosIdentidad: cambios,
+      });
+    }
+    if (pacienteConfirmado) {
+      eventos.push({ tipo: 'VINCULACION_INICIAL',
+        pacienteIdAnterior: null, hcAnterior: null,
+        pacienteIdNuevo: pacienteConfirmado._id, hcNueva: pacienteConfirmado.hc,
+        tipoDocAnterior: programacionActual.tipoDoc ?? null,
+        nroDocAnterior: programacionActual.nroDoc ?? null,
+        tipoDocNuevo: datos.tipoDoc, nroDocNuevo: datos.nroDoc,
+        fecha: ahora, ejecutadoPor: String(req.user.uid), usuario: req.user.nombreUsuario,
+        origenDocumento: 'EMPRESA', tipoResolucion: 'COINCIDENCIA_EXACTA',
+        motivoDecision: 'Paciente confirmado mediante consulta de DNI al editar programación',
+      });
+    }
+
+    const filtro = { _id: programacionActual._id,
+      estadoProgramacion: programacionActual.estadoProgramacion,
+      pacienteId: programacionActual.pacienteId ?? null,
+      hc: programacionActual.hc ?? null };
+    if (edicionIdentidadPermitida) filtro.fechaInicioAtencion = null;
+    const actualizacion = { $set: { ...datos, updatedBy: req.user.uid,
+      usuarioActualizacion: req.user.nombreUsuario, fechaActualizacion: ahora } };
+    if (eventos.length) actualizacion.$push = { historialVinculaciones: { $each: eventos } };
+    const programacion = await ProgramacionPacienteEmpresa.findOneAndUpdate(filtro, actualizacion,
+      { new: true, runValidators: true });
+    if (!programacion) return res.status(409).json({ ok: false,
+      msg: 'La programación cambió durante la edición. Vuelve a abrirla.' });
+    return res.json({ ok: true, msg: 'Programación actualizada correctamente', programacion });
   } catch (error) {
-    console.error("Error al actualizar programación empresarial:", error);
-    return res.status(400).json({
-      ok: false,
-      msg: error.message || "Datos de programación inválidos",
-    });
+    console.error('Error al actualizar programación empresarial:', error);
+    return res.status(400).json({ ok: false,
+      msg: error.message || 'Datos de programación inválidos' });
   }
 };
 
