@@ -45,6 +45,26 @@ const historialPermisoSchema = new Schema({
   reemplazadoPor: { type: String, default: '' },
 });
 
+// ====== Auditoría de edición de permisos vigentes ======
+const datosPermisoAuditoriaSchema = new Schema({
+  numeroDocumento: { type: String, default: '' },
+  entidadEmisora: { type: String, default: '' },
+  fechaEmision: { type: Date, default: null },
+  fechaVencimiento: { type: Date, default: null },
+  observaciones: { type: String, default: '' },
+}, { _id: false });
+
+const cambioPermisoSchema = new Schema({
+  tipo: { type: String, required: true, enum: ['EDICION', 'RENOVACION', 'ARCHIVO_ADJUNTADO', 'ARCHIVO_RETIRADO'] },
+  versionNumero: { type: Number, required: true, min: 1 },
+  fechaCambio: { type: Date, default: Date.now },
+  usuarioCambio: { type: String, default: '' },
+  motivo: { type: String, default: '', maxlength: 250 },
+  archivoNombre: { type: String, default: '' },
+  anterior: { type: datosPermisoAuditoriaSchema, default: undefined },
+  nuevo: { type: datosPermisoAuditoriaSchema, default: undefined },
+}, { _id: false });
+
 const permisoSchema = new Schema({
   tipoPermiso: { type: String, required: true, trim: true, maxlength: 100 },
   numeroDocumento: { type: String, required: true, trim: true, maxlength: 100 },
@@ -55,6 +75,7 @@ const permisoSchema = new Schema({
   archivos: { type: [archivoPermisoSchema], default: [] },
   versionActual: { type: Number, default: 1, min: 1 },
   historial: { type: [historialPermisoSchema], default: [] },
+  historialCambios: { type: [cambioPermisoSchema], default: [] },
 });
 
 const contactoHistorialSchema = new Schema({

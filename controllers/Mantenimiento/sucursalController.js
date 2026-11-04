@@ -90,13 +90,32 @@ function normalizarPermisos(permisos, original, usuario = '') {
     if (fechaEmision && fechaVencimiento && fechaVencimiento < fechaEmision) throw new Error('Vencimiento anterior a emisión');
 
     const renovar = p.renovar === true;
-    // ====== No sobrescribir datos de una versión ya emitida ======
-    if (previo && !renovar) {
-      const fechaBase = (valor) => valor ? new Date(valor).toISOString().slice(0, 10) : null;
-      const cambio = ['numeroDocumento', 'entidadEmisora', 'observaciones']
-        .some((campo) => String(previo[campo] || '').trim() !== String(p[campo] || '').trim());
-      const fechasCambiadas = fechaBase(previo.fechaEmision) !== fechaEmision || fechaBase(previo.fechaVencimiento) !== fechaVencimiento;
-      if (cambio || fechasCambiadas) throw new Error('Para cambiar datos de un permiso guardado use Registrar nueva versión');
+    const editar = p.editar === true;
+    if (editar && renovar) throw new Error('No se puede editar y renovar el permiso en una sola operación');
+    if (editar && !previo) throw new Error('Primero debe registrar el permiso antes de editarlo');
+
+    const fechaBase = (valor) => valor ? new Date(valor).toISOString().slice(0, 10) : null;
+    const anterior = previo ? {
+      numeroDocumento: String(previo.numeroDocumento || ''),
+      entidadEmisora: String(previo.entidadEmisora || ''),
+      fechaEmision: previo.fechaEmision || null,
+      fechaVencimiento: previo.fechaVencimiento || null,
+      observaciones: String(previo.observaciones || ''),
+    } : null;
+    const nuevo = {
+      numeroDocumento: String(p.numeroDocumento || '').trim(),
+      entidadEmisora: String(p.entidadEmisora || '').trim(),
+      fechaEmision, fechaVencimiento,
+      observaciones: String(p.observaciones || '').trim(),
+    };
+    const campos = ['numeroDocumento', 'entidadEmisora', 'observaciones'];
+    const cambio = !!previo && (
+      campos.some((campo) => anterior[campo] !== nuevo[campo]) ||
+      fechaBase(anterior.fechaEmision) !== fechaEmision ||
+      fechaBase(anterior.fechaVencimiento) !== fechaVencimiento
+    );
+    if (previo && cambio && !editar && !renovar) {
+      throw new Error('Para corregir datos de un permiso guardado utilice Editar datos');
     }
     if (renovar && !previo) throw new Error('Primero debe guardar el permiso inicial antes de renovarlo');
     if (renovar && !fechaEmision) throw new Error('La nueva versión requiere fecha de emisión');
@@ -116,6 +135,18 @@ function normalizarPermisos(permisos, original, usuario = '') {
         reemplazadoPor: usuario,
       },
     ] : historialPrevio;
+    const historialCambios = previo?.historialCambios?.map((c) => c.toObject()) || [];
+    if (previo && (renovar || (editar && cambio))) {
+      historialCambios.push({
+        tipo: renovar ? 'RENOVACION' : 'EDICION',
+        versionNumero: renovar ? (previo.versionActual || 1) + 1 : (previo.versionActual || 1),
+        fechaCambio: new Date(),
+        usuarioCambio: usuario,
+        motivo: String(renovar ? (p.motivoRenovacion || '') : (p.motivoEdicion || '')).trim().slice(0, 250),
+        anterior,
+        nuevo,
+      });
+    }
 
     return {
       ...(id ? { _id: id } : {}),
@@ -127,6 +158,7 @@ function normalizarPermisos(permisos, original, usuario = '') {
       observaciones: String(p.observaciones || '').trim(),
       versionActual: renovar ? (previo.versionActual || 1) + 1 : (previo?.versionActual || 1),
       historial,
+      historialCambios,
       // ====== El cliente nunca puede escribir referencias de almacenamiento ======
       archivos: renovar ? [] : (previo ? previo.archivos.map((a) => a.toObject()) : []),
     };
@@ -208,8 +240,16 @@ async function construirPayload(body, original = null, usuario = '') {
   datos.estado = body.estado;
   datos.esPrincipal = body.esPrincipal;
   datos.horarios = validarHorarios(body.horarios);
+  // ====== Información, Horarios y Personal obligatorios al crear ======
+  if (!original && !datos.horarios.some((horario) => horario.atiende && horario.turnos.length > 0)) {
+    throw new Error('Debe registrar al menos un día de atención con un turno para crear la sucursal');
+  }
+  if (!original && (!Array.isArray(body.personal) || body.personal.length === 0)) {
+    throw new Error('Debe asignar al menos un trabajador para crear la sucursal');
+  }
   datos.personal = await normalizarPersonal(body.personal);
-  datos.permisos = normalizarPermisos(body.permisos, original, usuario);
+  // ====== Permisos opcionales; si se registran deben estar completos ======
+  datos.permisos = normalizarPermisos(body.permisos ?? [], original, usuario);
   return datos;
 }
 async function verificarPrincipal(id, solicitado) {
@@ -401,6 +441,10 @@ const subirArchivoPermiso = async (req, res = response) => {
     if (!valida) return res.status(400).json({ ok: false, msg: 'Contenido de archivo no coincide con el formato declarado' });
     const archivoStorage = await subirArchivoStorage({ keyPrefix: `sucursales/${sucursal._id}/permisos/${permiso._id}`, buffer, mimeType: mimetype });
     permiso.archivos.push({ nombreArchivo: String(originalname).slice(0, 180), mimeType: mimetype, tamanioBytes: size, storageKey: archivoStorage.key, storageVersionId: archivoStorage.versionId, creadoPor: req.user.uid });
+    permiso.historialCambios.push({
+      tipo: 'ARCHIVO_ADJUNTADO', versionNumero: permiso.versionActual || 1,
+      usuarioCambio: req.user.nombreUsuario, archivoNombre: String(originalname).slice(0, 180),
+    });
     sucursal.updatedBy = req.user.uid;
     sucursal.usuarioActualizacion = req.user.nombreUsuario;
     try {
@@ -438,6 +482,11 @@ const retirarArchivoPermiso = async (req, res = response) => {
     if (!archivo) return res.status(404).json({ ok: false, msg: 'Archivo no encontrado' });
     const key = archivo.storageKey;
     const versionId = archivo.storageVersionId || undefined;
+    const permiso = sucursal.permisos.id(req.params.permisoId);
+    permiso.historialCambios.push({
+      tipo: 'ARCHIVO_RETIRADO', versionNumero: permiso.versionActual || 1,
+      usuarioCambio: req.user.nombreUsuario, archivoNombre: archivo.nombreArchivo,
+    });
     archivo.deleteOne();
     sucursal.updatedBy = req.user.uid;
     sucursal.usuarioActualizacion = req.user.nombreUsuario;
