@@ -17,31 +17,43 @@ const rechazar = (codigo, msg, status = 409) => {
 };
 const texto = valor => String(valor ?? '').trim().replace(/\s+/g, ' ');
 
-// ====== Validar datos reales del domicilio para un paciente definitivo ======
+// ====== Ubigeo opcional y jerárquico ======
 const obtenerUbicacion = body => {
   const ubicacion = {
     departamentoCliente: texto(body?.departamentoCliente),
     provinciaCliente: texto(body?.provinciaCliente),
     distritoCliente: texto(body?.distritoCliente),
   };
-  // ====== Mantenimiento de Pacientes almacena códigos de ubigeo de dos dígitos ======
-  if (Object.values(ubicacion).some(valor => !/^\d{2}$/.test(valor))) {
-    rechazar('UBIGEO_INVALIDO', 'Seleccione departamento, provincia y distrito desde las listas.', 400);
+  if (Object.values(ubicacion).some(valor => valor && !/^\d{2}$/.test(valor)) ||
+      (ubicacion.provinciaCliente && !ubicacion.departamentoCliente) ||
+      (ubicacion.distritoCliente && !ubicacion.provinciaCliente)) {
+    rechazar('UBIGEO_INVALIDO', 'La ubicación es opcional; si indicas provincia o distrito, completa sus niveles anteriores.', 400);
   }
   return ubicacion;
 };
 
-// ====== Teléfono y correo opcionales ======
+// ====== Teléfonos múltiples y correo opcionales ======
 const obtenerContacto = body => {
-  const telefono = texto(body?.telefonoCliente);
-  const correo = texto(body?.mailCliente).toLowerCase();
-  if (telefono && !/^\d{9,11}$/.test(telefono)) {
-    rechazar('TELEFONO_INVALIDO', 'El teléfono debe tener entre 9 y 11 dígitos.', 400);
+  const entrada = body?.phones ?? [];
+  if (!Array.isArray(entrada) || entrada.length > 15) {
+    rechazar('TELEFONOS_INVALIDOS', 'Ingresa un máximo de 15 teléfonos.', 400);
   }
+  const phones = entrada.map(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      rechazar('TELEFONOS_INVALIDOS', 'Revise los teléfonos ingresados.', 400);
+    }
+    const phoneNumber = texto(item.phoneNumber);
+    const descriptionPhone = texto(item.descriptionPhone);
+    if (!/^\d{9,11}$/.test(phoneNumber) || !descriptionPhone || descriptionPhone.length > 30) {
+      rechazar('TELEFONOS_INVALIDOS', 'Cada teléfono necesita 9 a 11 dígitos y una descripción de hasta 30 caracteres.', 400);
+    }
+    return { phoneNumber, descriptionPhone };
+  });
+  const correo = texto(body?.mailCliente).toLowerCase();
   if (correo && (correo.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo))) {
     rechazar('CORREO_INVALIDO', 'El correo electrónico no es válido.', 400);
   }
-  return { mailCliente: correo || undefined, phones: telefono ? [{ phoneNumber: telefono, descriptionPhone: 'CELULAR' }] : [] };
+  return { mailCliente: correo || undefined, phones };
 };
 
 // ====== Registrar cada corrección anterior / nueva en el evento de vinculación ======
@@ -159,7 +171,15 @@ const regularizarTemporalConHCNueva = async (req, res = response) => {
 
       const ahora = new Date();
       const nombreCompletoUsuario = await nombreOperador(uid, usuario, session);
-      // ====== Sincronizar identidad corregida con la programación vigente ======
+      // ====== Sincronizar identidad y contactos con la programación vigente ======
+      const telefonosAnteriores = JSON.stringify((programacion.phones ?? []).map(t => ({
+        phoneNumber: t.phoneNumber, descriptionPhone: t.descriptionPhone,
+      })));
+      const telefonosNuevos = JSON.stringify(contacto.phones);
+      if (telefonosAnteriores !== telefonosNuevos) cambiosIdentidad.push({
+        campo: 'phones', valorAnterior: telefonosAnteriores, valorNuevo: telefonosNuevos,
+      });
+      programacion.phones = contacto.phones;
       programacion.nombreCliente = identidad.nombreCliente;
       programacion.apePatCliente = identidad.apePatCliente;
       programacion.apeMatCliente = identidad.apeMatCliente;
