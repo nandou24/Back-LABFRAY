@@ -147,6 +147,9 @@ const obtenerExtension = (mimeType) => {
     case "image/webp":
       return "webp";
 
+    case "application/pdf":
+      return "pdf";
+
     default:
       return "bin";
   }
