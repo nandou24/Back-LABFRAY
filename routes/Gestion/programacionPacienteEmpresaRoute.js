@@ -1,4 +1,7 @@
 const { Router } = require("express");
+const Sucursal = require('../../models/Mantenimiento/Sucursal');
+const Programacion = require('../../models/Gestion/programacionPacienteEmpresa');
+const { listarSedesActivasProgramacion } = require('../../controllers/Gestion/sedesActivasProgramacionController');
 const { check } = require("express-validator");
 const {
   crearProgramacion,
@@ -29,6 +32,18 @@ const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
 
 const router = Router();
+
+// ====== Aceptar solo sedes activas; conservar el valor histórico en edición ======
+const validarSedeProgramacion = async (valor, { req }) => {
+  const sede = String(valor ?? '').trim();
+  if (!sede) throw new Error('Selecciona una sede activa.');
+  if (await Sucursal.exists({ nombre: sede, estado: 'ACTIVA' })) return true;
+  if (req.method === 'PUT' && req.params.id) {
+    const anterior = await Programacion.findById(req.params.id).select('sede').lean();
+    if (anterior?.sede === sede) return true;
+  }
+  throw new Error('La sede seleccionada no existe o ya no está activa.');
+};
 
 const validarProgramacion = [
   check("empresaId", "El ID de empresa es obligatorio").isMongoId(),
@@ -70,9 +85,7 @@ const validarProgramacion = [
     min: 1,
   }),
   check("fechaProgramada", "La fecha programada no es válida").isISO8601(),
-  check("sede", "La sede no es válida")
-    .optional()
-    .isIn(["Callao", "Comas", "NoIndica"]),
+  check('sede').custom(validarSedeProgramacion),
   check("tipoEvaluacion", "El tipo de evaluación no es válido")
     .optional()
     .isIn([
@@ -92,6 +105,8 @@ const validarProgramacion = [
   validarCampos,
 ];
 
+// ====== Catálogo de lectura para programación manual y Excel ======
+router.get('/sedes-activas', validarJWT, listarSedesActivasProgramacion);
 router.post("/", [validarJWT, ...validarProgramacion], crearProgramacion);
 router.get("/", validarJWT, listarProgramaciones);
 // ====== Consulta manual por Enter antes de registrar programación ======
@@ -143,9 +158,7 @@ router.put(
   [
     validarJWT,
     check("id", "ID inválido").isMongoId(),
-    check("sede", "La sede no es válida")
-      .optional()
-      .isIn(["Callao", "Comas", "NoIndica"]),
+    check('sede').optional().custom(validarSedeProgramacion),
     check("tipoEvaluacion", "El tipo de evaluación no es válido")
       .optional()
       .isIn([

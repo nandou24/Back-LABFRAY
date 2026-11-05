@@ -223,7 +223,7 @@ const ProgramacionPacienteEmpresaSchema = new Schema(
     fechaProgramada: { type: Date, required: true },
     turno: { type: String, enum: ["MAÑANA", "TARDE", "NOCHE"] },
     horaProgramada: { type: String, trim: true },
-    sede: { type: String, enum: ["Callao", "Comas", "NoIndica"] },
+    sede: { type: String, trim: true, maxlength: 150 },
     tipoEvaluacion: {
       type: String,
       enum: [

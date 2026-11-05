@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Empresa = require('../../models/Mantenimiento/Empresa');
+const Sucursal = require('../../models/Mantenimiento/Sucursal');
 const Programacion = require('../../models/Gestion/programacionPacienteEmpresa');
 
 // ====== Normalizar datos de identificación ======
@@ -65,6 +66,10 @@ const analizarFilasImportacion = async (entradas, session = null) => {
       };
     });
 
+    // ====== Revalidar sedes activas también durante el registro transaccional ======
+    const sedesActivas = new Set((await Sucursal.find({ estado: 'ACTIVA' })
+      .select('nombre').session(session).lean()).map((sucursal) => sucursal.nombre));
+
     const empresaIds = [...new Set(filas.map((f) => f.empresaId).filter((id) => mongoose.isValidObjectId(id)))];
     const rucs = [...new Set(filas.map((f) => f.rucEmpresa).filter((v) => /^\d{11}$/.test(v)))];
     const filtrosEmpresa = [
@@ -109,7 +114,7 @@ const analizarFilasImportacion = async (entradas, session = null) => {
       if (f.sexoCliente && !['Masculino', 'Femenino'].includes(f.sexoCliente)) errores.push('Sexo inválido.');
       if (f.observaciones.length > 200) errores.push('Observaciones: máximo 200 caracteres.');
       if (!f.nombreCliente || !f.apePatCliente) errores.push('Faltan nombres o apellido paterno.');
-      if (!['Callao', 'Comas', 'NoIndica'].includes(f.sede)) errores.push('Selecciona una sede válida.');
+      if (!sedesActivas.has(f.sede)) errores.push('Selecciona una sede registrada y activa.');
       if (!['ETAs', 'Ocupacional', 'PreOcupacional', 'Retiro', 'Toxicológico', 'Otro'].includes(f.tipoEvaluacion)) errores.push('Tipo de evaluación inválido.');
       if (!['Regular', 'Preferencial', 'VIP'].includes(f.tipoAtencion)) errores.push('Tipo de atención inválido.');
       if (!['Normal', 'Alta'].includes(f.prioridad)) errores.push('Prioridad inválida.');

@@ -90,8 +90,8 @@ const contactoHistorialSchema = new Schema({
 
 const sucursalSchema = new Schema({
   codigo: { type: String, unique: true, required: true, uppercase: true, trim: true, immutable: true },
-  nombre: { type: String, required: true, trim: true, maxlength: 150 },
-  nombreCorto: { type: String, trim: true, maxlength: 70 },
+  nombre: { type: String, required: true, trim: true, uppercase: true, maxlength: 150 },
+  nombreCorto: { type: String, trim: true, uppercase: true, maxlength: 70 },
   estado: { type: String, enum: ['ACTIVA', 'INACTIVA'], default: 'ACTIVA' },
   esPrincipal: { type: Boolean, default: false },
   fechaApertura: { type: Date, default: null },
