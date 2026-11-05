@@ -33,6 +33,7 @@ const sedeSchema = new Schema({
   provincia: { type: String, trim: true, maxlength: 100, default: '' },
   distrito: { type: String, trim: true, maxlength: 100, default: '' },
   direccion: { type: String, trim: true, maxlength: 250, default: '' },
+  coordenadasMaps: { type: String, trim: true, maxlength: 80, default: '' },
   telefono: { type: String, trim: true, maxlength: 30, default: '' },
   correo: { type: String, trim: true, lowercase: true, maxlength: 180, default: '' },
   telefonos: { type: [telefonoSchema], default: [] },

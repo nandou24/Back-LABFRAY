@@ -13,6 +13,21 @@ const fallar = (msg) => { const e = new Error(msg); e.statusCode = 400; throw e;
 const str = (v) => String(v ?? '').trim();
 const correoValido = (v, titulo) => { if (v && !EMAIL.test(v)) fallar(`${titulo}: correo inválido`); return v.toLowerCase(); };
 
+// ====== Validar coordenadas de sede, siguiendo Sucursales ======
+function coordenadasValidas(valor, sede) {
+  const limpio = str(valor);
+  if (!limpio) return '';
+  if (!/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(limpio)) {
+    fallar(`${sede}: coordenadas inválidas; utiliza latitud,longitud`);
+  }
+  const [latitud, longitud] = limpio.split(',').map(valor => Number(valor.trim()));
+  if (!Number.isFinite(latitud) || !Number.isFinite(longitud) ||
+      latitud < -90 || latitud > 90 || longitud < -180 || longitud > 180) {
+    fallar(`${sede}: coordenadas fuera de rango`);
+  }
+  return `${latitud},${longitud}`;
+}
+
 // ====== Validación por tipo de documento, como Pacientes ======
 function identidad(body) {
   const tipoPersona = str(body.tipoPersona);
@@ -67,7 +82,8 @@ function sedesValidas(sedes) {
     if (contactos.length && contactos.filter(c => c.principal === true).length !== 1) fallar(`${nombre}: seleccione exactamente un contacto principal`);
     return {
       nombre, principal: s.principal === true, departamento: str(s.departamento), provincia: str(s.provincia),
-      distrito: str(s.distrito), direccion: str(s.direccion), telefono: str(s.telefono),
+      distrito: str(s.distrito), direccion: str(s.direccion),
+      coordenadasMaps: coordenadasValidas(s.coordenadasMaps, nombre), telefono: str(s.telefono),
       correo: correoValido(str(s.correo), nombre),
       telefonos: telefonos.map(t => {
         if (!str(t.numero) || !str(t.descripcion)) fallar(`${nombre}: cada teléfono adicional necesita número y descripción`);
