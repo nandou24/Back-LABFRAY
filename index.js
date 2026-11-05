@@ -159,6 +159,9 @@ app.use(
 // Sucursales
 app.use("/api/sucursales", require("./routes/Mantenimiento/sucursalRoute"));
 
+// Asociados
+app.use("/api/asociados", require("./routes/Mantenimiento/asociadoRoute"));
+
 //!Levantar el servidor
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
