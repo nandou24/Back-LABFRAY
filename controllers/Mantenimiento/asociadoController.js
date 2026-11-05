@@ -171,9 +171,23 @@ exports.catalogoServicios = async (_req, res) => {
 };
 exports.listar = async (req, res) => {
   try {
-    const q = str(req.query.search).slice(0, 120).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const filtro = q ? { $or: [{ razonSocial: { $regex: q, $options: 'i' } }, { nombres: { $regex: q, $options: 'i' } }, { apellidoPaterno: { $regex: q, $options: 'i' } }, { ruc: { $regex: q, $options: 'i' } }, { numeroDocumento: { $regex: q, $options: 'i' } }] } : {};
-    const asociados = await Asociado.find(filtro).select('tipoPersona nombres apellidoPaterno razonSocial nombreComercial tipoDocumento numeroDocumento ruc activo convenio createdAt').sort({ createdAt: -1 }).limit(200).lean();
+    // ====== Buscar por palabras en nombres, apellidos, razón social y documento ======
+    const termino = str(req.query.search).slice(0, 120);
+    const palabras = termino.split(/\s+/).filter(Boolean).slice(0, 8);
+    const campos = ['razonSocial', 'nombreComercial', 'nombres', 'apellidoPaterno', 'apellidoMaterno', 'ruc', 'numeroDocumento'];
+    const acentos = { a: '[aáàäâ]', e: '[eéèëê]', i: '[iíìïî]', o: '[oóòöô]', u: '[uúùüû]', n: '[nñ]' };
+    const filtro = palabras.length ? {
+      $and: palabras.map(palabra => {
+        const texto = [...palabra].map(letra => {
+          const normal = letra.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+          return acentos[normal] || letra.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }).join('');
+        return { $or: campos.map(campo => ({ [campo]: { $regex: texto, $options: 'i' } })) };
+      }),
+    } : {};
+    const asociados = await Asociado.find(filtro)
+      .select('tipoPersona nombres apellidoPaterno apellidoMaterno razonSocial nombreComercial tipoDocumento numeroDocumento ruc activo convenio createdAt')
+      .sort({ createdAt: -1 }).limit(200).lean();
     res.json({ ok: true, asociados, limitado: asociados.length === 200 });
   } catch (err) { errorHttp(res, err, 'No se pudo listar asociados'); }
 };
