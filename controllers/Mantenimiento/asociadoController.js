@@ -102,15 +102,62 @@ function sedesValidas(sedes) {
 }
 function convenioValido(c) {
   if (!c || (c.enviaMuestras !== true && c.derivaPacientes !== true)) fallar('Seleccione al menos una modalidad de convenio');
-  const porcentaje = c.derivaPacientes ? Number(c.porcentajeComision) : null;
-  if (c.derivaPacientes && (c.porcentajeComision === '' || c.porcentajeComision == null || !Number.isFinite(porcentaje) || porcentaje < 0 || porcentaje > 100)) fallar('El porcentaje de comisión debe estar entre 0 y 100');
   const plazo = Number(c.plazoCreditoDias);
   if (!Number.isInteger(plazo) || plazo < 0 || plazo > 365) fallar('Plazo de crédito inválido');
   if (!['SEMANAL', 'QUINCENAL', 'MENSUAL'].includes(c.periodicidad)) fallar('Periodicidad inválida');
   if (!['CON_MEMBRETE', 'SIN_MEMBRETE'].includes(c.presentacionInforme)) fallar('Presentación del informe inválida');
-  return { enviaMuestras: c.enviaMuestras === true, derivaPacientes: c.derivaPacientes === true,
-    porcentajeComision: porcentaje, periodicidad: c.periodicidad, plazoCreditoDias: plazo,
-    presentacionInforme: c.presentacionInforme, condicionComision: 'PAGO_COMPLETO' };
+  const anteriores = c.porcentajeComision;
+  if (anteriores != null && anteriores !== '' && (!Number.isFinite(Number(anteriores)) || Number(anteriores) < 0 || Number(anteriores) > 100)) {
+    fallar('Porcentaje general anterior inválido');
+  }
+  return {
+    enviaMuestras: c.enviaMuestras === true, derivaPacientes: c.derivaPacientes === true,
+    // ====== Legado: se mantiene solo para consulta de registros antiguos ======
+    porcentajeComision: c.derivaPacientes && anteriores != null && anteriores !== '' ? Number(anteriores) : null,
+    periodicidad: c.periodicidad, plazoCreditoDias: plazo,
+    presentacionInforme: c.presentacionInforme, condicionComision: 'PAGO_COMPLETO',
+    comisionesPorTipo: c.derivaPacientes ? (c.comisionesPorTipo ?? []) : [],
+  };
+}
+
+// ====== Comisiones por tipo y servicio ======
+async function comisionesValidas(convenio, lista, idsTarifario) {
+  if (!Array.isArray(convenio.comisionesPorTipo) || !Array.isArray(lista)) fallar('Comisiones inválidas');
+  if (!convenio.derivaPacientes) {
+    if (convenio.comisionesPorTipo.length || lista.length) fallar('Desactive las comisiones cuando el convenio no incluye derivación');
+    return { porTipo: [], porServicio: [] };
+  }
+  if (lista.length > 5000) fallar('Demasiados servicios con comisión');
+  const tipos = new Map();
+  const porcentajeValido = valor => typeof valor === 'number' && Number.isFinite(valor) && valor > 0 && valor <= 100
+    && Math.abs(Math.round(valor * 100) - valor * 100) < 1e-7;
+  const catalogo = await Servicio.find({ estadoServicio: true }).select('_id tipoServicio claseServicio').lean();
+  const porId = new Map(catalogo.map(s => [String(s._id), s]));
+  const disponibles = new Set(catalogo.map(s => s.tipoServicio || (s.claseServicio === 'PAQUETE' ? 'Paquete' : 'No definido')));
+  for (const item of convenio.comisionesPorTipo) {
+    const tipo = str(item.tipoServicio);
+    const porcentaje = Number(item.porcentaje);
+    if (!disponibles.has(tipo) || tipos.has(tipo) || !porcentajeValido(porcentaje)) fallar('Porcentaje o tipo de servicio inválido o duplicado');
+    tipos.set(tipo, porcentaje);
+  }
+  const ids = new Set();
+  const resultado = [];
+  for (const item of lista) {
+    const id = String(item.servicioId || '');
+    if (!mongoose.isValidObjectId(id) || ids.has(id) || idsTarifario.has(id) || !porId.has(id)) {
+      fallar('Servicio duplicado, inexistente o asignado simultáneamente a tarifario y comisión');
+    }
+    ids.add(id);
+    const s = porId.get(id);
+    const tipo = s.tipoServicio || (s.claseServicio === 'PAQUETE' ? 'Paquete' : 'No definido');
+    const personalizado = item.porcentajePersonalizado == null || item.porcentajePersonalizado === ''
+      ? null : Number(item.porcentajePersonalizado);
+    if (personalizado !== null && !porcentajeValido(personalizado)) fallar('Comisión personalizada inválida (0 a 100 %, máximo dos decimales)');
+    if (personalizado === null && !tipos.has(tipo)) fallar(`Configure comisión general para ${tipo} o un porcentaje personalizado`);
+    resultado.push({ servicioId: id, porcentajePersonalizado: personalizado });
+  }
+  if (!resultado.length) fallar('Seleccione al menos un servicio que genere comisión');
+  return { porTipo: [...tipos].map(([tipoServicio, porcentaje]) => ({ tipoServicio, porcentaje })), porServicio: resultado };
 }
 function comprobantesValidos(list) {
   if (!Array.isArray(list) || !list.length || list.some(x => !COMPROBANTES.includes(x)) || new Set(list).size !== list.length) fallar('Seleccione comprobantes válidos');
@@ -139,8 +186,14 @@ async function construir(body) {
     const especialidad = await Especialidad.findOne({ _id: id.especialidadId, estadoEspecialidad: true }).select('profesionRef').lean();
     if (!especialidad || String(especialidad.profesionRef) !== String(id.profesionId)) fallar('La especialidad no pertenece a la profesión seleccionada');
   }
-  return { ...id, sedes: sedesValidas(body.sedes), convenio: convenioValido(body.convenio),
-    serviciosHabilitados: await tarifasValidas(body.serviciosHabilitados ?? []),
+  const convenio = convenioValido(body.convenio);
+  const serviciosHabilitados = await tarifasValidas(body.serviciosHabilitados ?? []);
+  if (!convenio.enviaMuestras && serviciosHabilitados.length) fallar('El convenio no incluye envío de muestras con tarifario');
+  const idsTarifario = new Set(serviciosHabilitados.map(s => String(s.servicioId)));
+  const comisiones = await comisionesValidas(convenio, body.serviciosComisionables ?? [], idsTarifario);
+  convenio.comisionesPorTipo = comisiones.porTipo;
+  return { ...id, sedes: sedesValidas(body.sedes), convenio,
+    serviciosHabilitados, serviciosComisionables: comisiones.porServicio,
     comprobantes: comprobantesValidos(body.comprobantes), observaciones: str(body.observaciones),
     activo: body.activo !== false };
 }

@@ -50,12 +50,19 @@ const convenioSchema = new Schema({
   presentacionInforme: { type: String, enum: ['CON_MEMBRETE', 'SIN_MEMBRETE'], default: 'CON_MEMBRETE' },
   porcentajeComision: { type: Number, min: 0, max: 100, default: null },
   condicionComision: { type: String, enum: ['PAGO_COMPLETO'], default: 'PAGO_COMPLETO' },
+  comisionesPorTipo: { type: [new Schema({ tipoServicio: { type: String, required: true, trim: true }, porcentaje: { type: Number, min: 0, max: 100, required: true } }, { _id: false })], default: [] },
 }, { _id: false });
 
 // ====== Únicamente los servicios habilitados; el resto no se ofrece ======
 const servicioHabilitadoSchema = new Schema({
   servicioId: { type: Schema.Types.ObjectId, ref: 'servicioCollection', required: true },
   precioPersonalizado: { type: Number, min: 0, default: null },
+}, { _id: false });
+
+// ====== Servicios que generan comisión (separados del tarifario) ======
+const servicioComisionableSchema = new Schema({
+  servicioId: { type: Schema.Types.ObjectId, ref: 'servicioCollection', required: true },
+  porcentajePersonalizado: { type: Number, min: 0, max: 100, default: null },
 }, { _id: false });
 
 const asociadoSchema = new Schema({
@@ -75,6 +82,7 @@ const asociadoSchema = new Schema({
   sedes: { type: [sedeSchema], default: [] },
   convenio: { type: convenioSchema, required: true },
   serviciosHabilitados: { type: [servicioHabilitadoSchema], default: [] },
+  serviciosComisionables: { type: [servicioComisionableSchema], default: [] },
   comprobantes: { type: [{ type: String, enum: ['RPH', 'BOLETA', 'FACTURA', 'NO_ESPECIFICA'] }], default: ['NO_ESPECIFICA'] },
   observaciones: { type: String, trim: true, maxlength: 3000, default: '' },
   activo: { type: Boolean, default: true },
