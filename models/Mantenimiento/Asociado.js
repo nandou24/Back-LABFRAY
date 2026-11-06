@@ -68,6 +68,8 @@ const servicioComisionableSchema = new Schema({
 const asociadoSchema = new Schema({
   tipoPersona: { type: String, enum: ['NATURAL', 'JURIDICA'], required: true },
   identificadorClave: { type: String, required: true, unique: true, immutable: true },
+  // ====== Código operativo único, asignado por backend ======
+  codigoAsociado: { type: String, uppercase: true, trim: true, immutable: true, match: /^AS\d{5,}$/ },
   // ====== Personas jurídicas utilizan RUC; no tienen tipoDocumento ======
   tipoDocumento: {
     type: String,
@@ -101,6 +103,7 @@ const asociadoSchema = new Schema({
   usuarioActualizacion: { type: String, default: '' },
 }, { timestamps: true, optimisticConcurrency: true });
 
+asociadoSchema.index({ codigoAsociado: 1 }, { unique: true, partialFilterExpression: { codigoAsociado: { $type: 'string' } } });
 asociadoSchema.index({ razonSocial: 1 });
 asociadoSchema.index({ apellidoPaterno: 1, nombres: 1 });
 

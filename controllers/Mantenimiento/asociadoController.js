@@ -4,6 +4,7 @@ const Servicio = require('../../models/Mantenimiento/Servicio');
 const PruebaLab = require('../../models/Mantenimiento/PruebaLab');
 const Profesion = require('../../models/Mantenimiento/Profesiones');
 const Especialidad = require('../../models/Mantenimiento/Especialidades');
+const { siguienteCodigoAsociado } = require('../../utils/generarCodigoAsociado');
 
 const HORARIO = /^([01]\d|2[0-3]):[0-5]\d$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -198,7 +199,12 @@ async function construir(body) {
     activo: body.activo !== false };
 }
 function errorHttp(res, err, texto) {
-  if (err.code === 11000) return res.status(409).json({ ok: false, msg: 'Ya existe un asociado con el mismo documento' });
+  if (err.code === 11000) {
+    if (err.keyPattern?.codigoAsociado || err.keyValue?.codigoAsociado) {
+      return res.status(409).json({ ok: false, msg: 'No fue posible reservar el código del asociado. Vuelve a intentar.' });
+    }
+    return res.status(409).json({ ok: false, msg: 'Ya existe un asociado con el mismo documento' });
+  }
   if (err.name === 'VersionError') return res.status(409).json({ ok: false, msg: 'El registro fue actualizado por otro usuario; recárguelo' });
   if (err.statusCode || err.name === 'ValidationError') return res.status(err.statusCode || 400).json({ ok: false, msg: err.message });
   console.error(texto, err);
@@ -227,7 +233,7 @@ exports.listar = async (req, res) => {
     // ====== Buscar por palabras en nombres, apellidos, razón social y documento ======
     const termino = str(req.query.search).slice(0, 120);
     const palabras = termino.split(/\s+/).filter(Boolean).slice(0, 8);
-    const campos = ['razonSocial', 'nombreComercial', 'nombres', 'apellidoPaterno', 'apellidoMaterno', 'ruc', 'numeroDocumento'];
+    const campos = ['codigoAsociado', 'razonSocial', 'nombreComercial', 'nombres', 'apellidoPaterno', 'apellidoMaterno', 'ruc', 'numeroDocumento'];
     const acentos = { a: '[aáàäâ]', e: '[eéèëê]', i: '[iíìïî]', o: '[oóòöô]', u: '[uúùüû]', n: '[nñ]' };
     const filtro = palabras.length ? {
       $and: palabras.map(palabra => {
@@ -239,7 +245,7 @@ exports.listar = async (req, res) => {
       }),
     } : {};
     const asociados = await Asociado.find(filtro)
-      .select('tipoPersona nombres apellidoPaterno apellidoMaterno razonSocial nombreComercial tipoDocumento numeroDocumento ruc activo convenio createdAt')
+      .select('codigoAsociado tipoPersona nombres apellidoPaterno apellidoMaterno razonSocial nombreComercial tipoDocumento numeroDocumento ruc activo convenio createdAt')
       .sort({ createdAt: -1 }).limit(200).lean();
     res.json({ ok: true, asociados, limitado: asociados.length === 200 });
   } catch (err) { errorHttp(res, err, 'No se pudo listar asociados'); }
@@ -255,7 +261,9 @@ exports.obtener = async (req, res) => {
 exports.crear = async (req, res) => {
   try {
     const payload = await construir(req.body);
-    const asociado = await Asociado.create({ ...payload, createdBy: req.user.uid, usuarioRegistro: req.user.nombreUsuario || '' });
+    // ====== El código no proviene del formulario ni del documento ======
+    const codigoAsociado = await siguienteCodigoAsociado();
+    const asociado = await Asociado.create({ ...payload, codigoAsociado, createdBy: req.user.uid, usuarioRegistro: req.user.nombreUsuario || '' });
     res.status(201).json({ ok: true, asociado });
   } catch (err) { errorHttp(res, err, 'No se pudo crear el asociado'); }
 };
