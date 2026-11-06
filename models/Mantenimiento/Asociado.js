@@ -68,7 +68,16 @@ const servicioComisionableSchema = new Schema({
 const asociadoSchema = new Schema({
   tipoPersona: { type: String, enum: ['NATURAL', 'JURIDICA'], required: true },
   identificadorClave: { type: String, required: true, unique: true, immutable: true },
-  tipoDocumento: { type: String, enum: ['DNI', 'CE', 'PASAPORTE'], default: null },
+  // ====== Personas jurídicas utilizan RUC; no tienen tipoDocumento ======
+  tipoDocumento: {
+    type: String,
+    default: null,
+    required: function () { return this.tipoPersona === 'NATURAL'; },
+    validate: {
+      validator: valor => valor == null || ['DNI', 'CE', 'PASAPORTE'].includes(valor),
+      message: 'Tipo de documento de persona natural inválido',
+    },
+  },
   numeroDocumento: { type: String, trim: true, uppercase: true, default: '' },
   ruc: { type: String, trim: true, default: '' },
   nombres: { type: String, trim: true, maxlength: 120, default: '' },
