@@ -43,9 +43,12 @@ const lecturaPreviaSchema = new Schema({
 }, { _id: false });
 
 const recepcionCentralSchema = new Schema({
+  // ====== Fecha declarada y fecha real de persistencia ======
   fechaHora: { type: Date, required: true },
+  fechaRegistroSistema: { type: Date, default: null },
   recibidoPor: { type: String, required: true },
   usuarioRecepcion: { type: String, required: true },
+  nombreResponsableRecepcion: { type: String, trim: true, default: '' },
   temperaturaC: { type: Number, default: null },
   motivoSinLectura: { type: String, trim: true, default: '' },
   incidencia: { type: String, trim: true, default: '' },

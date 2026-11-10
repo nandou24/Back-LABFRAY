@@ -15,6 +15,8 @@ router.use((req, res, next) => {
 });
 
 router.get('/catalogos', controller.obtenerCatalogos);
+router.get('/pacientes', controller.buscarPacientes);
+router.get('/pruebas', controller.buscarPruebas);
 router.get('/muestras', controller.buscarMuestras);
 router.get('/', controller.listarRecepciones);
 router.get('/:id', controller.obtenerRecepcion);

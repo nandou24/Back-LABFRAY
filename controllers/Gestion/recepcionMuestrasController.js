@@ -5,6 +5,10 @@ const MuestraLaboratorio = require('../../models/Gestion/MuestraLaboratorio');
 const SolicitudAtencion = require('../../models/Gestion/SolicitudAtencion');
 const Asociado = require('../../models/Mantenimiento/Asociado');
 const Sucursal = require('../../models/Mantenimiento/Sucursal');
+const RecHumano = require('../../models/Mantenimiento/RecHumano');
+const Paciente = require('../../models/Mantenimiento/Paciente');
+const PruebaLab = require('../../models/Mantenimiento/PruebaLab');
+const Servicio = require('../../models/Mantenimiento/Servicio');
 
 const estadosTransportables = ['RECOLECTADA', 'RECEPCIONADA', 'ACEPTADA'];
 const estadosPorRecibir = ['PENDIENTE_RECEPCION', 'DESPACHADO'];
@@ -12,6 +16,14 @@ const esId = valor => typeof valor === 'string' && /^[0-9a-fA-F]{24}$/.test(valo
 const limpio = (valor, max = 300) => typeof valor === 'string' ? valor.trim().slice(0, max) : '';
 const expresion = valor => new RegExp(valor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
 const error = (res, status, msg) => res.status(status).json({ ok: false, msg });
+
+// ====== Responsable: identificar al personal desde uid autenticado ======
+const nombreResponsable = async uid => {
+  const humano = await RecHumano.findOne({ codRecHumano: uid })
+    .select('nombreRecHumano apePatRecHumano apeMatRecHumano').lean();
+  return [humano?.nombreRecHumano, humano?.apePatRecHumano, humano?.apeMatRecHumano]
+    .filter(Boolean).map(x => String(x).trim()).join(' ').trim();
+};
 
 // ====== Resolver pruebas únicamente desde snapshots clínicos existentes ======
 const pruebasDeMuestra = muestra => {
@@ -30,14 +42,17 @@ const nombrePaciente = solicitud => [
 // ====== Catálogos restringidos al alcance de recepción ======
 const obtenerCatalogos = async (req, res) => {
   try {
-    const [asociados, sucursales] = await Promise.all([
+    const [asociados, sucursales, nombreCompleto] = await Promise.all([
       Asociado.find({ activo: true, 'convenio.enviaMuestras': true })
         .select('codigoAsociado tipoPersona razonSocial nombreComercial nombres apellidoPaterno apellidoMaterno ruc numeroDocumento sedes')
         .sort({ codigoAsociado: 1 }).limit(300).lean(),
       Sucursal.find({ estado: 'ACTIVA' }).select('codigo nombre nombreCorto')
         .sort({ nombre: 1 }).limit(300).lean(),
+      nombreResponsable(req.user.uid),
     ]);
+    if (!nombreCompleto) return error(res, 403, 'No se encontró el recurso humano asociado a esta sesión');
     return res.json({
+      responsable: { nombreCompleto },
       ok: true,
       asociados: asociados.map(a => ({
         _id: a._id,
@@ -53,6 +68,90 @@ const obtenerCatalogos = async (req, res) => {
   } catch (e) {
     console.error('Catalogos recepción:', e);
     return error(res, 500, 'No se pudieron cargar los catálogos');
+  }
+};
+
+
+// ====== Buscar pacientes existentes sin alterar el maestro ======
+const buscarPacientes = async (req, res) => {
+  const termino = limpio(req.query.search, 90);
+  if (termino.length < 2) return res.json({ ok: true, pacientes: [] });
+  try {
+    const filtro = { $or: [
+      { hc: expresion(termino) },
+      { nroDoc: expresion(termino) },
+      { nombreCliente: expresion(termino) },
+      { apePatCliente: expresion(termino) },
+      { apeMatCliente: expresion(termino) },
+    ] };
+    const pacientes = await Paciente.find(filtro)
+      .select('_id hc tipoDoc nroDoc nombreCliente apePatCliente apeMatCliente sexoCliente fechaNacimiento phones')
+      .sort({ updatedAt: -1 }).limit(15).lean();
+    return res.json({ ok: true, pacientes: pacientes.map(p => ({
+      _id: p._id, hc: p.hc || '', tipoDoc: p.tipoDoc || '', nroDoc: p.nroDoc || '',
+      nombres: p.nombreCliente || '', apePat: p.apePatCliente || '', apeMat: p.apeMatCliente || '',
+      sexo: p.sexoCliente || '', fechaNacimiento: p.fechaNacimiento || null,
+      telefono: (p.phones || [])[0]?.phoneNumber || '',
+    })) });
+  } catch (e) {
+    console.error('Buscar pacientes recepción:', e);
+    return error(res, 500, 'No se pudieron buscar pacientes');
+  }
+};
+
+// ====== Buscar pruebas habilitadas para el origen seleccionado ======
+const buscarPruebas = async (req, res) => {
+  const origenTipo = limpio(req.query.origenTipo, 30);
+  const asociadoId = limpio(req.query.asociadoId, 40);
+  const termino = limpio(req.query.search, 90);
+  if (!['ASOCIADO', 'SUCURSAL_PROPIA'].includes(origenTipo)) return error(res, 400, 'Origen inválido');
+  if (origenTipo === 'ASOCIADO' && !esId(asociadoId)) return error(res, 400, 'Seleccione un asociado');
+  try {
+    let autorizadas = null;
+    if (origenTipo === 'ASOCIADO') {
+      const asociado = await Asociado.findOne({
+        _id: asociadoId, activo: true, 'convenio.enviaMuestras': true,
+      }).select('serviciosHabilitados').lean();
+      if (!asociado) return error(res, 422, 'Asociado no habilitado para enviar muestras');
+      const servicioIds = (asociado.serviciosHabilitados || []).map(s => s.servicioId).filter(Boolean);
+      if (!servicioIds.length) return res.json({ ok: true, pruebas: [] });
+      // ====== Desplegar servicios incluidos en paquetes habilitados ======
+      const visitados = new Set();
+      let pendientes = servicioIds.map(String);
+      const permitidas = new Set();
+      for (let nivel = 0; nivel < 4 && pendientes.length; nivel++) {
+        const lote = [...new Set(pendientes)].filter(id => !visitados.has(id));
+        lote.forEach(id => visitados.add(id));
+        if (!lote.length) break;
+        const servicios = await Servicio.find({ _id: { $in: lote }, estadoServicio: true })
+          .select('examenesServicio serviciosIncluidos').lean();
+        pendientes = [];
+        for (const servicio of servicios) {
+          (servicio.examenesServicio || []).forEach(e => {
+            if (e.tipoExamen === 'LABORATORIO' && e.referenciaId) permitidas.add(String(e.referenciaId));
+          });
+          (servicio.serviciosIncluidos || []).forEach(s => {
+            if (s.servicioId && !visitados.has(String(s.servicioId))) pendientes.push(String(s.servicioId));
+          });
+        }
+      }
+      autorizadas = [...permitidas];
+      if (!autorizadas.length) return res.json({ ok: true, pruebas: [] });
+    }
+    const filtro = { estadoPrueba: 'ACTIVO' };
+    if (autorizadas) filtro._id = { $in: autorizadas };
+    if (termino) filtro.$or = [
+      { codPruebaLab: expresion(termino) }, { nombrePruebaLab: expresion(termino) },
+    ];
+    const pruebas = await PruebaLab.find(filtro).select('_id codPruebaLab nombrePruebaLab areaLab')
+      .sort({ nombrePruebaLab: 1 }).limit(50).lean();
+    return res.json({ ok: true, pruebas: pruebas.map(p => ({
+      _id: p._id, codPruebaLab: p.codPruebaLab, nombrePruebaLab: p.nombrePruebaLab,
+      areaLab: p.areaLab || '',
+    })) });
+  } catch (e) {
+    console.error('Buscar pruebas recepción:', e);
+    return error(res, 500, 'No se pudieron buscar las pruebas');
   }
 };
 
@@ -278,12 +377,26 @@ const confirmarRecepcion = async (req, res) => {
       }
       conteoPorId.set(id, valor);
     }
+    // ====== Conservar fecha declarada y sello de tiempo del servidor ======
+    const fechaTexto = req.body?.fechaHoraRecepcion;
+    const fechaRecepcion = typeof fechaTexto === 'string' &&
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(fechaTexto)
+      ? new Date(fechaTexto) : null;
+    const registroSistema = new Date();
+    if (!fechaRecepcion || Number.isNaN(fechaRecepcion.getTime()) ||
+        fechaRecepcion.toISOString() !== fechaTexto ||
+        fechaRecepcion.getTime() > registroSistema.getTime() + 10 * 60 * 1000 ||
+        fechaRecepcion.getUTCFullYear() < 2000) {
+      return error(res, 400, 'Fecha y hora de recepción inválida o posterior a la fecha del servidor');
+    }
+    const responsable = await nombreResponsable(req.user.uid);
+    if (!responsable) return error(res, 403, 'El usuario autenticado no tiene un recurso humano válido');
     const sinLectura = req.body?.sinLectura === true;
     const temperatura = req.body?.temperaturaC;
     const motivo = limpio(req.body?.motivoSinLectura, 500);
     if (sinLectura ? (temperatura !== null && temperatura !== undefined && temperatura !== '') || !motivo
       : (typeof temperatura !== 'number' || !Number.isFinite(temperatura))) {
-      return error(res, 400, 'Registre temperatura de llegada numérica o motivo de no medición');
+      return error(res, 400, 'Registre temperatura de recepción en Central numérica o motivo de no medición');
     }
     const totalDeclarado = filas.reduce((sum, l) => sum + l.cantidadDeclarada, 0);
     const totalRecibido = [...conteoPorId.values()].reduce((sum, n) => sum + n, 0);
@@ -301,9 +414,11 @@ const confirmarRecepcion = async (req, res) => {
           estado: totalDeclarado === totalRecibido ? 'RECIBIDO_COMPLETO' : 'RECIBIDO_CON_DIFERENCIAS',
           remisiones,
           recepcionCentral: {
-            fechaHora: new Date(),
+            fechaHora: fechaRecepcion,
+            fechaRegistroSistema: registroSistema,
             recibidoPor: req.user.uid,
             usuarioRecepcion: req.user.nombreUsuario || req.user.uid,
+            nombreResponsableRecepcion: responsable,
             temperaturaC: sinLectura ? null : temperatura,
             motivoSinLectura: sinLectura ? motivo : '',
             incidencia,
@@ -327,6 +442,8 @@ const confirmarRecepcion = async (req, res) => {
 
 module.exports = {
   obtenerCatalogos,
+  buscarPacientes,
+  buscarPruebas,
   buscarMuestras,
   listarRecepciones,
   obtenerRecepcion,
