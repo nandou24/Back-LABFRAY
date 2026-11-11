@@ -22,6 +22,7 @@ router.get('/pruebas', controller.buscarPruebas);
 router.get('/muestras', controller.buscarMuestras);
 router.get('/', controller.listarRecepciones);
 router.get('/:id', controller.obtenerRecepcion);
+router.get('/:id/historial', controller.obtenerHistorial);
 router.post('/contingencia', controller.crearContingencia);
 router.get('/:id/atenciones', confirmarAtenciones.listarAtencionesRecepcion);
 router.get('/:id/atenciones/:clave/solicitud', confirmarAtenciones.obtenerSolicitudConfirmada);

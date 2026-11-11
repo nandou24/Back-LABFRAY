@@ -11,6 +11,7 @@ const PruebaLab = require('../../models/Mantenimiento/PruebaLab');
 const Servicio = require('../../models/Mantenimiento/Servicio');
 const TipoMuestra = require('../../models/Mantenimiento/TipoMuestra');
 const TuboEnvase = require('../../models/Mantenimiento/TuboEnvase');
+const { agregarCambio, cambiosCreacion, cambiosEdicion, crearEvento } = require('../../helpers/historialRecepcionMuestras');
 
 const estadosTransportables = ['RECOLECTADA', 'RECEPCIONADA', 'ACEPTADA'];
 const estadosPorRecibir = ['PENDIENTE_RECEPCION', 'DESPACHADO'];
@@ -341,12 +342,28 @@ const listarRecepciones = async (req, res) => {
 const obtenerRecepcion = async (req, res) => {
   if (!esId(req.params.id)) return error(res, 400, 'Identificador de envío inválido');
   try {
-    const envio = await RecepcionMuestras.findById(req.params.id).lean();
+    const envio = await RecepcionMuestras.findById(req.params.id).select('-historialCambios').lean();
     if (!envio) return error(res, 404, 'Envío no encontrado');
     return res.json({ ok: true, recepcion: envio });
   } catch (e) {
     console.error('Detalle envío:', e);
     return error(res, 500, 'No se pudo consultar el envío');
+  }
+};
+
+// ====== Consultar historial en solo lectura (requiere permiso de recepción) ======
+const obtenerHistorial = async (req, res) => {
+  if (!esId(req.params.id)) return error(res, 400, 'Identificador de remisión inválido');
+  try {
+    const envio = await RecepcionMuestras.findById(req.params.id)
+      .select('codigoEnvio historialCambios createdAt estado modoRegistro').lean();
+    if (!envio) return error(res, 404, 'Remisión no encontrada');
+    return res.json({ ok: true, codigoEnvio: envio.codigoEnvio,
+      historial: [...(envio.historialCambios || [])].reverse(),
+      inicioAuditoria: (envio.historialCambios || []).length ? null : 'Este registro es anterior a la activación del historial o no tiene movimientos auditados.' });
+  } catch (e) {
+    console.error('Consultar historial de remisión:', e);
+    return error(res, 500, 'No se pudo consultar el historial');
   }
 };
 
@@ -569,7 +586,7 @@ const crearContingencia = async (req, res) => {
     if (lectura) lectura.nombreResponsableRecepcion = await nombreResponsable(req.user.uid);
     // ====== Emitir el correlativo después de validar todos los datos ======
     const codigoEnvio = await siguienteCodigoRemision();
-    const envio = await RecepcionMuestras.create({
+    const datosEnvio = {
       codigoEnvio,
       modoRegistro: 'CONTINGENCIA_CENTRAL',
       origenDespacho: origenTipo === 'ASOCIADO' && rutaIngreso === 'DIRECTO' ? 'ASOCIADO' : 'SUCURSAL',
@@ -596,7 +613,12 @@ const crearContingencia = async (req, res) => {
       recepcionCentral: lectura,
       registradoPor: req.user.uid,
       usuarioRegistro: req.user.nombreUsuario || req.user.uid,
-    });
+    };
+    datosEnvio.historialCambios = [crearEvento({
+      accion: 'CREACION', usuario: req.user, nombreCompleto: await nombreResponsable(req.user.uid).catch(() => ''),
+      cambios: cambiosCreacion(datosEnvio),
+    })];
+    const envio = await RecepcionMuestras.create(datosEnvio);
     return res.status(201).json({ ok: true, msg: 'Remisión registrada en Central', recepcion: envio });
   } catch (e) {
     if (responderIndiceDuplicado(res, e)) return;
@@ -707,6 +729,8 @@ const actualizarContingencia = async (req, res) => {
     const total = detalle.recipientesAdministrativos.reduce((n, x) => n + x.cantidadDeclarada, 0);
     const lectura = lecturaCentralDeclarada(req.body, req.user, total, actual.recepcionCentral);
     if (lectura && !lectura.nombreResponsableRecepcion) lectura.nombreResponsableRecepcion = await nombreResponsable(req.user.uid);
+    const motivoCambio = limpio(req.body?.motivoCambio, 500);
+    if (motivoCambio.length < 5) return error(res, 422, 'Indique el motivo del cambio (mínimo 5 caracteres)');
     const remision = {
       _id: actual.remisiones[0]._id,
       origenTipo, asociadoId: origenTipo === 'ASOCIADO' ? asociadoId : null,
@@ -716,19 +740,24 @@ const actualizarContingencia = async (req, res) => {
       lineas: [], pacientesAdministrativos: detalle.pacientesAdministrativos,
       recipientesAdministrativos: detalle.recipientesAdministrativos,
     };
+    const nuevaVersion = {
+      origenNombre, origenCodigo, rutaIngreso,
+      prioridad: req.body.prioridad === 'URGENTE' ? 'URGENTE' : 'NORMAL',
+      sedeOrigen: origenTipo === 'ASOCIADO' ? sede : origenNombre,
+      observacionRemision: limpio(req.body.observacionRemision, 2000),
+      remisiones: [remision], recepcionCentral: lectura,
+      origenDespacho: origenTipo === 'ASOCIADO' && rutaIngreso === 'DIRECTO' ? 'ASOCIADO' : 'SUCURSAL',
+    };
+    const evento = crearEvento({ accion: 'EDICION', usuario: req.user,
+      nombreCompleto: await nombreResponsable(req.user.uid).catch(() => ''), motivo: motivoCambio,
+      versionAnterior: actual.__v, cambios: cambiosEdicion(actual, nuevaVersion),
+    });
     const actualizado = await RecepcionMuestras.findOneAndUpdate(
       { _id: actual._id, modoRegistro: 'CONTINGENCIA_CENTRAL',
         estado: { $in: estadosEditablesCentral }, __v: actual.__v, 'atencionesConfirmadas.0': { $exists: false } },
-      { $set: {
-        origenDespacho: origenTipo === 'ASOCIADO' && rutaIngreso === 'DIRECTO' ? 'ASOCIADO' : 'SUCURSAL',
-        origenNombre, origenCodigo, rutaIngreso,
-        prioridad: req.body.prioridad === 'URGENTE' ? 'URGENTE' : 'NORMAL',
-        sedeOrigen: origenTipo === 'ASOCIADO' ? sede : origenNombre,
-        observacionRemision: limpio(req.body.observacionRemision, 2000),
-        remisiones: [remision], recepcionCentral: lectura,
-        actualizadoPor: req.user.uid,
-      }, $inc: { __v: 1 } },
-      { new: true, runValidators: true },
+      { $set: { ...nuevaVersion, actualizadoPor: req.user.uid },
+        $push: { historialCambios: evento }, $inc: { __v: 1 } },
+      { new: true, runValidators: true, projection: { historialCambios: 0 } },
     ).lean();
     if (!actualizado) return error(res, 409, 'La remisión cambió de estado o fue editada. Vuelva a cargarla');
     return res.json({ ok: true, msg: 'Remisión actualizada', recepcion: actualizado });
@@ -800,6 +829,22 @@ const confirmarRecepcion = async (req, res) => {
         ...l, cantidadRecibida: conteoPorId.get(String(l._id)),
       })),
     }));
+    const cambios = [];
+    agregarCambio(cambios, 'Estado de recepción', envio.estado,
+      totalDeclarado === totalRecibido ? 'RECIBIDO_COMPLETO' : 'RECIBIDO_CON_DIFERENCIAS');
+    agregarCambio(cambios, 'Cantidad recibida total', null, totalRecibido);
+    agregarCambio(cambios, 'Incidencia de recepción', null, incidencia);
+    agregarCambio(cambios, 'Temperatura de recepción', envio.recepcionCentral, {
+      temperaturaC: sinLectura ? null : temperatura, motivoSinLectura: sinLectura ? motivo : '',
+      fechaHora: fechaRecepcion, responsable,
+    });
+    for (let i = 0; i < filas.length; i++) {
+      const fila = filas[i];
+      agregarCambio(cambios, `Recipiente ${fila._id}: cantidad cotejada`,
+        fila.cantidadRecibida ?? null, conteoPorId.get(String(fila._id)));
+    }
+    const evento = crearEvento({ accion: 'RECEPCION_ADMINISTRATIVA', usuario: req.user,
+      nombreCompleto: responsable, motivo: incidencia, versionAnterior: envio.__v, cambios });
     const actualizado = await RecepcionMuestras.findOneAndUpdate(
       { _id: envio._id, estado: { $in: estadosPorRecibir }, recepcionCentral: null, __v: envio.__v },
       {
@@ -820,9 +865,10 @@ const confirmarRecepcion = async (req, res) => {
           },
           actualizadoPor: req.user.uid,
         },
+        $push: { historialCambios: evento },
         $inc: { __v: 1 },
       },
-      { new: true, runValidators: true },
+      { new: true, runValidators: true, projection: { historialCambios: 0 } },
     ).lean();
     if (!actualizado) return error(res, 409, 'El envío cambió durante la recepción; vuelva a cargarlo');
     return res.json({ ok: true, msg: 'Recepción administrativa confirmada', recepcion: actualizado });
@@ -841,6 +887,7 @@ module.exports = {
   buscarMuestras,
   listarRecepciones,
   obtenerRecepcion,
+  obtenerHistorial,
   crearContingencia,
   obtenerBorradorCentral,
   actualizarContingencia,

@@ -94,6 +94,24 @@ const recepcionCentralSchema = new Schema({
   totalRecibido: { type: Number, required: true },
 }, { _id: false });
 
+// ====== Auditoría histórica: conservada junto a cada modificación atómica ======
+const historialCambioSchema = new Schema({
+  campo: { type: String, required: true, trim: true, maxlength: 200 },
+  anterior: { type: Schema.Types.Mixed, default: null },
+  nuevo: { type: Schema.Types.Mixed, default: null },
+}, { _id: false });
+const historialEventoSchema = new Schema({
+  accion: { type: String, enum: ['CREACION', 'EDICION', 'RECEPCION_ADMINISTRATIVA', 'CONFIRMACION_ATENCIONES'], required: true },
+  fechaHora: { type: Date, required: true, default: Date.now },
+  usuarioId: { type: String, required: true },
+  nombreUsuario: { type: String, required: true },
+  nombreCompleto: { type: String, required: true },
+  motivo: { type: String, default: '', maxlength: 500 },
+  versionAnterior: { type: Number, default: null },
+  versionNueva: { type: Number, required: true },
+  cambios: { type: [historialCambioSchema], default: [] },
+}, { _id: true });
+
 const recepcionMuestrasSchema = new Schema({
   // ====== Registro administrativo del despacho físico ======
   codigoEnvio: { type: String, unique: true, required: true, uppercase: true, immutable: true, trim: true },
@@ -118,6 +136,7 @@ const recepcionMuestrasSchema = new Schema({
   registradoPor: { type: String, required: true },
   usuarioRegistro: { type: String, required: true },
   actualizadoPor: { type: String, default: '' },
+  historialCambios: { type: [historialEventoSchema], default: [] },
   // ====== Solicitudes confirmadas por atención independiente ======
   atencionesConfirmadas: { type: [{
     claveAtencion: { type: String, required: true, trim: true },

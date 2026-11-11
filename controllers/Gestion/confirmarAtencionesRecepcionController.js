@@ -1,10 +1,12 @@
 const mongoose = require('mongoose');
+const { crearEvento } = require('../../helpers/historialRecepcionMuestras');
 const RecepcionMuestras = require('../../models/Gestion/RecepcionMuestras');
 const SolicitudAtencion = require('../../models/Gestion/SolicitudAtencion');
 const Paciente = require('../../models/Mantenimiento/Paciente');
 const PruebaLab = require('../../models/Mantenimiento/PruebaLab');
 const Servicio = require('../../models/Mantenimiento/Servicio');
 const Asociado = require('../../models/Mantenimiento/Asociado');
+const RecHumano = require('../../models/Mantenimiento/RecHumano');
 const { crearSolicitudesAtencion } = require('./solicitudAtencionController');
 
 const responder = (res, status, msg) => res.status(status).json({ ok: false, msg });
@@ -219,9 +221,26 @@ const confirmarAtencionesRecepcion = async (req, res) => {
           confirmadoPor: String(req.user.uid), usuarioConfirmacion: String(req.user.nombreUsuario), observacion,
         });
       }
+      // ====== Un problema del maestro de personal no debe detener la confirmación ======
+      let nombreResponsable = '';
+      try {
+        const humano = await RecHumano.findOne({ codRecHumano: req.user.uid })
+          .select('nombreRecHumano apePatRecHumano apeMatRecHumano').session(session).lean();
+        nombreResponsable = [humano?.nombreRecHumano, humano?.apePatRecHumano, humano?.apeMatRecHumano]
+          .filter(Boolean).map(x => String(x).trim()).join(' ').trim();
+      } catch (err) {
+        console.warn('Nombre de responsable no disponible para historial de recepción:', err.message);
+      }
+      const evento = crearEvento({ accion: 'CONFIRMACION_ATENCIONES', usuario: req.user,
+        nombreCompleto: nombreResponsable || String(req.user.nombreUsuario || req.user.uid),
+        motivo: observacion, versionAnterior: version,
+        cambios: referencias.map(ref => ({ campo: `Atención ${ref.claveAtencion}: solicitud clínica`,
+          anterior: null, nuevo: { codSolicitud: ref.codSolicitud, codigoLaboratorio: ref.codigoLaboratorio,
+            solicitudAtencionId: String(ref.solicitudAtencionId) } })),
+      });
       const modificado = await RecepcionMuestras.findOneAndUpdate(
         { _id: envio._id, __v: version },
-        { $push: { atencionesConfirmadas: { $each: referencias } }, $inc: { __v: 1 } },
+        { $push: { atencionesConfirmadas: { $each: referencias }, historialCambios: evento }, $inc: { __v: 1 } },
         { session, new: true, runValidators: true },
       );
       if (!modificado) { const e = new Error('Otro usuario modificó la remisión; actualice la pantalla'); e.status = 409; throw e; }
