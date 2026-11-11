@@ -24,14 +24,52 @@ const lineaSchema = new Schema({
   cantidadRecibida: { type: Number, min: 0, max: 1, default: null },
 });
 
+// ====== Pacientes declarados para una contingencia sin solicitud clínica ======
+const pacienteAdministrativoSchema = new Schema({
+  clave: { type: String, required: true, trim: true },
+  pacienteId: { type: Schema.Types.ObjectId, ref: 'pacientesCollection', default: null },
+  hc: { type: String, trim: true, default: '' },
+  nombre: { type: String, required: true, trim: true },
+  apePat: { type: String, trim: true, default: '' },
+  apeMat: { type: String, trim: true, default: '' },
+  nombres: { type: String, trim: true, default: '' },
+  tipoDoc: { type: String, trim: true, default: '' },
+  nroDoc: { type: String, trim: true, default: '' },
+  telefono: { type: String, trim: true, default: '' },
+  documento: { type: String, trim: true, default: '' },
+  sexo: { type: String, trim: true, default: '' },
+  fechaNacimiento: { type: Date, default: null },
+  edadDeclarada: { type: Number, default: null, min: 0 },
+  unidadEdad: { type: String, enum: ['ANIOS', 'MESES', 'DIAS'], default: 'ANIOS' },
+  pruebas: { type: [pruebaSchema], default: [] },
+}, { _id: false });
+
+// ====== Recipientes administrativos: nunca son MuestraLaboratorio ======
+const recipienteAdministrativoSchema = new Schema({
+  clavePaciente: { type: String, required: true, trim: true },
+  tuboEnvaseId: { type: Schema.Types.ObjectId, ref: 'tuboEnvaseCollection', required: true },
+  tuboEnvaseNombre: { type: String, required: true, trim: true },
+  color: { type: String, trim: true, default: '' },
+  // ====== Dato declarado opcional; Central no clasifica la muestra ======
+  tipoMuestraId: { type: Schema.Types.ObjectId, ref: 'tipoMuestraCollection', default: null },
+  tipoMuestraNombre: { type: String, trim: true, default: '' },
+  cantidadDeclarada: { type: Number, required: true, min: 1, max: 100 },
+  cantidadRecibida: { type: Number, default: null, min: 0, max: 100 },
+  codigoEtiqueta: { type: String, trim: true, default: '', maxlength: 100 },
+  fechaToma: { type: Date, default: null },
+});
+
 const remisionSchema = new Schema({
   origenTipo: { type: String, enum: ['ASOCIADO', 'SUCURSAL_PROPIA'], required: true },
   asociadoId: { type: Schema.Types.ObjectId, ref: 'asociadoCollection', default: null },
   sucursalId: { type: Schema.Types.ObjectId, ref: 'sucursalesCollection', default: null },
+  sucursalRemitenteNombre: { type: String, trim: true, default: '' },
   origenNombre: { type: String, required: true, trim: true },
   origenCodigo: { type: String, trim: true, default: '' },
   referenciaRemision: { type: String, trim: true, default: '', maxlength: 120 },
-  lineas: { type: [lineaSchema], required: true },
+  lineas: { type: [lineaSchema], default: [] },
+  pacientesAdministrativos: { type: [pacienteAdministrativoSchema], default: [] },
+  recipientesAdministrativos: { type: [recipienteAdministrativoSchema], default: [] },
 });
 
 const lecturaPreviaSchema = new Schema({
@@ -69,7 +107,7 @@ const recepcionMuestrasSchema = new Schema({
   observacionRemision: { type: String, trim: true, default: '', maxlength: 2000 },
   estado: {
     type: String,
-    enum: ['PENDIENTE_RECEPCION', 'DESPACHADO', 'RECIBIDO_COMPLETO', 'RECIBIDO_CON_DIFERENCIAS'],
+    enum: ['REGISTRADA_CENTRAL', 'PENDIENTE_RECEPCION', 'DESPACHADO', 'RECIBIDO_COMPLETO', 'RECIBIDO_CON_DIFERENCIAS'],
     default: 'PENDIENTE_RECEPCION',
     index: true,
     required: true,
@@ -82,8 +120,8 @@ const recepcionMuestrasSchema = new Schema({
   actualizadoPor: { type: String, default: '' },
 }, { timestamps: true, optimisticConcurrency: true });
 
-// ====== Un recipiente físico no puede ingresar dos veces al circuito de envíos ======
-recepcionMuestrasSchema.index({ 'remisiones.lineas.muestraLaboratorioId': 1 }, { unique: true, name: 'una_remision_por_muestra_fisica' });
+// ====== Las remisiones declarativas no restringen pacientes ni recipientes entre envíos ======
+// ====== El índice único antiguo debe revisarse en MongoDB; quitarlo del esquema no lo borra ======
 recepcionMuestrasSchema.index({ estado: 1, createdAt: -1 });
 
 module.exports = mongoose.model('RecepcionMuestras', recepcionMuestrasSchema);

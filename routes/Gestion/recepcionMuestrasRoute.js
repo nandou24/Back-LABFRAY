@@ -15,12 +15,15 @@ router.use((req, res, next) => {
 });
 
 router.get('/catalogos', controller.obtenerCatalogos);
+router.get('/catalogos-recipientes', controller.catalogosRecipientes);
 router.get('/pacientes', controller.buscarPacientes);
 router.get('/pruebas', controller.buscarPruebas);
 router.get('/muestras', controller.buscarMuestras);
 router.get('/', controller.listarRecepciones);
 router.get('/:id', controller.obtenerRecepcion);
 router.post('/contingencia', controller.crearContingencia);
+router.get('/:id/edicion', controller.obtenerBorradorCentral);
+router.put('/:id', controller.actualizarContingencia);
 router.post('/:id/recepcion', controller.confirmarRecepcion);
 
 module.exports = router;
