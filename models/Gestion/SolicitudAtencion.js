@@ -1165,10 +1165,16 @@ const SolicitudAtencionSchema = new Schema(
     origenAtencion: {
       type: String,
       required: true,
-      enum: ["PARTICULAR", "EMPRESA"],
+      enum: ["PARTICULAR", "EMPRESA", "RECEPCION_MUESTRAS"],
       default: "PARTICULAR",
       index: true,
     },
+    // ====== Atención generada desde Recepción Central ======
+    recepcionMuestrasId: { type: Schema.Types.ObjectId, ref: 'RecepcionMuestras', default: null },
+    claveAtencionRecepcion: { type: String, trim: true, default: null },
+    remisionItemId: { type: Schema.Types.ObjectId, default: null },
+    codigoRemisionOrigen: { type: String, trim: true, default: null },
+    origenRemisionTipo: { type: String, enum: ['ASOCIADO', 'SUCURSAL_PROPIA'], default: null },
     pagoId: {
       type: Schema.Types.ObjectId,
       ref: "pagoCollection",
@@ -1397,4 +1403,7 @@ SolicitudAtencionSchema.index(
   },
 );
 
+SolicitudAtencionSchema.index({ recepcionMuestrasId: 1, remisionItemId: 1, claveAtencionRecepcion: 1 }, { unique: true,
+  partialFilterExpression: { recepcionMuestrasId: { $type: 'objectId' }, remisionItemId: { $type: 'objectId' }, claveAtencionRecepcion: { $type: 'string' } },
+  name: 'solicitud_unica_por_atencion_recepcion' });
 module.exports = mongoose.model("SolicitudAtencion", SolicitudAtencionSchema);

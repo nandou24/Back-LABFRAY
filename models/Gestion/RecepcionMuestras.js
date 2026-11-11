@@ -118,6 +118,18 @@ const recepcionMuestrasSchema = new Schema({
   registradoPor: { type: String, required: true },
   usuarioRegistro: { type: String, required: true },
   actualizadoPor: { type: String, default: '' },
+  // ====== Solicitudes confirmadas por atención independiente ======
+  atencionesConfirmadas: { type: [{
+    claveAtencion: { type: String, required: true, trim: true },
+    remisionId: { type: Schema.Types.ObjectId, required: true },
+    solicitudAtencionId: { type: Schema.Types.ObjectId, ref: 'SolicitudAtencion', required: true },
+    codSolicitud: { type: String, required: true },
+    codigoLaboratorio: { type: String, default: '' },
+    fechaConfirmacion: { type: Date, required: true },
+    confirmadoPor: { type: String, required: true },
+    usuarioConfirmacion: { type: String, required: true },
+    observacion: { type: String, default: '', maxlength: 500 },
+  }], default: [] },
 }, { timestamps: true, optimisticConcurrency: true });
 
 // ====== Las remisiones declarativas no restringen pacientes ni recipientes entre envíos ======

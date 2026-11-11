@@ -70,7 +70,8 @@ const esEditableCentral = envio => envio &&
   envio.modoRegistro === 'CONTINGENCIA_CENTRAL' &&
   estadosEditablesCentral.includes(envio.estado) &&
   (envio.remisiones || []).length === 1 &&
-  !(envio.remisiones[0].lineas || []).length;
+  !(envio.remisiones[0].lineas || []).length &&
+  !(envio.atencionesConfirmadas || []).length;
 
 // ====== Lectura administrativa opcional para remisión originada en Central ======
 const lecturaCentralDeclarada = (datos, usuario, total, anterior = null) => {
@@ -388,8 +389,7 @@ const prepararDetalleAdministrativo = async (pacientes, recipientes, origenTipo,
       unidadEdad: p.unidadEdad || 'ANIOS', pruebasIds: pruebas.map(t => String(t._id)),
     };
   });
-  const pacientesMaestroIds = pacientesLimpios.map(p => String(p.pacienteId || '')).filter(Boolean);
-  if (new Set(pacientesMaestroIds).size !== pacientesMaestroIds.length) invalidar('No repita al mismo paciente maestro en una remisión');
+  // ====== Un mismo paciente puede corresponder a atenciones independientes ======
   if (pacientesLimpios.some(p => p.pacienteId)) {
     const idsPacientes = [...new Set(pacientesLimpios.map(p => p.pacienteId).filter(Boolean))];
     const existentes = await Paciente.find({ _id: { $in: idsPacientes } })
@@ -674,7 +674,7 @@ const actualizarContingencia = async (req, res) => {
   try {
     const actual = await RecepcionMuestras.findById(req.params.id).lean();
     if (!actual) return error(res, 404, 'Remisión no encontrada');
-    if (!esEditableCentral(actual)) return error(res, 409, 'Esta remisión no se puede modificar; podría haber sido aceptada o cerrada');
+    if (!esEditableCentral(actual) || actual.atencionesConfirmadas?.length) return error(res, 409, 'Esta remisión ya tiene solicitudes confirmadas o no admite edición');
     if (actual.__v !== req.body.version) return error(res, 409, 'La remisión fue modificada por otro usuario. Cárguela nuevamente');
     const { origenTipo, asociadoId, sucursalId } = req.body || {};
     const rutaIngreso = req.body?.rutaIngreso === 'SUCURSAL' ? 'SUCURSAL' : 'DIRECTO';
@@ -718,7 +718,7 @@ const actualizarContingencia = async (req, res) => {
     };
     const actualizado = await RecepcionMuestras.findOneAndUpdate(
       { _id: actual._id, modoRegistro: 'CONTINGENCIA_CENTRAL',
-        estado: { $in: estadosEditablesCentral }, __v: actual.__v },
+        estado: { $in: estadosEditablesCentral }, __v: actual.__v, 'atencionesConfirmadas.0': { $exists: false } },
       { $set: {
         origenDespacho: origenTipo === 'ASOCIADO' && rutaIngreso === 'DIRECTO' ? 'ASOCIADO' : 'SUCURSAL',
         origenNombre, origenCodigo, rutaIngreso,

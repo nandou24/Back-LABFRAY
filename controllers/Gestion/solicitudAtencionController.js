@@ -1343,7 +1343,7 @@ const crearSolicitudesAtencion = async ({
 
   // ====== Validar origen ======
 
-  if (!["PARTICULAR", "EMPRESA"].includes(origenAtencion)) {
+  if (!["PARTICULAR", "EMPRESA", "RECEPCION_MUESTRAS"].includes(origenAtencion)) {
     throw new Error("Origen de atención no válido");
   }
 
@@ -1446,6 +1446,15 @@ const crearSolicitudesAtencion = async ({
     if (!["HABILES", "CALENDARIO"].includes(tipoDias)) {
       throw new Error("El tipo de días del plazo empresarial no es válido");
     }
+  }
+
+  // ====== El registro clínico desde Central exige remisión y atención válidas ======
+  if (origenAtencion === 'RECEPCION_MUESTRAS' &&
+      (!mongoose.isValidObjectId(datosOrigen?.recepcionMuestrasId) ||
+       !String(datosOrigen?.claveAtencionRecepcion || '').trim() ||
+       !mongoose.isValidObjectId(datosOrigen?.remisionItemId) ||
+       !String(datosOrigen?.codigoRemisionOrigen || '').trim())) {
+    throw new Error('Falta el vínculo de la atención con su remisión administrativa');
   }
 
   // ====== Expandir servicios ======
@@ -1652,6 +1661,17 @@ const crearSolicitudesAtencion = async ({
         codProtocolo: datosOrigen.codProtocolo,
 
         nombreProtocolo: datosOrigen.nombreProtocolo,
+      });
+    }
+
+    // ====== Trazabilidad de recepción administrativa ======
+    if (origenAtencion === 'RECEPCION_MUESTRAS') {
+      Object.assign(datosSolicitud, {
+        recepcionMuestrasId: datosOrigen.recepcionMuestrasId,
+        claveAtencionRecepcion: datosOrigen.claveAtencionRecepcion,
+        remisionItemId: datosOrigen.remisionItemId,
+        codigoRemisionOrigen: datosOrigen.codigoRemisionOrigen,
+        origenRemisionTipo: datosOrigen.origenRemisionTipo,
       });
     }
 

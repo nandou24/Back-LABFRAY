@@ -1,6 +1,7 @@
 const { Router } = require('express');
 const { validarJWT } = require('../../middlewares/validar-token');
 const controller = require('../../controllers/Gestion/recepcionMuestrasController');
+const confirmarAtenciones = require('../../controllers/Gestion/confirmarAtencionesRecepcionController');
 const router = Router();
 
 router.use(validarJWT);
@@ -22,6 +23,9 @@ router.get('/muestras', controller.buscarMuestras);
 router.get('/', controller.listarRecepciones);
 router.get('/:id', controller.obtenerRecepcion);
 router.post('/contingencia', controller.crearContingencia);
+router.get('/:id/atenciones', confirmarAtenciones.listarAtencionesRecepcion);
+router.get('/:id/atenciones/:clave/solicitud', confirmarAtenciones.obtenerSolicitudConfirmada);
+router.post('/:id/confirmar-atenciones', confirmarAtenciones.confirmarAtencionesRecepcion);
 router.get('/:id/edicion', controller.obtenerBorradorCentral);
 router.put('/:id', controller.actualizarContingencia);
 router.post('/:id/recepcion', controller.confirmarRecepcion);
