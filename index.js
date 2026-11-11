@@ -168,6 +168,12 @@ app.use(
   require("./routes/Gestion/recepcionMuestrasRoute"),
 );
 
+// Recepción de muestras sucursal
+app.use(
+  "/api/recepcionMuestrasSucursal",
+  require("./routes/Gestion/recepcionMuestrasSucursalRoute"),
+);
+
 //!Levantar el servidor
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
