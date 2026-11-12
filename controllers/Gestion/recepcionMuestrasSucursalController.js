@@ -31,7 +31,7 @@ const contextoSucursal = async (req, res, next) => {
     if (!humano) return error(res, 403, 'No existe un operador activo para esta sesión');
     const sucursales = await Sucursal.find({ estado: 'ACTIVA', personal: { $elemMatch: {
       recursoHumanoId: humano._id, activo: true,
-    } } }).select('_id codigo nombre nombreCorto').lean();
+    } } }).select('_id codigo nombre nombreCorto esPrincipal').lean();
     if (!sucursales.length) return error(res, 403, 'El operador no pertenece al personal activo de una sucursal');
     const sedeAsignada = texto(humano.datosLogueo?.sedeAsignada, 150).toUpperCase();
     const coincidencias = sucursales.filter(s => [s.codigo, s.nombre, s.nombreCorto]
@@ -55,11 +55,12 @@ const contextoSucursal = async (req, res, next) => {
 const catalogos = async (req, res) => {
   try {
     const asociados = await Asociado.find({ activo: true, 'convenio.enviaMuestras': true })
-      .select('codigoAsociado tipoPersona razonSocial nombreComercial nombres apellidoPaterno apellidoMaterno ruc numeroDocumento sedes.nombre')
+      .select('codigoAsociado tipoPersona razonSocial nombreComercial nombres apellidoPaterno apellidoMaterno ruc numeroDocumento sedes._id sedes.nombre')
       .sort({ codigoAsociado: 1 }).limit(500).lean();
     return res.json({ ok: true, responsable: { nombreCompleto: req.nombreResponsableSucursal },
       sucursal: { _id: req.sucursalOperativa._id, codigo: req.sucursalOperativa.codigo,
-        nombre: req.sucursalOperativa.nombreCorto || req.sucursalOperativa.nombre },
+        nombre: req.sucursalOperativa.nombreCorto || req.sucursalOperativa.nombre,
+        esPrincipal: req.sucursalOperativa.esPrincipal === true },
       asociados: asociados.map(a => ({ _id: a._id, codigo: a.codigoAsociado || '',
         nombre: nombreAsociado(a), documento: a.ruc || a.numeroDocumento || '',
         sedes: (a.sedes || []).map(s => ({ _id: s._id, nombre: s.nombre })).filter(s => !!s._id) })) });
@@ -333,6 +334,9 @@ const respuestaError = (res, e, etiqueta) => {
 };
 
 const crear = async (req, res) => {
+  if (req.sucursalOperativa?.esPrincipal === true) {
+    return error(res, 403, 'La sede principal solo puede consultar remisiones de este módulo');
+  }
   try {
     const datos = await prepararDatos(req.body || {});
     datos.recipientes.forEach(r => { r._id = new mongoose.Types.ObjectId(); });
@@ -425,6 +429,9 @@ const edicion = async (req, res) => {
 };
 
 const actualizar = async (req, res) => {
+  if (req.sucursalOperativa?.esPrincipal === true) {
+    return error(res, 403, 'La sede principal solo puede consultar remisiones de este módulo');
+  }
   if (!esId(req.params.id)) return error(res, 400, 'Identificador inválido');
   if (!Number.isSafeInteger(req.body?.version) || req.body.version < 0) return error(res, 400, 'Versión inválida');
   const motivoCambio = texto(req.body?.motivoCambio, 500);
