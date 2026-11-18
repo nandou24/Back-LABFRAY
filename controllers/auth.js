@@ -80,6 +80,12 @@ const loginUsuario = async (req, res) => {
 
     // ====== Inicio de sesión restringido para cambio obligatorio ======
     if (usuario.datosLogueo.requiereCambioPassword === true) {
+      const vencimiento = usuario.datosLogueo.fechaExpiracionPasswordTemporal;
+      if (vencimiento && (!Number.isFinite(new Date(vencimiento).getTime()) ||
+          new Date(vencimiento).getTime() <= Date.now())) {
+        return res.status(403).json({ ok: false,
+          msg: 'Contraseña temporal vencida. Solicite un nuevo restablecimiento.' });
+      }
       const token = jwt.sign({
         uid: usuario.codRecHumano,
         alcance: 'CAMBIO_PASSWORD',
@@ -154,6 +160,13 @@ const cambiarPasswordObligatorio = async (req, res) => {
         version !== Number(payload.versionCredenciales ?? -1)) {
       return res.status(401).json({ ok: false, msg: 'Sesión temporal no vigente' });
     }
+    // ====== Las claves temporales nuevas caducan aunque el JWT siga vigente ======
+    const vencimiento = usuario.datosLogueo.fechaExpiracionPasswordTemporal;
+    if (vencimiento && (!Number.isFinite(new Date(vencimiento).getTime()) ||
+        new Date(vencimiento).getTime() <= Date.now())) {
+      return res.status(403).json({ ok: false,
+        msg: 'Contraseña temporal vencida. Solicite un nuevo restablecimiento.' });
+    }
     if (!await bcrypt.compare(passwordActual, usuario.datosLogueo.passwordHash ?? '')) {
       return res.status(400).json({ ok: false, msg: 'Contraseña temporal incorrecta' });
     }
@@ -168,11 +181,13 @@ const cambiarPasswordObligatorio = async (req, res) => {
       'datosLogueo.estado': true,
       'datosLogueo.requiereCambioPassword': true,
       'datosLogueo.passwordHash': usuario.datosLogueo.passwordHash,
+      ...(vencimiento ? { 'datosLogueo.fechaExpiracionPasswordTemporal': { $gt: new Date() } } : {}),
       ...condicionVersion,
     }, {
       $set: {
         'datosLogueo.passwordHash': await bcrypt.hash(passwordNueva, 10),
         'datosLogueo.requiereCambioPassword': false,
+        'datosLogueo.fechaExpiracionPasswordTemporal': null,
         fechaActualizacion: new Date(),
       },
       $inc: { 'datosLogueo.versionCredenciales': 1 },

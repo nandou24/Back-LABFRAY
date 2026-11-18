@@ -11,6 +11,7 @@ const crypto = require("crypto");
 
 // ====== Credencial única para acceso inicial o restablecimiento ======
 const generarClaveTemporal = () => crypto.randomBytes(18).toString('base64url');
+const expiracionClaveTemporal = () => new Date(Date.now() + 24 * 60 * 60 * 1000);
 
 const SERVICIOS_FIRMABLES = ["Laboratorio", "Ecografía", "Rayos X", "Consulta", "Procedimiento"];
 
@@ -100,6 +101,7 @@ const crearRecursoHumano = async (req, res = response) => {
     delete login.passwordHash;
     delete login.requiereCambioPassword;
     delete login.versionCredenciales;
+    delete login.fechaExpiracionPasswordTemporal;
     let contrasenaTemporal;
     if (usuarioSistema === true) {
       if (!String(login.nombreUsuario ?? '').trim() || !login.rol || !login.sedeAsignada) {
@@ -109,6 +111,7 @@ const crearRecursoHumano = async (req, res = response) => {
       login.passwordHash = await bcrypt.hash(contrasenaTemporal, 10);
       login.requiereCambioPassword = true;
       login.versionCredenciales = 1;
+      login.fechaExpiracionPasswordTemporal = expiracionClaveTemporal();
     } else {
       login.estado = false;
     }
@@ -402,6 +405,7 @@ const actualizarRecursoHumano = async (req, res = response) => {
         contrasenaTemporal = generarClaveTemporal();
         camposLogin['datosLogueo.passwordHash'] = await bcrypt.hash(contrasenaTemporal, 10);
         camposLogin['datosLogueo.requiereCambioPassword'] = true;
+        camposLogin['datosLogueo.fechaExpiracionPasswordTemporal'] = expiracionClaveTemporal();
         camposLogin['datosLogueo.versionCredenciales'] =
           Number(actual.datosLogueo?.versionCredenciales ?? 0) + 1;
       }
@@ -451,6 +455,7 @@ const restablecerPasswordRecursoHumano = async (req, res = response) => {
       $set: {
         'datosLogueo.passwordHash': await bcrypt.hash(contrasenaTemporal, 10),
         'datosLogueo.requiereCambioPassword': true,
+        'datosLogueo.fechaExpiracionPasswordTemporal': expiracionClaveTemporal(),
         updatedBy: req.user.uid,
         usuarioActualizacion: req.user.nombreUsuario,
         fechaActualizacion: new Date(),

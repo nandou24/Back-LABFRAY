@@ -94,6 +94,7 @@ const RecursoHumanoSchema = Schema(
       // ====== Estado de contraseña temporal ======
       requiereCambioPassword: { type: Boolean, default: false },
       versionCredenciales: { type: Number, default: 0 },
+      fechaExpiracionPasswordTemporal: { type: Date, default: null },
       rol: {
         type: Schema.Types.ObjectId,
         ref: "rolCollection",
