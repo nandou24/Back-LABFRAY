@@ -9,6 +9,9 @@ const Especialidad = require("../../models/Mantenimiento/Especialidades");
 const FirmaProfesionalLaboratorio = require("../../models/Mantenimiento/FirmaProfesionalLaboratorio");
 const crypto = require("crypto");
 
+// ====== Credencial única para acceso inicial o restablecimiento ======
+const generarClaveTemporal = () => crypto.randomBytes(18).toString('base64url');
+
 const SERVICIOS_FIRMABLES = ["Laboratorio", "Ecografía", "Rayos X", "Consulta", "Procedimiento"];
 
 
@@ -45,12 +48,11 @@ const crearRecursoHumano = async (req, res = response) => {
     profesionSolicitante,
     especialidadesRecurso,
     usuarioSistema,
-    datosLogueo, // Aquí se espera que contenga el passwordHash
+    datosLogueo, // Datos de acceso sin contraseña editable
   } = req.body;
 
   const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
 
-  console.log("Datos del recurso humano:", req.body);
 
   //Para crear HC
   const fecha = new Date();
@@ -91,19 +93,31 @@ const crearRecursoHumano = async (req, res = response) => {
     // Crear el número de historia clínica sin guiones
     const codigo = `RH${String(correlativo).padStart(4, "0")}`;
 
-    if (usuarioSistema && datosLogueo?.passwordHash) {
-      const salt = await bcrypt.genSalt(10);
-      datosLogueo.passwordHash = await bcrypt.hash(
-        datosLogueo.passwordHash,
-        salt
-      );
+    // ====== El alta nunca recibe contraseñas desde el formulario ======
+    const entradaLimpia = retirarCamposFirmaProtegidos(req.body);
+    const login = entradaLimpia.datosLogueo && typeof entradaLimpia.datosLogueo === 'object' &&
+      !Array.isArray(entradaLimpia.datosLogueo) ? { ...entradaLimpia.datosLogueo } : {};
+    delete login.passwordHash;
+    delete login.requiereCambioPassword;
+    delete login.versionCredenciales;
+    let contrasenaTemporal;
+    if (usuarioSistema === true) {
+      if (!String(login.nombreUsuario ?? '').trim() || !login.rol || !login.sedeAsignada) {
+        return res.status(422).json({ ok: false, msg: 'Complete usuario, rol y sede de la cuenta' });
+      }
+      contrasenaTemporal = generarClaveTemporal();
+      login.passwordHash = await bcrypt.hash(contrasenaTemporal, 10);
+      login.requiereCambioPassword = true;
+      login.versionCredenciales = 1;
+    } else {
+      login.estado = false;
     }
 
     // Crear el paciente con el número de historia clínica
     // Crear usuario con el modelo
     const nuevoRecursoHumano = new RecurHumano({
-      ...retirarCamposFirmaProtegidos(req.body),
-      datosLogueo: datosLogueo,
+      ...entradaLimpia,
+      datosLogueo: login,
       codRecHumano: codigo, // Agregar el código generado
       createdBy: uid, // uid del usuario que creó el recurso humano
       usuarioRegistro: nombreUsuario, // Nombre de usuario que creó el recurso humano
@@ -113,13 +127,15 @@ const crearRecursoHumano = async (req, res = response) => {
     await nuevoRecursoHumano.save();
     // console.log(dbUser, "pasoo registro");
     //Generar respuesta exitosa
+    res.set('Cache-Control', 'no-store');
     return res.status(201).json({
       ok: true,
       uid: nuevoRecursoHumano.id,
+      ...(contrasenaTemporal ? { contrasenaTemporal } : {}),
       //token: token,
     });
   } catch (error) {
-    console.error("❌ Error al registrar el recurso humano:", error);
+    console.error("Error al registrar el recurso humano:", error?.message);
     return res.status(500).json({
       ok: false,
       msg: "Error al momento de registrar",
@@ -136,12 +152,14 @@ const mostrarUltimosRecurHumanos = async (req, res = response) => {
     // Si no se especifica cantidad, mostrar todos los recursos humanos
     if (cantidad == 0) {
       recHumanos = await RecurHumano.find()
+        .select("-datosLogueo.passwordHash")
         .populate("datosLogueo.rol")
         .sort({ createdAt: -1 })
         .lean();
       // Si se especifica una cantidad, limitar la consulta
     } else {
       recHumanos = await RecurHumano.find()
+        .select("-datosLogueo.passwordHash")
         .populate("datosLogueo.rol")
         .sort({ createdAt: -1 })
         .limit(limite)
@@ -324,10 +342,10 @@ const encontrarTermino = async (req, res = response) => {
         { nroDoc: { $regex: termino, $options: "i" } }, // Búsqueda en el campo "nro documento"
         // Agrega más campos si es necesario
       ],
-    }).populate("datosLogueo.rol");
+    }).select("-datosLogueo.passwordHash").populate("datosLogueo.rol");
     return res.json({
       ok: true,
-      recHumanos, //! favoritos: favoritos
+      recHumanos,
     });
   } catch (error) {
     console.log(error);
@@ -339,52 +357,112 @@ const encontrarTermino = async (req, res = response) => {
 };
 
 const actualizarRecursoHumano = async (req, res = response) => {
-  const codigo = req.params.codRecHumano; //recupera la hc
-  const datosActualizados = retirarCamposFirmaProtegidos(req.body); //recupera los datos a grabar
-  const { uid, nombreUsuario } = req.user; // ← obtenemos al usuario del token
+  const codigo = req.params.codRecHumano;
+  const datosActualizados = retirarCamposFirmaProtegidos(req.body);
+  const { uid, nombreUsuario } = req.user;
 
   try {
-    // Solo encripta si el campo passwordHash viene con datos nuevos
-    if (
-      datosActualizados.usuarioSistema &&
-      datosActualizados.datosLogueo?.passwordHash
-    ) {
-      const salt = await bcrypt.genSalt(10);
-      datosActualizados.datosLogueo.passwordHash = await bcrypt.hash(
-        datosActualizados.datosLogueo.passwordHash,
-        salt
-      );
+    // ====== Obtener el estado anterior sin exponer el hash ======
+    const actual = await RecurHumano.findOne({ codRecHumano: codigo })
+      .select("usuarioSistema datosLogueo.passwordHash datosLogueo.versionCredenciales");
+    if (!actual) {
+      return res.status(404).json({ ok: false,
+        msg: "Recurso humano no encontrado con ese código" });
     }
 
-    const recHumano = await RecurHumano.findOneAndUpdate(
-      { codRecHumano: codigo },
-      { 
-        $set: datosActualizados,
-        updatedBy: uid, // uid del usuario que actualiza
-        usuarioActualizacion: nombreUsuario, // Nombre de usuario que actualiza
-        fechaActualizacion: new Date(), // Fecha de actualización
-      },
-      { new: true }
-    );
-    console.log(recHumano);
+    const loginEntrada = datosActualizados.datosLogueo;
+    // ====== Impedir reemplazos de credenciales por campos directos ======
+    Object.keys(datosActualizados).forEach((campo) => {
+      if (campo === "datosLogueo" || campo.startsWith("datosLogueo.") ||
+          campo === "passwordHash") delete datosActualizados[campo];
+    });
+    const actualizaAcceso = typeof datosActualizados.usuarioSistema === "boolean";
+    const accesoHabilitado = actualizaAcceso
+      ? datosActualizados.usuarioSistema === true : actual.usuarioSistema === true;
+    const camposLogin = {};
 
-    if (!recHumano) {
-      return res.status(404).json({
-        ok: false,
-        msg: "Recurso humano no encontrado con ese código",
+    if (accesoHabilitado && loginEntrada && typeof loginEntrada === "object" &&
+        !Array.isArray(loginEntrada)) {
+      // ====== Solo admitir campos conocidos; nunca reemplazar todo datosLogueo ======
+      ["nombreUsuario", "correoLogin", "rol", "sedeAsignada", "estado"].forEach((campo) => {
+        if (Object.prototype.hasOwnProperty.call(loginEntrada, campo)) {
+          camposLogin[`datosLogueo.${campo}`] = loginEntrada[campo];
+        }
       });
     }
 
-    //Generar respuesta exitosa
-    return res.status(201).json({
-      ok: true,
-    });
+    let contrasenaTemporal;
+    if (accesoHabilitado) {
+      // ====== Alta de acceso: emitir credencial temporal única ======
+      if (!actual.usuarioSistema || !actual.datosLogueo?.passwordHash) {
+        if (!String(loginEntrada?.nombreUsuario ?? '').trim() ||
+            !loginEntrada?.rol || !loginEntrada?.sedeAsignada) {
+          return res.status(422).json({ ok: false, msg: 'Complete usuario, rol y sede antes de habilitar acceso' });
+        }
+        contrasenaTemporal = generarClaveTemporal();
+        camposLogin['datosLogueo.passwordHash'] = await bcrypt.hash(contrasenaTemporal, 10);
+        camposLogin['datosLogueo.requiereCambioPassword'] = true;
+        camposLogin['datosLogueo.versionCredenciales'] =
+          Number(actual.datosLogueo?.versionCredenciales ?? 0) + 1;
+      }
+    } else if (actualizaAcceso) {
+      // ====== Deshabilitar sin eliminar el hash ni sus metadatos ======
+      camposLogin['datosLogueo.estado'] = false;
+    }
+
+    // ====== Actualización parcial: nunca sobrescribe el hash por omisión ======
+    const cambios = {
+      ...datosActualizados,
+      ...camposLogin,
+      updatedBy: uid,
+      usuarioActualizacion: nombreUsuario,
+      fechaActualizacion: new Date(),
+    };
+    const actualizado = await RecurHumano.findOneAndUpdate({ codRecHumano: codigo },
+      { $set: cambios }, { new: false });
+    if (!actualizado) {
+      return res.status(404).json({ ok: false,
+        msg: "Recurso humano no encontrado con ese código" });
+    }
+    res.set('Cache-Control', 'no-store');
+    return res.status(201).json({ ok: true,
+      ...(contrasenaTemporal ? { contrasenaTemporal } : {}) });
   } catch (error) {
-    console.error("Error al actualizar el recurso: ", error);
-    return res.status(500).json({
-      ok: false,
-      msg: "Error al momento de actualizar back end",
-    });
+    console.error("Error al actualizar el recurso humano:", error?.message);
+    return res.status(500).json({ ok: false,
+      msg: "Error al momento de actualizar back end" });
+  }
+};
+
+// ====== Restablecimiento administrativo; no modificar otros datos ======
+const restablecerPasswordRecursoHumano = async (req, res = response) => {
+  const codigo = req.params.codRecHumano;
+  try {
+    const trabajador = await RecurHumano.findOne({ codRecHumano: codigo });
+    if (!trabajador) return res.status(404).json({ ok: false, msg: 'Trabajador no encontrado' });
+    if (trabajador.usuarioSistema !== true || trabajador.datosLogueo?.estado !== true) {
+      return res.status(409).json({ ok: false, msg: 'La cuenta debe estar habilitada y activa' });
+    }
+    const contrasenaTemporal = generarClaveTemporal();
+    // ====== Actualización atómica: no revalidar datos históricos ajenos ======
+    const actualizado = await RecurHumano.findOneAndUpdate({
+      codRecHumano: codigo, usuarioSistema: true, 'datosLogueo.estado': true,
+    }, {
+      $set: {
+        'datosLogueo.passwordHash': await bcrypt.hash(contrasenaTemporal, 10),
+        'datosLogueo.requiereCambioPassword': true,
+        updatedBy: req.user.uid,
+        usuarioActualizacion: req.user.nombreUsuario,
+        fechaActualizacion: new Date(),
+      },
+      $inc: { 'datosLogueo.versionCredenciales': 1 },
+    }, { new: false });
+    if (!actualizado) return res.status(409).json({ ok: false, msg: 'No se pudo restablecer esta cuenta' });
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ok: true, contrasenaTemporal, msg: 'Credencial temporal emitida' });
+  } catch (error) {
+    console.error('Error restableciendo contraseña:', error?.message);
+    return res.status(500).json({ ok: false, msg: 'No se pudo restablecer la contraseña' });
   }
 };
 
@@ -818,6 +896,7 @@ module.exports = {
   mostrarUltimosRecurHumanos,
   encontrarTermino,
   actualizarRecursoHumano,
+  restablecerPasswordRecursoHumano,
   obtenerSolicitantes,
   obtenerProfesionalesQueAtiendenConsultas,
   obtenerProfesionalesConsultas,

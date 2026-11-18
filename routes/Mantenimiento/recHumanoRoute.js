@@ -5,6 +5,7 @@ const {
   mostrarUltimosRecurHumanos,
   encontrarTermino,
   actualizarRecursoHumano,
+  restablecerPasswordRecursoHumano,
   obtenerSolicitantes,
   obtenerProfesionalesConsultas,
   obtenerProfesionalesQueAtiendenConsultas,
@@ -16,13 +17,49 @@ const {
 } = require("../../controllers/Mantenimiento/recursoHumanoController");
 const { validarCampos } = require("../../middlewares/validar-campo");
 const { validarJWT } = require("../../middlewares/validar-token");
-const { validarPermisoAccion } = require("../../middlewares/validar-permiso-accion");
+const {
+  validarPermisoAccion,
+} = require("../../middlewares/validar-permiso-accion");
 const { PERMISOS_ACCION } = require("../../utils/permisosAccion");
 const multer = require("multer");
-const subirFirma = multer({ storage: multer.memoryStorage(), limits: { fileSize: 300 * 1024, files: 1 } });
+const subirFirma = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 300 * 1024, files: 1 },
+});
 
 //Rutas
 const router = Router();
+
+// ====== Solo administradores autorizados al mantenimiento RRHH ======
+const validarAdministradorRRHH = (req, res, next) => {
+  const roles = (process.env.RRHH_ROLES_ADMIN_RESET || "SuperAdmin") //agregar más roles que puedan resetear password
+    .split(",")
+    .map((v) => v.trim().toUpperCase());
+  const rol = String(req.user?.rol ?? "")
+    .trim()
+    .toUpperCase();
+  const tieneRuta = (req.user?.rutasPermitidas ?? []).some(
+    (ruta) =>
+      String(ruta?.urlRuta ?? "")
+        .toLowerCase()
+        .split("?")[0] === "/pages/recursohumano",
+  );
+  if (!roles.includes(rol) || !tieneRuta) {
+    return res.status(403).json({
+      ok: false,
+      msg: "Operación reservada a administradores de RRHH",
+    });
+  }
+  next();
+};
+
+// ====== Restablecimiento independiente de la actualización general ======
+router.put(
+  "/:codRecHumano/restablecer-password",
+  validarJWT,
+  validarAdministradorRRHH,
+  restablecerPasswordRecursoHumano,
+);
 
 // ====== Consultar y configurar firmantes de laboratorio ======
 router.get(
@@ -40,12 +77,19 @@ router.put(
 );
 
 // ====== Firma PNG protegida ======
-router.put("/firmantes-laboratorio/:codRecHumano/imagen", validarJWT,
+router.put(
+  "/firmantes-laboratorio/:codRecHumano/imagen",
+  validarJWT,
   validarPermisoAccion(PERMISOS_ACCION.RESULTADOS_GESTIONAR_FIRMANTES),
-  subirFirma.single("firma"), guardarImagenFirmaLaboratorio);
-router.get("/firmantes-laboratorio/:codRecHumano/imagen", validarJWT,
+  subirFirma.single("firma"),
+  guardarImagenFirmaLaboratorio,
+);
+router.get(
+  "/firmantes-laboratorio/:codRecHumano/imagen",
+  validarJWT,
   validarPermisoAccion(PERMISOS_ACCION.RESULTADOS_GESTIONAR_FIRMANTES),
-  verImagenFirmaLaboratorio);
+  verImagenFirmaLaboratorio,
+);
 
 //POST
 //controlador de esa ruta
@@ -90,7 +134,7 @@ router.post(
 
     validarCampos,
   ],
-  crearRecursoHumano
+  crearRecursoHumano,
 );
 
 //POST
@@ -101,7 +145,7 @@ router.get(
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
   ],
-  mostrarUltimosRecurHumanos
+  mostrarUltimosRecurHumanos,
 );
 
 //! Listar últimos solicitantes
@@ -111,7 +155,7 @@ router.get(
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
   ],
-  obtenerSolicitantes
+  obtenerSolicitantes,
 );
 
 //GET
@@ -122,7 +166,7 @@ router.get(
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
   ],
-  encontrarTermino
+  encontrarTermino,
 );
 
 //GET
@@ -133,13 +177,13 @@ router.get(
     //check('token')
     //.notEmpty().withMessage('Es token es obligatorio'),
   ],
-  obtenerProfesionalesConsultas
+  obtenerProfesionalesConsultas,
 );
 
 // ! Buscar profesionales que atienden consultas por término
 router.get(
   "/traerProfesionalesQueAtiendenConsultas",
-  obtenerProfesionalesQueAtiendenConsultas
+  obtenerProfesionalesQueAtiendenConsultas,
 );
 
 //POST
@@ -147,7 +191,7 @@ router.get(
 router.put(
   "/:codRecHumano/updateRecHumano",
   [validarJWT],
-  actualizarRecursoHumano
+  actualizarRecursoHumano,
 );
 //para exportar rutas
 module.exports = router;

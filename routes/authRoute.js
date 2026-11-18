@@ -4,6 +4,7 @@ const {
   crearUsuario,
   loginUsuario,
   revalidarToken,
+  cambiarPasswordObligatorio,
 } = require("../controllers/auth");
 const { validarCampos } = require("../middlewares/validar-campo");
 
@@ -63,6 +64,13 @@ router.post(
   ],
   loginUsuario
 );
+
+// ====== Solo se acepta token temporal de cambio de contraseña ======
+router.post('/cambiar-password-obligatorio', [
+  check('passwordActual').notEmpty(),
+  check('passwordNueva').notEmpty(),
+  validarCampos,
+], cambiarPasswordObligatorio);
 
 //para exportar rutas
 module.exports = router;

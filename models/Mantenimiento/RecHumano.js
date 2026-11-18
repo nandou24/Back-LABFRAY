@@ -91,6 +91,9 @@ const RecursoHumanoSchema = Schema(
       nombreUsuario: { type: String },
       correoLogin: { type: String },
       passwordHash: { type: String },
+      // ====== Estado de contraseña temporal ======
+      requiereCambioPassword: { type: Boolean, default: false },
+      versionCredenciales: { type: Number, default: 0 },
       rol: {
         type: Schema.Types.ObjectId,
         ref: "rolCollection",

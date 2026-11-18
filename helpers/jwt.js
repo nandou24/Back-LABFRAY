@@ -6,6 +6,7 @@ const generarJWT = (
   rol,
   rutasPermitidas,
   permisosAcciones = [],
+  versionCredenciales = 0,
 ) => {
   const payload = {
     uid,
@@ -13,6 +14,7 @@ const generarJWT = (
     rol,
     rutasPermitidas,
     permisosAcciones,
+    versionCredenciales,
   };
 
   return new Promise((resolve, reject) => {
