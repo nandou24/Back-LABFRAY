@@ -8,6 +8,15 @@ const Profesion = require("../../models/Mantenimiento/Profesiones");
 const Especialidad = require("../../models/Mantenimiento/Especialidades");
 const FirmaProfesionalLaboratorio = require("../../models/Mantenimiento/FirmaProfesionalLaboratorio");
 const crypto = require("crypto");
+const Rol = require("../../models/permisos/roles");
+const { esRolSuperAdmin } = require("../../utils/rolGlobalRRHH");
+
+// ====== Un rol global solo podrá concederse desde una operación protegida ======
+const esRolGlobalPorId = async (rolId) => {
+  if (!mongoose.isValidObjectId(rolId)) return false;
+  const rol = await Rol.findById(rolId).select('codRol').lean();
+  return esRolSuperAdmin(rol);
+};
 
 // ====== Credencial única para acceso inicial o restablecimiento ======
 const generarClaveTemporal = () => crypto.randomBytes(18).toString('base64url');
@@ -98,16 +107,27 @@ const crearRecursoHumano = async (req, res = response) => {
 
     // ====== El alta nunca recibe contraseñas desde el formulario ======
     const entradaLimpia = retirarCamposFirmaProtegidos(req.body);
-    const login = entradaLimpia.datosLogueo && typeof entradaLimpia.datosLogueo === 'object' &&
-      !Array.isArray(entradaLimpia.datosLogueo) ? { ...entradaLimpia.datosLogueo } : {};
-    delete login.passwordHash;
-    delete login.requiereCambioPassword;
-    delete login.versionCredenciales;
-    delete login.fechaExpiracionPasswordTemporal;
+    // ====== El alta solo recibe los campos públicos del login antiguo ======
+    Object.keys(entradaLimpia).forEach((clave) => {
+      if (clave.startsWith('datosLogueo.')) delete entradaLimpia[clave];
+    });
+    const loginEntrada = entradaLimpia.datosLogueo &&
+      typeof entradaLimpia.datosLogueo === 'object' &&
+      !Array.isArray(entradaLimpia.datosLogueo) ? entradaLimpia.datosLogueo : {};
+    const login = {};
+    ['nombreUsuario', 'correoLogin', 'rol', 'sedeAsignada', 'estado'].forEach((campo) => {
+      if (Object.prototype.hasOwnProperty.call(loginEntrada, campo)) {
+        login[campo] = loginEntrada[campo];
+      }
+    });
     let contrasenaTemporal;
     if (usuarioSistema === true) {
       if (!String(login.nombreUsuario ?? '').trim() || !login.rol || !login.sedeAsignada) {
         return res.status(422).json({ ok: false, msg: 'Complete usuario, rol y sede de la cuenta' });
+      }
+      if (await esRolGlobalPorId(login.rol)) {
+        return res.status(403).json({ ok: false,
+          msg: 'El rol SuperAdmin global no puede concederse desde el alta común de RRHH' });
       }
       contrasenaTemporal = generarClaveTemporal();
       login.passwordHash = await bcrypt.hash(contrasenaTemporal, 10);
@@ -369,13 +389,31 @@ const actualizarRecursoHumano = async (req, res = response) => {
   try {
     // ====== Obtener el estado anterior sin exponer el hash ======
     const actual = await RecurHumano.findOne({ codRecHumano: codigo })
-      .select("usuarioSistema datosLogueo.passwordHash datosLogueo.versionCredenciales");
+      .select("usuarioSistema datosLogueo.rol datosLogueo.passwordHash datosLogueo.versionCredenciales");
     if (!actual) {
       return res.status(404).json({ ok: false,
         msg: "Recurso humano no encontrado con ese código" });
     }
 
     const loginEntrada = datosActualizados.datosLogueo;
+    // ====== Evitar deshabilitar accidentalmente una cuenta global por la ficha común ======
+    if (await esRolGlobalPorId(String(actual.datosLogueo?.rol ?? '')) &&
+        (datosActualizados.usuarioSistema === false ||
+          (loginEntrada && Object.prototype.hasOwnProperty.call(loginEntrada, 'estado') &&
+           loginEntrada.estado !== true))) {
+      return res.status(403).json({ ok: false,
+        msg: 'La cuenta SuperAdmin no se puede deshabilitar desde el formulario general' });
+    }
+    // ====== Los cambios al rol global se gestionan solo con operación protegida ======
+    if (loginEntrada && Object.prototype.hasOwnProperty.call(loginEntrada, 'rol')) {
+      const rolAnteriorId = String(actual.datosLogueo?.rol ?? '');
+      const rolNuevoId = String(loginEntrada.rol ?? '');
+      if (rolAnteriorId !== rolNuevoId &&
+          (await esRolGlobalPorId(rolAnteriorId) || await esRolGlobalPorId(rolNuevoId))) {
+        return res.status(403).json({ ok: false,
+          msg: 'La asignación o retiro de SuperAdmin global requiere una operación protegida' });
+      }
+    }
     // ====== Impedir reemplazos de credenciales por campos directos ======
     Object.keys(datosActualizados).forEach((campo) => {
       if (campo === "datosLogueo" || campo.startsWith("datosLogueo.") ||
@@ -424,11 +462,16 @@ const actualizarRecursoHumano = async (req, res = response) => {
       usuarioActualizacion: nombreUsuario,
       fechaActualizacion: new Date(),
     };
-    const actualizado = await RecurHumano.findOneAndUpdate({ codRecHumano: codigo },
+    // ====== Evitar que una edición concurrente reemplace un rol protegido ======
+    const afectaAcceso = Boolean(loginEntrada) || actualizaAcceso;
+    const filtro = { codRecHumano: codigo,
+      ...(afectaAcceso ? { 'datosLogueo.rol': actual.datosLogueo?.rol ?? null } : {}),
+    };
+    const actualizado = await RecurHumano.findOneAndUpdate(filtro,
       { $set: cambios }, { new: false });
     if (!actualizado) {
-      return res.status(404).json({ ok: false,
-        msg: "Recurso humano no encontrado con ese código" });
+      return res.status(409).json({ ok: false,
+        msg: 'La ficha o el rol cambió. Recargue antes de guardar' });
     }
     res.set('Cache-Control', 'no-store');
     return res.status(201).json({ ok: true,

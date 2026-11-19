@@ -26,6 +26,10 @@ const {
   subirFotoPerfilRRHH,
   eliminarFotoPerfilRRHH,
 } = require("../../controllers/Mantenimiento/fotoRecursoHumanoController");
+const {
+  obtenerAccesosSedesRRHH,
+  guardarAccesosSedesRRHH,
+} = require("../../controllers/Mantenimiento/accesosSedesRRHHController");
 const multer = require("multer");
 const subirFirma = multer({
   storage: multer.memoryStorage(),
@@ -57,6 +61,24 @@ const validarAdministradorRRHH = (req, res, next) => {
   }
   next();
 };
+
+// ====== Asignar o retirar SuperAdmin: validación adicional en backend ======
+const { administrarSuperAdmin } = require('../../controllers/Mantenimiento/administrarSuperAdminController');
+router.put('/:codRecHumano/superadmin', validarJWT, administrarSuperAdmin);
+
+// ====== Roles por sede: configuración independiente de la ficha general ======
+router.get(
+  "/:codRecHumano/accesos-sedes",
+  validarJWT,
+  validarAdministradorRRHH,
+  obtenerAccesosSedesRRHH,
+);
+router.put(
+  "/:codRecHumano/accesos-sedes",
+  validarJWT,
+  validarAdministradorRRHH,
+  guardarAccesosSedesRRHH,
+);
 
 // ====== Restablecimiento independiente de la actualización general ======
 router.put(

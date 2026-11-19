@@ -33,6 +33,23 @@ const profesionesSchema = new mongoose.Schema({
   especialidades: [especialidadesSchema],
 });
 
+// ====== Autorización informática por sucursal ======
+const accesoSedeSchema = new Schema({
+  sucursalRef: {
+    type: Schema.Types.ObjectId,
+    ref: "sucursalesCollection",
+    required: true,
+  },
+  rolRef: {
+    type: Schema.Types.ObjectId,
+    ref: "rolCollection",
+    required: true,
+  },
+  habilitado: { type: Boolean, default: false },
+  actualizadoEn: { type: Date, default: Date.now },
+  actualizadoPor: { type: String, default: "" },
+}, { _id: false });
+
 const RecursoHumanoSchema = Schema(
   {
     codRecHumano: { type: String, required: true },
@@ -109,6 +126,22 @@ const RecursoHumanoSchema = Schema(
         ref: "rolCollection",
       }, // rol del usuario
       sedeAsignada: { type: String },
+      // ====== Configuración nueva independiente de la asignación física ======
+      accesosSedes: { type: [accesoSedeSchema], default: [] },
+      sedePredeterminadaRef: {
+        type: Schema.Types.ObjectId,
+        ref: "sucursalesCollection",
+        default: null,
+      },
+      versionAccesos: { type: Number, default: 0, min: 0 },
+      // ====== Auditoría del cambio global junto a la revocación de sesiones ======
+      auditoriaGlobal: { type: [new Schema({
+        accion: { type: String, enum: ['ASIGNAR', 'RETIRAR'], required: true },
+        rolAnteriorRef: { type: Schema.Types.ObjectId, default: null },
+        rolNuevoRef: { type: Schema.Types.ObjectId, required: true },
+        actorCodigo: { type: String, required: true },
+        realizadoEn: { type: Date, required: true },
+      }, { _id: false })], default: [], select: false },
       estado: { type: Boolean }, // activo o no para el sistema
     },
     // 🔍 Campos de auditoría:
