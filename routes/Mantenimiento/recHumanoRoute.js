@@ -21,6 +21,11 @@ const {
   validarPermisoAccion,
 } = require("../../middlewares/validar-permiso-accion");
 const { PERMISOS_ACCION } = require("../../utils/permisosAccion");
+const {
+  obtenerFotoPerfilRRHH,
+  subirFotoPerfilRRHH,
+  eliminarFotoPerfilRRHH,
+} = require("../../controllers/Mantenimiento/fotoRecursoHumanoController");
 const multer = require("multer");
 const subirFirma = multer({
   storage: multer.memoryStorage(),
@@ -60,6 +65,37 @@ router.put(
   validarAdministradorRRHH,
   restablecerPasswordRecursoHumano,
 );
+
+// ====== Fotografía opcional del maestro RRHH ======
+const subirFotoRRHH = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 1200 * 1024, files: 1 },
+});
+const validarAccesoFotoRRHH = (req, res, next) => {
+  const rutas = Array.isArray(req.user?.rutasPermitidas)
+    ? req.user.rutasPermitidas : [];
+  const tieneRuta = rutas.some((item) => {
+    const ruta = typeof item === "string" ? item : item?.urlRuta;
+    return String(ruta ?? "").trim().toLowerCase().split("?")[0] === "/pages/recursohumano";
+  });
+  if (!tieneRuta) {
+    return res.status(403).json({ ok: false, msg: "Sin autorización para gestionar fotografías de RRHH" });
+  }
+  next();
+};
+router.get("/:codRecHumano/foto-perfil", validarJWT, validarAccesoFotoRRHH, obtenerFotoPerfilRRHH);
+const recibirFotoRRHH = (req, res, next) => {
+  subirFotoRRHH.single("foto")(req, res, (error) => {
+    if (!error) return next();
+    const tamano = error.code === "LIMIT_FILE_SIZE";
+    return res.status(tamano ? 413 : 400).json({ ok: false,
+      msg: tamano ? "Fotografía demasiado grande (máximo 1,2 MB)" : "Archivo de fotografía no válido",
+    });
+  });
+};
+router.put("/:codRecHumano/foto-perfil", validarJWT, validarAccesoFotoRRHH,
+  recibirFotoRRHH, subirFotoPerfilRRHH);
+router.delete("/:codRecHumano/foto-perfil", validarJWT, validarAccesoFotoRRHH, eliminarFotoPerfilRRHH);
 
 // ====== Consultar y configurar firmantes de laboratorio ======
 router.get(

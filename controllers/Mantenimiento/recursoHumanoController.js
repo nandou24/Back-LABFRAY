@@ -23,6 +23,8 @@ const retirarCamposFirmaProtegidos = (datos = {}) => {
       ([clave]) =>
         clave !== "firmaLaboratorio" &&
         !clave.startsWith("firmaLaboratorio.") &&
+        clave !== "fotoPerfil" &&
+        !clave.startsWith("fotoPerfil.") &&
         !clave.startsWith("$"),
     ),
   );
@@ -155,14 +157,14 @@ const mostrarUltimosRecurHumanos = async (req, res = response) => {
     // Si no se especifica cantidad, mostrar todos los recursos humanos
     if (cantidad == 0) {
       recHumanos = await RecurHumano.find()
-        .select("-datosLogueo.passwordHash")
+        .select("-datosLogueo.passwordHash -fotoPerfil.key -fotoPerfil.versionId")
         .populate("datosLogueo.rol")
         .sort({ createdAt: -1 })
         .lean();
       // Si se especifica una cantidad, limitar la consulta
     } else {
       recHumanos = await RecurHumano.find()
-        .select("-datosLogueo.passwordHash")
+        .select("-datosLogueo.passwordHash -fotoPerfil.key -fotoPerfil.versionId")
         .populate("datosLogueo.rol")
         .sort({ createdAt: -1 })
         .limit(limite)
@@ -345,7 +347,7 @@ const encontrarTermino = async (req, res = response) => {
         { nroDoc: { $regex: termino, $options: "i" } }, // Búsqueda en el campo "nro documento"
         // Agrega más campos si es necesario
       ],
-    }).select("-datosLogueo.passwordHash").populate("datosLogueo.rol");
+    }).select("-datosLogueo.passwordHash -fotoPerfil.key -fotoPerfil.versionId").populate("datosLogueo.rol");
     return res.json({
       ok: true,
       recHumanos,

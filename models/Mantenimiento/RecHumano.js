@@ -84,6 +84,15 @@ const RecursoHumanoSchema = Schema(
       actualizadoPor: { type: String, default: null },
       usuarioActualizacion: { type: String, default: null },
     },
+    // ====== Fotografía opcional del maestro RRHH en S3 ======
+    fotoPerfil: {
+      key: { type: String, select: false },
+      versionId: { type: String, select: false },
+      mimeType: { type: String },
+      tamanoBytes: { type: Number },
+      actualizadaEn: { type: Date },
+      actualizadoPor: { type: String },
+    },
     gradoInstruccion: { type: String },
     profesionesRecurso: [profesionesSchema],
     usuarioSistema: { type: Boolean },
