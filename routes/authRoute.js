@@ -9,6 +9,7 @@ const {
 } = require("../controllers/auth");
 const { validarCampos } = require("../middlewares/validar-campo");
 const { validarJWT } = require("../middlewares/validar-token");
+const { obtenerMiPerfilSesion } = require("../controllers/miPerfilSesionController");
 
 //Rutas
 const router = Router();
@@ -71,6 +72,9 @@ router.post(
 router.post('/seleccionar-sede', validarJWT, cambiarSede);
 router.post('/cambiar-sede', validarJWT, cambiarSede);
 router.get('/sesion-sedes', validarJWT, consultarSedesSesion);
+
+// ====== Identidad y fotografía propias, sin exponer otras fichas ======
+router.get('/mi-perfil', validarJWT, obtenerMiPerfilSesion);
 
 // ====== Solo se acepta token temporal de cambio de contraseña ======
 router.post('/cambiar-password-obligatorio', [
