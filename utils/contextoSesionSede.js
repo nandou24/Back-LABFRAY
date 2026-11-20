@@ -21,7 +21,7 @@ const obtenerUsuarioSesion = (codigo) => RecurHumano.findOne({ codRecHumano: cod
 
 const cargarRoles = (ids) => Rol.find({ _id: { $in: ids } })
   .select('_id codRol nombreRol estado rutasPermitidas permisosAcciones')
-  .populate('rutasPermitidas', 'codRuta nombreRuta urlRuta iconoRuta')
+  .populate('rutasPermitidas', 'codRuta nombreRuta nombreMostrar descripcionRuta urlRuta iconoRuta')
   .lean();
 
 const resumirSede = (sucursal, rol, esSuperAdmin) => ({
@@ -87,7 +87,7 @@ const validarSedeActual = async (usuario, sucursalRef) => {
   const rolAnteriorId = idDe(usuario.datosLogueo?.rol);
   const rolAnterior = idValido(rolAnteriorId)
     ? await Rol.findById(rolAnteriorId).select('_id codRol nombreRol estado rutasPermitidas permisosAcciones')
-      .populate('rutasPermitidas', 'codRuta nombreRuta urlRuta iconoRuta').lean()
+      .populate('rutasPermitidas', 'codRuta nombreRuta nombreMostrar descripcionRuta urlRuta iconoRuta').lean()
     : null;
   const global = esRolSuperAdmin(rolAnterior);
   const acceso = global ? null : accesos.find((item) =>
@@ -95,7 +95,7 @@ const validarSedeActual = async (usuario, sucursalRef) => {
   if (!global && !acceso) return null;
   const rol = global ? rolAnterior : await Rol.findById(acceso.rolRef)
     .select('_id codRol nombreRol estado rutasPermitidas permisosAcciones')
-    .populate('rutasPermitidas', 'codRuta nombreRuta urlRuta iconoRuta').lean();
+    .populate('rutasPermitidas', 'codRuta nombreRuta nombreMostrar descripcionRuta urlRuta iconoRuta').lean();
   if (!rol || rol.estado !== true || (!global && esRolSuperAdmin(rol))) return null;
   const sucursal = await Sucursal.findById(sucursalRef)
     .select('_id codigo nombre estado esPrincipal personal.recursoHumanoId personal.activo').lean();
@@ -107,6 +107,7 @@ const validarSedeActual = async (usuario, sucursalRef) => {
 const datosRolSesion = (rol) => ({
   rutasPermitidas: (rol.rutasPermitidas ?? []).filter(Boolean).map((ruta) => ({
     codRuta: ruta.codRuta, nombreRuta: ruta.nombreRuta,
+    nombreMostrar: ruta.nombreMostrar ?? '', descripcionRuta: ruta.descripcionRuta ?? '',
     urlRuta: ruta.urlRuta, iconoRuta: ruta.iconoRuta,
   })),
   permisosAcciones: normalizarPermisosAcciones(rol.permisosAcciones),
