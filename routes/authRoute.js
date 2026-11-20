@@ -3,10 +3,12 @@ const { check } = require("express-validator");
 const {
   crearUsuario,
   loginUsuario,
-  revalidarToken,
+  cambiarSede,
+  consultarSedesSesion,
   cambiarPasswordObligatorio,
 } = require("../controllers/auth");
 const { validarCampos } = require("../middlewares/validar-campo");
+const { validarJWT } = require("../middlewares/validar-token");
 
 //Rutas
 const router = Router();
@@ -64,6 +66,11 @@ router.post(
   ],
   loginUsuario
 );
+
+// ====== Selección de contexto autenticada, sin volver a emitir JWT ======
+router.post('/seleccionar-sede', validarJWT, cambiarSede);
+router.post('/cambiar-sede', validarJWT, cambiarSede);
+router.get('/sesion-sedes', validarJWT, consultarSedesSesion);
 
 // ====== Solo se acepta token temporal de cambio de contraseña ======
 router.post('/cambiar-password-obligatorio', [
