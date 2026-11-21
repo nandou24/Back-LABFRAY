@@ -23,13 +23,13 @@ const cargarCatalogos = async () => {
       .lean(),
     Rol.find({})
       .select('_id codRol nombreRol estado rutasPermitidas')
-      .populate('rutasPermitidas', 'codRuta nombreRuta urlRuta')
+      .populate('rutasPermitidas', 'codRuta nombreRuta urlRuta estado')
       .lean(),
   ]);
   return { sucursales, roles };
 };
 
-// ====== Estado informativo; la autorización de operaciones llegará con JWT ======
+// ====== Estado de doble autorización vigente por sede ======
 const calcularEstado = (usuario, acceso, sucursal, rol) => {
   const cuentaHabilitada = usuario.usuarioSistema === true &&
     usuario.datosLogueo?.estado === true &&
@@ -73,7 +73,7 @@ const construirRespuesta = (usuario, catalogos, permiteAdministrarGlobal = false
     rolGlobal: perfilGlobalHeredado ? {
       _id: String(rolLegacy._id), codRol: rolLegacy.codRol,
       nombreRol: rolLegacy.nombreRol, estado: rolLegacy.estado === true, esGlobal: true,
-      rutasPermitidas: (rolLegacy.rutasPermitidas ?? []).filter(Boolean).map((ruta) => ({
+      rutasPermitidas: (rolLegacy.rutasPermitidas ?? []).filter((ruta) => ruta?.estado === true).map((ruta) => ({
         codRuta: ruta.codRuta, nombreRuta: ruta.nombreRuta, urlRuta: ruta.urlRuta,
       })),
     } : null,
@@ -111,13 +111,13 @@ const construirRespuesta = (usuario, catalogos, permiteAdministrarGlobal = false
       roles: catalogos.roles.map((item) => ({
         _id: String(item._id), codRol: item.codRol,
         nombreRol: item.nombreRol, estado: item.estado, esGlobal: esRolSuperAdmin(item),
-        rutasPermitidas: (item.rutasPermitidas ?? []).filter(Boolean).map((ruta) => ({
+        rutasPermitidas: (item.rutasPermitidas ?? []).filter((ruta) => ruta?.estado === true).map((ruta) => ({
           codRuta: ruta.codRuta, nombreRuta: ruta.nombreRuta, urlRuta: ruta.urlRuta,
         })),
       })),
     },
-    // ====== Advertencia hasta integrar autorización por sede en validarJWT ======
-    autorizacionEnVigor: false,
+    // ====== El JWT ya valida el contexto multisede; no implica permisos de operación ======
+    autorizacionEnVigor: true,
   };
 };
 
@@ -193,7 +193,7 @@ const guardarAccesosSedesRRHH = async (req, res) => {
       String(r._id) === idGuardado(usuario.datosLogueo?.rol));
     if (esRolSuperAdmin(rolLegacy)) {
       return res.status(409).json({ ok: false,
-        msg: 'La cuenta conserva un SuperAdmin global. No se gestiona por sedes; espere el flujo protegido de RRHH-2D.' });
+        msg: 'La cuenta tiene un perfil SuperAdmin global. Utiliza la administración protegida para asignarlo o retirarlo; no se gestiona por sedes.' });
     }
     const sedesPorId = new Map(catalogos.sucursales.map((item) => [String(item._id), item]));
     const rolesPorId = new Map(catalogos.roles.map((item) => [String(item._id), item]));
