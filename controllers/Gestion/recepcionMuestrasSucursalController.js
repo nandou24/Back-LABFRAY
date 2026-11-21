@@ -198,6 +198,16 @@ const prepararDatos = async body => {
       if (p.fechaNacimiento) p.edadDeclarada = null;
     }
   }
+  // ====== No declarar como nuevo un DNI existente en el maestro ======
+  const dniSinVinculo = [...new Set(pacientes
+    .filter(p => !p.pacienteId && String(p.tipoDoc).toUpperCase() === 'DNI' && /^\d{8}$/.test(p.nroDoc))
+    .map(p => p.nroDoc))];
+  if (dniSinVinculo.length) {
+    const existente = await Paciente.findOne({ tipoDoc: 'DNI', nroDoc: { $in: dniSinVinculo } })
+      .select('_id hc nroDoc').lean();
+    if (existente) fallo(`El DNI ${existente.nroDoc} ya pertenece a un paciente del maestro. Selecciónelo para registrar una atención independiente.`, 422);
+  }
+
   const autorizadas = await permitidasPorConvenio(asociado);
   if ([...pruebasIds].some(id => !autorizadas.has(id))) fallo('El convenio del asociado no permite una o más pruebas');
   const pruebas = await PruebaLab.find({ _id: { $in: [...pruebasIds] }, estadoPrueba: 'ACTIVO' })
@@ -306,10 +316,15 @@ const construirCambios = (anterior, nuevo) => {
   return cambios;
 };
 
-// ====== El contador anual es el mismo que usa Central ======
-const siguienteCodigo = async () => {
-  const anio = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Lima', year: 'numeric' }).format(new Date());
-  const prefijo = `REM-${anio}`;
+// ====== Correlativo propio por sede y año, separado de la futura remisión ======
+const siguienteCodigo = async (sucursal) => {
+  // ====== Año corto sin tope de 99: 2026 -> 26, 2100 -> 100 ======
+  const anio = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Lima', year: 'numeric' }).format(new Date())) - 2000;
+  // ====== Admitir códigos maestros antiguos LF-0002 y nuevos LF2 sin migrar referencias ======
+  const coincidencia = /^LF-?0*([1-9]\d*)$/i.exec(String(sucursal.codigo || '').trim());
+  if (!coincidencia || anio < 0) fallo('La sede no tiene un código válido para emitir recepciones', 422);
+  const sede = `LF${coincidencia[1]}`;
+  const prefijo = `REC-${sede}-${anio}`;
   let correlativo;
   try {
     correlativo = await Correlativo.findOneAndUpdate({ _id: prefijo },
@@ -319,8 +334,8 @@ const siguienteCodigo = async () => {
     correlativo = await Correlativo.findOneAndUpdate({ _id: prefijo },
       { $inc: { secuencia: 1 } }, { new: true });
   }
-  if (!correlativo) throw new Error('No se pudo generar correlativo');
-  return `${prefijo}-${String(correlativo.secuencia).padStart(6, '0')}`;
+  if (!correlativo) throw new Error('No se pudo generar correlativo de recepción');
+  return `${prefijo}-${correlativo.secuencia}`;
 };
 
 const respuestaError = (res, e, etiqueta) => {
@@ -344,9 +359,9 @@ const crear = async (req, res) => {
       sucursalReceptoraCodigo: req.sucursalOperativa.codigo,
       sucursalReceptoraNombre: req.sucursalOperativa.nombreCorto || req.sucursalOperativa.nombre,
       registradoPor: req.user.uid, usuarioRegistro: req.user.nombreUsuario || req.user.uid };
-    // ====== Evitar reutilizar accidentalmente el mismo REM en colecciones distintas ======
+    // ====== Evitar colisiones entre recepciones e historiales anteriores ======
     for (let intento = 0; intento < 4; intento++) {
-      const codigoRemision = await siguienteCodigo();
+      const codigoRemision = await siguienteCodigo(req.sucursalOperativa);
       const repetidoCentral = await RecepcionMuestras.exists({ codigoEnvio: codigoRemision });
       const repetidoSucursal = await RemisionSucursal.exists({ codigoRemision });
       if (repetidoCentral || repetidoSucursal) continue;
@@ -355,7 +370,7 @@ const crear = async (req, res) => {
         cambios: construirCambios(null, base) });
       try {
         const remision = await RemisionSucursal.create({ ...base, codigoRemision, historialCambios: [evento] });
-        return res.status(201).json({ ok: true, msg: 'Remisión registrada para envío posterior', remision });
+        return res.status(201).json({ ok: true, msg: 'Recepción registrada para envío posterior', remision });
       } catch (e) { if (e.code !== 11000) throw e; }
     }
     return error(res, 409, 'No fue posible reservar un código de remisión no repetido');
@@ -474,7 +489,7 @@ const actualizar = async (req, res) => {
       $push: { historialCambios: evento }, $inc: { __v: 1 },
     }, { new: true, runValidators: true, projection: { historialCambios: 0 } }).lean();
     if (!remision) return error(res, 409, 'La remisión cambió durante la edición; vuelva a cargarla');
-    return res.json({ ok: true, msg: 'Remisión actualizada', remision });
+    return res.json({ ok: true, msg: 'Recepción actualizada', remision });
   } catch (e) { return respuestaError(res, e, 'Editar remisión sucursal:'); }
 };
 
