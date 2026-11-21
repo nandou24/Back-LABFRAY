@@ -7,7 +7,7 @@ router.use(validarJWT);
 
 // ====== Permiso exclusivo: no concede acceso a Recepción Central ======
 router.use((req, res, next) => {
-  const autorizado = req.user?.rutasPermitidas?.some(
+  const autorizado = req.user?.esSuperAdmin === true || req.user?.rutasPermitidas?.some(
     (r) =>
       String(r.urlRuta || "").toLowerCase() ===
       "/pages/recepcion-muestras-sucursal",

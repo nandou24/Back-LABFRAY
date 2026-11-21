@@ -23,24 +23,22 @@ const nombreAsociado = a => a.tipoPersona === 'JURIDICA'
   : [a.nombres, a.apellidoPaterno, a.apellidoMaterno].filter(Boolean).join(' ');
 const scope = req => ({ sucursalReceptoraId: req.sucursalOperativa._id });
 
-// ====== La asignación se resuelve siempre desde el usuario autenticado ======
+// ====== La sede operativa proviene del JWT validado y de su contexto actual ======
 const contextoSucursal = async (req, res, next) => {
   try {
-    const humano = await RecHumano.findOne({ codRecHumano: req.user.uid,
-      'datosLogueo.estado': true }).select('_id codRecHumano nombreRecHumano apePatRecHumano apeMatRecHumano datosLogueo.sedeAsignada').lean();
+    const sedeRef = req.user?.sucursalOperativaRef;
+    if (!esId(sedeRef)) return error(res, 403, 'No se pudo identificar la sede autorizada de la sesión');
+
+    // ====== validarJWT ya comprobó el permiso por sede o el perfil global ======
+    const [humano, sucursal] = await Promise.all([
+      RecHumano.findOne({ codRecHumano: req.user.uid, 'datosLogueo.estado': true })
+        .select('_id nombreRecHumano apePatRecHumano apeMatRecHumano').lean(),
+      Sucursal.findOne({ _id: sedeRef, estado: 'ACTIVA' })
+        .select('_id codigo nombre nombreCorto esPrincipal').lean(),
+    ]);
     if (!humano) return error(res, 403, 'No existe un operador activo para esta sesión');
-    const sucursales = await Sucursal.find({ estado: 'ACTIVA', personal: { $elemMatch: {
-      recursoHumanoId: humano._id, activo: true,
-    } } }).select('_id codigo nombre nombreCorto esPrincipal').lean();
-    if (!sucursales.length) return error(res, 403, 'El operador no pertenece al personal activo de una sucursal');
-    const sedeAsignada = texto(humano.datosLogueo?.sedeAsignada, 150).toUpperCase();
-    const coincidencias = sucursales.filter(s => [s.codigo, s.nombre, s.nombreCorto]
-      .some(v => String(v || '').toUpperCase() === sedeAsignada));
-    // ====== Nunca elegir arbitrariamente entre varias sucursales autorizadas ======
-    const sucursal = coincidencias.length === 1 ? coincidencias[0]
-      : (sucursales.length === 1 ? sucursales[0] : null);
-    if (!sucursal) return error(res, 403,
-      'El operador tiene varias sucursales activas y no existe una sedeAsignada inequívoca');
+    if (!sucursal) return error(res, 403, 'La sucursal operativa no está activa o autorizada');
+
     req.sucursalOperativa = sucursal;
     req.nombreResponsableSucursal = nombreHumano(humano);
     if (!req.nombreResponsableSucursal) return error(res, 403, 'No se pudo identificar al responsable');
