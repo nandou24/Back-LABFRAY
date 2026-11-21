@@ -389,7 +389,7 @@ const actualizarRecursoHumano = async (req, res = response) => {
   try {
     // ====== Obtener el estado anterior sin exponer el hash ======
     const actual = await RecurHumano.findOne({ codRecHumano: codigo })
-      .select("usuarioSistema datosLogueo.rol datosLogueo.passwordHash datosLogueo.versionCredenciales");
+      .select("usuarioSistema datosLogueo.rol datosLogueo.estado datosLogueo.passwordHash datosLogueo.versionCredenciales");
     if (!actual) {
       return res.status(404).json({ ok: false,
         msg: "Recurso humano no encontrado con ese código" });
@@ -446,13 +446,22 @@ const actualizarRecursoHumano = async (req, res = response) => {
         camposLogin['datosLogueo.passwordHash'] = await bcrypt.hash(contrasenaTemporal, 10);
         camposLogin['datosLogueo.requiereCambioPassword'] = true;
         camposLogin['datosLogueo.fechaExpiracionPasswordTemporal'] = expiracionClaveTemporal();
-        camposLogin['datosLogueo.versionCredenciales'] =
-          Number(actual.datosLogueo?.versionCredenciales ?? 0) + 1;
       }
     } else if (actualizaAcceso) {
       // ====== Deshabilitar sin eliminar el hash ni sus metadatos ======
       camposLogin['datosLogueo.estado'] = false;
     }
+
+    // ====== Revocar sesiones cuando cambia la habilitación, el estado o el rol ======
+    const estadoAnterior = actual.datosLogueo?.estado === true;
+    const estadoNuevo = Object.prototype.hasOwnProperty.call(camposLogin, 'datosLogueo.estado')
+      ? camposLogin['datosLogueo.estado'] === true : estadoAnterior;
+    const rolAnterior = String(actual.datosLogueo?.rol ?? '');
+    const rolNuevo = Object.prototype.hasOwnProperty.call(camposLogin, 'datosLogueo.rol')
+      ? String(camposLogin['datosLogueo.rol'] ?? '') : rolAnterior;
+    const revocarSesiones = Boolean(contrasenaTemporal) ||
+      (actual.usuarioSistema === true) !== accesoHabilitado ||
+      estadoAnterior !== estadoNuevo || rolAnterior !== rolNuevo;
 
     // ====== Actualización parcial: nunca sobrescribe el hash por omisión ======
     const cambios = {
@@ -464,11 +473,19 @@ const actualizarRecursoHumano = async (req, res = response) => {
     };
     // ====== Evitar que una edición concurrente reemplace un rol protegido ======
     const afectaAcceso = Boolean(loginEntrada) || actualizaAcceso;
+    const versionAnterior = Number(actual.datosLogueo?.versionCredenciales ?? 0);
+    const filtroVersion = versionAnterior === 0
+      ? { $or: [{ 'datosLogueo.versionCredenciales': 0 },
+          { 'datosLogueo.versionCredenciales': { $exists: false } }] }
+      : { 'datosLogueo.versionCredenciales': versionAnterior };
     const filtro = { codRecHumano: codigo,
       ...(afectaAcceso ? { 'datosLogueo.rol': actual.datosLogueo?.rol ?? null } : {}),
+      ...(revocarSesiones ? filtroVersion : {}),
     };
     const actualizado = await RecurHumano.findOneAndUpdate(filtro,
-      { $set: cambios }, { new: false });
+      { $set: cambios,
+        ...(revocarSesiones ? { $inc: { 'datosLogueo.versionCredenciales': 1 } } : {}),
+      }, { new: false });
     if (!actualizado) {
       return res.status(409).json({ ok: false,
         msg: 'La ficha o el rol cambió. Recargue antes de guardar' });
