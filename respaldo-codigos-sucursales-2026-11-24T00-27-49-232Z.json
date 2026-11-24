@@ -1,0 +1,28 @@
+{
+  "tipo": "LABFRAY_CODIGOS_SUCURSALES_V1",
+  "fecha": "2026-11-24T00:27:49.233Z",
+  "cambiosSedes": [
+    {
+      "_id": "6aebb3c5810bbc605ca4b53e",
+      "anterior": "LF-0001",
+      "nuevo": "LF1",
+      "numero": 1
+    },
+    {
+      "_id": "6aebc0c5747a8f3ff04ab20a",
+      "anterior": "LF-0002",
+      "nuevo": "LF2",
+      "numero": 2
+    }
+  ],
+  "cambiosRecepciones": [
+    {
+      "_id": "6b010e1d5a616535ab65695b",
+      "sucursalId": "6aebc0c5747a8f3ff04ab20a",
+      "anterior": "LF-0002",
+      "nuevo": "LF2"
+    }
+  ],
+  "secuenciaAnterior": 2,
+  "consecutivoFinal": 2
+}

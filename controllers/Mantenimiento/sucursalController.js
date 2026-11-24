@@ -333,7 +333,7 @@ const crearSucursal = async (req, res = response) => {
     if (!Number.isInteger(numero)) throw new Error('No se pudo generar el consecutivo de sucursal');
     const sucursal = await Sucursal.create({
       ...datos,
-      codigo: `LF-${String(numero).padStart(4, '0')}`,
+      codigo: `LF${numero}`,
       contactoHistorial: [crearRegistroContacto(datos, req.user.nombreUsuario, 'CREACION')],
       createdBy: req.user.uid,
       usuarioRegistro: req.user.nombreUsuario,
