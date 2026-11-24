@@ -1,7 +1,6 @@
 const mongoose = require('mongoose');
-const RemisionSucursal = require('../../models/Gestion/RemisionSucursal');
-const RecepcionMuestras = require('../../models/Gestion/RecepcionMuestras');
-const Correlativo = require('../../models/Gestion/RecepcionMuestrasCorrelativo');
+const RecepcionSucursal = require('../../models/Gestion/RecepcionSucursal');
+const Correlativo = require('../../models/Gestion/RecepcionSucursalCorrelativo');
 const RecHumano = require('../../models/Mantenimiento/RecHumano');
 const Sucursal = require('../../models/Mantenimiento/Sucursal');
 const Asociado = require('../../models/Mantenimiento/Asociado');
@@ -22,6 +21,12 @@ const nombreAsociado = a => a.tipoPersona === 'JURIDICA'
   ? (a.nombreComercial || a.razonSocial || '')
   : [a.nombres, a.apellidoPaterno, a.apellidoMaterno].filter(Boolean).join(' ');
 const scope = req => ({ sucursalReceptoraId: req.sucursalOperativa._id });
+
+// ====== Respuesta compatible con los tipos vigentes del frontend ======
+const respuestaRecepcion = registro => registro && ({
+  ...registro,
+  codigoRemision: registro.codigoRecepcion,
+});
 
 // ====== La sede operativa proviene del JWT validado y de su contexto actual ======
 const contextoSucursal = async (req, res, next) => {
@@ -235,7 +240,7 @@ const prepararDatos = async body => {
     }
     tuboIds.add(r.tuboEnvaseId);
     const etiqueta = texto(r.codigoEtiqueta, 100).toUpperCase();
-    if (etiqueta && etiquetas.has(etiqueta)) fallo('La etiqueta externa se repite dentro de esta remisión');
+    if (etiqueta && etiquetas.has(etiqueta)) fallo('La etiqueta externa se repite dentro de esta recepción');
     if (etiqueta) etiquetas.add(etiqueta);
   }
   const tubos = await TuboEnvase.find({ _id: { $in: [...tuboIds] }, estadoTuboEnvase: 'ACTIVO' })
@@ -320,10 +325,11 @@ const construirCambios = (anterior, nuevo) => {
 const siguienteCodigo = async (sucursal) => {
   // ====== Año corto sin tope de 99: 2026 -> 26, 2100 -> 100 ======
   const anio = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Lima', year: 'numeric' }).format(new Date())) - 2000;
-  // ====== Admitir códigos maestros antiguos LF-0002 y nuevos LF2 sin migrar referencias ======
-  const coincidencia = /^LF-?0*([1-9]\d*)$/i.exec(String(sucursal.codigo || '').trim());
-  if (!coincidencia || anio < 0) fallo('La sede no tiene un código válido para emitir recepciones', 422);
-  const sede = `LF${coincidencia[1]}`;
+  // ====== Solo se admiten códigos maestros vigentes LF1, LF2, ... ======
+  const sede = String(sucursal?.codigo || '').trim().toUpperCase();
+  if (!/^LF[1-9]\d*$/.test(sede) || anio < 0) {
+    fallo('La sede no tiene un código válido para emitir recepciones', 422);
+  }
   const prefijo = `REC-${sede}-${anio}`;
   let correlativo;
   try {
@@ -340,7 +346,7 @@ const siguienteCodigo = async (sucursal) => {
 
 const respuestaError = (res, e, etiqueta) => {
   if (e.status) return error(res, e.status, e.message);
-  if (e.code === 11000) return error(res, 409, 'Conflicto de código; revise el correlativo de remisiones');
+  if (e.code === 11000) return error(res, 409, 'Conflicto de código; revise el correlativo de recepciones');
   if (e.name === 'ValidationError' || e.name === 'CastError') return error(res, 422, e.message);
   console.error(etiqueta, e);
   return error(res, 500, 'No se pudo completar la operación');
@@ -348,7 +354,7 @@ const respuestaError = (res, e, etiqueta) => {
 
 const crear = async (req, res) => {
   if (req.sucursalOperativa?.esPrincipal === true) {
-    return error(res, 403, 'La sede principal solo puede consultar remisiones de este módulo');
+    return error(res, 403, 'La sede principal solo puede consultar recepciones de este módulo');
   }
   try {
     const datos = await prepararDatos(req.body || {});
@@ -359,22 +365,15 @@ const crear = async (req, res) => {
       sucursalReceptoraCodigo: req.sucursalOperativa.codigo,
       sucursalReceptoraNombre: req.sucursalOperativa.nombreCorto || req.sucursalOperativa.nombre,
       registradoPor: req.user.uid, usuarioRegistro: req.user.nombreUsuario || req.user.uid };
-    // ====== Evitar colisiones entre recepciones e historiales anteriores ======
-    for (let intento = 0; intento < 4; intento++) {
-      const codigoRemision = await siguienteCodigo(req.sucursalOperativa);
-      const repetidoCentral = await RecepcionMuestras.exists({ codigoEnvio: codigoRemision });
-      const repetidoSucursal = await RemisionSucursal.exists({ codigoRemision });
-      if (repetidoCentral || repetidoSucursal) continue;
-      const evento = crearEvento({ accion: 'CREACION', usuario: req.user,
-        nombreCompleto: req.nombreResponsableSucursal,
-        cambios: construirCambios(null, base) });
-      try {
-        const remision = await RemisionSucursal.create({ ...base, codigoRemision, historialCambios: [evento] });
-        return res.status(201).json({ ok: true, msg: 'Recepción registrada para envío posterior', remision });
-      } catch (e) { if (e.code !== 11000) throw e; }
-    }
-    return error(res, 409, 'No fue posible reservar un código de remisión no repetido');
-  } catch (e) { return respuestaError(res, e, 'Crear remisión sucursal:'); }
+    // ====== Código nuevo, sin numeración heredada ======
+    const codigoRecepcion = await siguienteCodigo(req.sucursalOperativa);
+    const evento = crearEvento({ accion: 'CREACION', usuario: req.user,
+      nombreCompleto: req.nombreResponsableSucursal,
+      cambios: construirCambios(null, base) });
+    const recepcion = await RecepcionSucursal.create({ ...base, codigoRecepcion, historialCambios: [evento] });
+    return res.status(201).json({ ok: true, msg: 'Recepción registrada para envío posterior',
+      remision: respuestaRecepcion(recepcion.toObject()) });
+  } catch (e) { return respuestaError(res, e, 'Crear recepción sucursal:'); }
 };
 
 const listar = async (req, res) => {
@@ -382,39 +381,39 @@ const listar = async (req, res) => {
     const search = texto(req.query.search, 100);
     const filtro = { ...scope(req) };
     if (search) filtro.$or = [
-      { codigoRemision: regExp(search) }, { asociadoCodigo: regExp(search) },
+      { codigoRecepcion: regExp(search) }, { asociadoCodigo: regExp(search) },
       { asociadoNombre: regExp(search) }, { referenciaRemision: regExp(search) },
       { 'pacientes.nroDoc': regExp(search) }, { 'pacientes.nombre': regExp(search) },
     ];
-    const remisiones = await RemisionSucursal.find(filtro)
-      .select('codigoRemision asociadoNombre asociadoCodigo sedeAsociadoNombre estado prioridad referenciaRemision createdAt pacientes.clave recipientes.cantidadDeclarada')
+    const remisiones = await RecepcionSucursal.find(filtro)
+      .select('codigoRecepcion asociadoNombre asociadoCodigo sedeAsociadoNombre estado prioridad referenciaRemision createdAt pacientes.clave recipientes.cantidadDeclarada')
       .sort({ createdAt: -1 }).limit(50).lean();
     return res.json({ ok: true, remisiones: remisiones.map(r => ({ _id: r._id,
-      codigoRemision: r.codigoRemision, asociadoNombre: r.asociadoNombre,
+      codigoRemision: r.codigoRecepcion, codigoRecepcion: r.codigoRecepcion, asociadoNombre: r.asociadoNombre,
       asociadoCodigo: r.asociadoCodigo, sedeAsociadoNombre: r.sedeAsociadoNombre,
       prioridad: r.prioridad, estado: r.estado, referenciaRemision: r.referenciaRemision,
       fechaRegistro: r.createdAt, pacientes: r.pacientes?.length || 0,
       recipientes: (r.recipientes || []).reduce((n, x) => n + x.cantidadDeclarada, 0),
     })) });
-  } catch (e) { return respuestaError(res, e, 'Listar remisiones sucursal:'); }
+  } catch (e) { return respuestaError(res, e, 'Listar recepciones sucursal:'); }
 };
 
 const detalle = async (req, res) => {
   if (!esId(req.params.id)) return error(res, 400, 'Identificador inválido');
   try {
-    const remision = await RemisionSucursal.findOne({ _id: req.params.id, ...scope(req) })
+    const remision = await RecepcionSucursal.findOne({ _id: req.params.id, ...scope(req) })
       .select('-historialCambios').lean();
-    if (!remision) return error(res, 404, 'Remisión no encontrada en su sucursal');
-    return res.json({ ok: true, remision });
-  } catch (e) { return respuestaError(res, e, 'Detalle remisión sucursal:'); }
+    if (!remision) return error(res, 404, 'Recepción no encontrada en su sucursal');
+    return res.json({ ok: true, remision: respuestaRecepcion(remision) });
+  } catch (e) { return respuestaError(res, e, 'Detalle recepción sucursal:'); }
 };
 
 const edicion = async (req, res) => {
   if (!esId(req.params.id)) return error(res, 400, 'Identificador inválido');
   try {
-    const r = await RemisionSucursal.findOne({ _id: req.params.id, ...scope(req) }).lean();
-    if (!r) return error(res, 404, 'Remisión no encontrada en su sucursal');
-    if (r.estado !== 'DISPONIBLE_PARA_ENVIO') return error(res, 409, 'La remisión ya no admite edición');
+    const r = await RecepcionSucursal.findOne({ _id: req.params.id, ...scope(req) }).lean();
+    if (!r) return error(res, 404, 'Recepción no encontrada en su sucursal');
+    if (r.estado !== 'DISPONIBLE_PARA_ENVIO') return error(res, 409, 'La recepción ya no admite edición');
     const pacientes = (r.pacientes || []).map(p => ({
       clave: p.clave, pacienteId: p.pacienteId || null, hc: p.hc || '',
       tipoDoc: p.tipoDoc || '', nroDoc: p.nroDoc || '', nombres: p.nombres || '',
@@ -438,29 +437,29 @@ const edicion = async (req, res) => {
       fechaHoraRecepcion: r.recepcionSucursal.fechaHora,
       incidencia: r.recepcionSucursal.observacion,
     } });
-  } catch (e) { return respuestaError(res, e, 'Edición remisión sucursal:'); }
+  } catch (e) { return respuestaError(res, e, 'Edición recepción sucursal:'); }
 };
 
 const actualizar = async (req, res) => {
   if (req.sucursalOperativa?.esPrincipal === true) {
-    return error(res, 403, 'La sede principal solo puede consultar remisiones de este módulo');
+    return error(res, 403, 'La sede principal solo puede consultar recepciones de este módulo');
   }
   if (!esId(req.params.id)) return error(res, 400, 'Identificador inválido');
   if (!Number.isSafeInteger(req.body?.version) || req.body.version < 0) return error(res, 400, 'Versión inválida');
   const motivoCambio = texto(req.body?.motivoCambio, 500);
   if (motivoCambio.length < 5) return error(res, 422, 'Indique el motivo de edición (mínimo 5 caracteres)');
   try {
-    const anterior = await RemisionSucursal.findOne({ _id: req.params.id, ...scope(req) }).lean();
-    if (!anterior) return error(res, 404, 'Remisión no encontrada en su sucursal');
-    if (anterior.estado !== 'DISPONIBLE_PARA_ENVIO') return error(res, 409, 'La remisión ya no admite edición');
-    if (anterior.__v !== req.body.version) return error(res, 409, 'Otro operador modificó la remisión; vuelva a cargarla');
+    const anterior = await RecepcionSucursal.findOne({ _id: req.params.id, ...scope(req) }).lean();
+    if (!anterior) return error(res, 404, 'Recepción no encontrada en su sucursal');
+    if (anterior.estado !== 'DISPONIBLE_PARA_ENVIO') return error(res, 409, 'La recepción ya no admite edición');
+    if (anterior.__v !== req.body.version) return error(res, 409, 'Otro operador modificó la recepción; vuelva a cargarla');
     const datos = await prepararDatos(req.body);
     const nuevosIds = new Set();
     const previos = new Set((anterior.recipientes || []).map(r => String(r._id)));
     for (let i = 0; i < datos.recipientes.length; i++) {
       const clave = texto(req.body.recipientes[i]?.clave, 40);
       if (esId(clave)) {
-        if (!previos.has(clave) || nuevosIds.has(clave)) fallo('La referencia de un recipiente no pertenece a esta remisión');
+        if (!previos.has(clave) || nuevosIds.has(clave)) fallo('La referencia de un recipiente no pertenece a esta recepción');
         nuevosIds.add(clave);
         datos.recipientes[i]._id = clave;
       } else datos.recipientes[i]._id = new mongoose.Types.ObjectId();
@@ -479,29 +478,29 @@ const actualizar = async (req, res) => {
     }
     const nuevos = { ...datos, recepcionSucursal: lectura };
     const cambios = construirCambios(anterior, nuevos);
-    if (!cambios.length) return res.json({ ok: true, msg: 'Sin modificaciones', remision: anterior });
+    if (!cambios.length) return res.json({ ok: true, msg: 'Sin modificaciones', remision: respuestaRecepcion(anterior) });
     const evento = crearEvento({ accion: 'EDICION', usuario: req.user,
       nombreCompleto: req.nombreResponsableSucursal, motivo: motivoCambio,
       versionAnterior: anterior.__v, cambios });
-    const remision = await RemisionSucursal.findOneAndUpdate({ _id: req.params.id, ...scope(req),
+    const remision = await RecepcionSucursal.findOneAndUpdate({ _id: req.params.id, ...scope(req),
       estado: 'DISPONIBLE_PARA_ENVIO', __v: anterior.__v }, {
       $set: { ...nuevos, actualizadoPor: req.user.uid },
       $push: { historialCambios: evento }, $inc: { __v: 1 },
     }, { new: true, runValidators: true, projection: { historialCambios: 0 } }).lean();
-    if (!remision) return error(res, 409, 'La remisión cambió durante la edición; vuelva a cargarla');
-    return res.json({ ok: true, msg: 'Recepción actualizada', remision });
-  } catch (e) { return respuestaError(res, e, 'Editar remisión sucursal:'); }
+    if (!remision) return error(res, 409, 'La recepción cambió durante la edición; vuelva a cargarla');
+    return res.json({ ok: true, msg: 'Recepción actualizada', remision: respuestaRecepcion(remision) });
+  } catch (e) { return respuestaError(res, e, 'Editar recepción sucursal:'); }
 };
 
 const historial = async (req, res) => {
   if (!esId(req.params.id)) return error(res, 400, 'Identificador inválido');
   try {
-    const r = await RemisionSucursal.findOne({ _id: req.params.id, ...scope(req) })
-      .select('codigoRemision historialCambios').lean();
-    if (!r) return error(res, 404, 'Remisión no encontrada en su sucursal');
-    return res.json({ ok: true, codigoRemision: r.codigoRemision,
+    const r = await RecepcionSucursal.findOne({ _id: req.params.id, ...scope(req) })
+      .select('codigoRecepcion historialCambios').lean();
+    if (!r) return error(res, 404, 'Recepción no encontrada en su sucursal');
+    return res.json({ ok: true, codigoRemision: r.codigoRecepcion, codigoRecepcion: r.codigoRecepcion,
       historial: [...(r.historialCambios || [])].reverse() });
-  } catch (e) { return respuestaError(res, e, 'Historial remisión sucursal:'); }
+  } catch (e) { return respuestaError(res, e, 'Historial recepción sucursal:'); }
 };
 
 module.exports = { contextoSucursal, catalogos, catalogosRecipientes,

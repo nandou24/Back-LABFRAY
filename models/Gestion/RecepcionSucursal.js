@@ -68,8 +68,8 @@ const eventoSchema = new Schema({
   cambios: { type: [cambioSchema], default: [] },
 });
 
-const remisionSucursalSchema = new Schema({
-  codigoRemision: { type: String, required: true, unique: true, immutable: true, uppercase: true, trim: true },
+const recepcionSucursalSchema = new Schema({
+  codigoRecepcion: { type: String, required: true, unique: true, immutable: true, uppercase: true, trim: true },
   sucursalReceptoraId: { type: Schema.Types.ObjectId, ref: 'sucursalesCollection', required: true, immutable: true },
   sucursalReceptoraCodigo: { type: String, required: true },
   sucursalReceptoraNombre: { type: String, required: true },
@@ -93,7 +93,8 @@ const remisionSucursalSchema = new Schema({
 }, { timestamps: true, optimisticConcurrency: true });
 
 // ====== Los índices no deben impedir atenciones legítimas repetidas ======
-remisionSucursalSchema.index({ sucursalReceptoraId: 1, createdAt: -1 });
-remisionSucursalSchema.index({ sucursalReceptoraId: 1, estado: 1, createdAt: -1 });
+recepcionSucursalSchema.index({ sucursalReceptoraId: 1, createdAt: -1 });
+recepcionSucursalSchema.index({ sucursalReceptoraId: 1, estado: 1, createdAt: -1 });
 
-module.exports = mongoose.models.RemisionSucursal || mongoose.model('RemisionSucursal', remisionSucursalSchema);
+module.exports = mongoose.models.RecepcionSucursal ||
+  mongoose.model('RecepcionSucursal', recepcionSucursalSchema, 'recepcionessucursales');
